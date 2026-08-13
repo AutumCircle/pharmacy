@@ -40,7 +40,7 @@ export default function SearchBar() {
   useEffect(() => {
     const fetchSuggestions = async () => {
       const normalizedQuery = query.trim();
-      if (searchSubmitted || normalizedQuery.length < 4) {
+      if (searchSubmitted || normalizedQuery.length < 2) {
         requestRef.current?.abort();
         setSuggestions([]);
         setShowDropdown(false);
@@ -125,7 +125,7 @@ export default function SearchBar() {
         </button>
       </form>
 
-      {showDropdown && query.trim().length >= 4 && (
+      {showDropdown && query.trim().length >= 2 && (
         <div style={{
           position: 'absolute',
           top: '100%',

@@ -777,6 +777,8 @@ a {
   .product-details-image { min-height: 260px; padding: 24px; }
   .cart-layout,
   .tracking-layout { grid-template-columns: minmax(0, 1fr) !important; gap: 20px !important; }
+  .tracking-order-details { order: 1; }
+  .tracking-order-list { order: 2; }
   .featured-products-section { margin-bottom: 34px; }
   .featured-products-heading { gap: 10px; }
   .featured-products-heading .section-title {

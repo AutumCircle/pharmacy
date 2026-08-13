@@ -3,6 +3,7 @@
 import { useCart } from '@/context/CartContext';
 import { useFavorites } from '@/context/FavoritesContext';
 import type { PublicMedicine } from '@/lib/api-v1/types';
+import { formatVendorCountry } from '@/lib/formatters';
 
 export default function ProductDetailsClient({ product }: { product: PublicMedicine }) {
   const { addItem, items, updateQuantity, removeItem } = useCart();
@@ -56,12 +57,12 @@ export default function ProductDetailsClient({ product }: { product: PublicMedic
             <div className="attr-row">
               <span className="attr-label">Производитель</span>
               <span className="attr-dots"></span>
-              <span className="attr-value" style={{ color: 'var(--primary)' }}>{product.vendor ?? '—'}</span>
+              <span className="attr-value" style={{ color: 'var(--primary)' }}>{formatVendorCountry(product.vendor)}</span>
             </div>
             <div className="attr-row">
               <span className="attr-label">Страна</span>
               <span className="attr-dots"></span>
-              <span className="attr-value" style={{ color: 'var(--primary)' }}>{product.country ?? '—'}</span>
+              <span className="attr-value" style={{ color: 'var(--primary)' }}>{formatVendorCountry(product.country)}</span>
             </div>
             <div className="attr-row">
               <span className="attr-label">Артикул</span>

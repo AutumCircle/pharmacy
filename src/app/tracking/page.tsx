@@ -20,9 +20,15 @@ export default function TrackingPage() {
     
     try {
       const data = await trackOrdersClient(phoneNumber, force);
-      setOrders(data.data || []);
-      if (data.data && data.data.length > 0) {
-        setSelectedOrder(data.data[0]);
+      const newestFirst = [...(data.data || [])].sort((left, right) => {
+        const dateDifference = new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+        return dateDifference || right.order_id.localeCompare(left.order_id);
+      });
+      setOrders(newestFirst);
+      if (newestFirst.length > 0) {
+        setSelectedOrder(newestFirst[0]);
+      } else {
+        setSelectedOrder(null);
       }
     } catch {
       setError('Ошибка при загрузке заказов.');
@@ -168,7 +174,7 @@ export default function TrackingPage() {
           }}>
             
             {/* Left Sidebar: List of Orders */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="tracking-order-list" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ background: 'white', padding: '25px', borderRadius: '12px', border: '1px solid #E8E8E8' }}>
                 <h3 style={{ fontSize: '18px', margin: '0 0 15px 0', fontWeight: 600 }}>Список заказов</h3>
                 
@@ -209,7 +215,7 @@ export default function TrackingPage() {
             </div>
 
             {/* Right Main Area: Order Details */}
-            <div style={{ background: 'white', padding: '30px', borderRadius: '12px', border: '1px solid #E8E8E8', minHeight: '500px' }}>
+            <div className="tracking-order-details" style={{ background: 'white', padding: '30px', borderRadius: '12px', border: '1px solid #E8E8E8', minHeight: '500px' }}>
               {!selectedOrder ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>
                   <p>{orders.length === 0 ? 'Нет доступных заказов' : 'Выберите заказ из списка слева'}</p>
