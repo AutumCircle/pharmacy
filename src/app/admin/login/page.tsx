@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function AdminLogin() {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,17 +19,18 @@ export default function AdminLogin() {
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        credentials: 'same-origin',
+        body: JSON.stringify({ username, password })
       });
 
       if (res.ok) {
-        router.push('/admin');
+        router.replace('/admin');
         router.refresh();
       } else {
         const data = await res.json();
         setError(data.error || 'Ошибка входа');
       }
-    } catch (err) {
+    } catch {
       setError('Ошибка сети');
     } finally {
       setLoading(false);
@@ -36,20 +38,32 @@ export default function AdminLogin() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f7' }}>
-      <div style={{ background: 'white', padding: '40px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.05)', width: '100%', maxWidth: '400px' }}>
+    <div className="admin-login-page">
+      <div className="admin-login-card">
         <div style={{ textAlign: 'center', marginBottom: '30px' }}>
           <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#111', marginBottom: '10px' }}>Панель управления</h1>
-          <p style={{ color: '#666', fontSize: '14px' }}>Введите пароль администратора для доступа</p>
+          <p style={{ color: '#666', fontSize: '14px' }}>Введите логин и пароль администратора</p>
         </div>
         
         <form onSubmit={handleLogin}>
+          <div style={{ marginBottom: '15px' }}>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Логин"
+              autoComplete="username"
+              required
+              style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #e0e0e0', outline: 'none', fontSize: '16px' }}
+            />
+          </div>
           <div style={{ marginBottom: '20px' }}>
             <input 
               type="password" 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Пароль" 
+              autoComplete="current-password"
               required
               style={{ width: '100%', padding: '15px', borderRadius: '12px', border: '1px solid #e0e0e0', outline: 'none', fontSize: '16px' }}
             />

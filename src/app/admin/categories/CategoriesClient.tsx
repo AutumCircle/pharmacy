@@ -1,30 +1,33 @@
 'use client';
 
 import { useState } from 'react';
-import { createCategory, updateCategory, deleteCategory, getCategoryMedicines, addCategoryMedicine, removeCategoryMedicine } from './actions';
+import { createCategory, updateCategory, disableCategory, deleteCategory, getCategoryMedicines, addCategoryMedicine, removeCategoryMedicine, searchMedicinesForCategory } from './actions';
+import type { AdminCategory, AdminCategoryMedicine } from '@/lib/api-v1/admin-types';
 
-export default function CategoriesClient({ initialCategories }: { initialCategories: any[] }) {
+type SearchResult = { medicine_id: number; medicine_name: string; country?: string | null; vendor?: string | null; in_stock?: boolean };
+
+export default function CategoriesClient({ initialCategories }: { initialCategories: AdminCategory[] }) {
   const [categories, setCategories] = useState(initialCategories);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<any>(null);
+  const [editingCategory, setEditingCategory] = useState<AdminCategory | null>(null);
   
-  const [formData, setFormData] = useState({ slug: '', name: '', icon: '', color: '' });
+  const [formData, setFormData] = useState({ slug: '', name: '', icon: '', color: '', sort_order: '0' });
 
-  const [managingCategory, setManagingCategory] = useState<any>(null);
-  const [categoryItems, setCategoryItems] = useState<any[]>([]);
+  const [managingCategory, setManagingCategory] = useState<AdminCategory | null>(null);
+  const [categoryItems, setCategoryItems] = useState<AdminCategoryMedicine[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
 
-  const handleOpenModal = (cat?: any) => {
+  const handleOpenModal = (cat?: AdminCategory) => {
     if (cat) {
       setEditingCategory(cat);
-      setFormData({ slug: cat.slug, name: cat.name, icon: cat.icon || '', color: cat.color || '' });
+      setFormData({ slug: cat.slug, name: cat.name, icon: cat.icon || '', color: cat.color || '', sort_order: String(cat.sort_order) });
     } else {
       setEditingCategory(null);
-      setFormData({ slug: '', name: '', icon: '', color: '' });
+      setFormData({ slug: '', name: '', icon: '', color: '', sort_order: '0' });
     }
     setIsModalOpen(true);
   };
@@ -35,64 +38,89 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
     setError('');
     let res;
     if (editingCategory) {
-      res = await updateCategory({ id: editingCategory.id, name: formData.name, icon: formData.icon, color: formData.color });
+      res = await updateCategory({ id: editingCategory.id, name: formData.name, icon: formData.icon, color: formData.color, sort_order: Number(formData.sort_order) });
     } else {
-      res = await createCategory(formData);
+      res = await createCategory({ ...formData, sort_order: Number(formData.sort_order) });
     }
     
     if (res.success) {
+      setCategories((current) => {
+        const updated = editingCategory
+          ? current.map((category) => category.id === res.category.id ? res.category : category)
+          : [...current, res.category];
+        return updated.sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+      });
       setIsModalOpen(false);
-      window.location.reload(); // Quick refresh to get new server-side list
+      setLoading(false);
     } else {
       setError(res.error || 'Ошибка сохранения');
       setLoading(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Вы уверены, что хотите удалить эту категорию?')) return;
+  const handleToggleActive = async (category: AdminCategory) => {
+    const nextActive = !category.is_active;
+    if (!confirm(nextActive ? 'Включить эту категорию?' : 'Отключить эту категорию? Товары и связи сохранятся.')) return;
     setLoading(true);
-    const res = await deleteCategory(id);
+    const res = nextActive
+      ? await updateCategory({ id: category.id, is_active: true })
+      : await disableCategory(category.id);
     if (res.success) {
-      window.location.reload();
+      setCategories((current) => current.map((item) => item.id === res.category.id ? res.category : item));
+      setLoading(false);
     } else {
-      alert(res.error || 'Ошибка удаления');
+      alert(res.error || 'Ошибка изменения категории');
       setLoading(false);
     }
   };
 
-  const handleManageItems = async (cat: any) => {
-    setManagingCategory(cat);
+  const handleDelete = async (category: AdminCategory) => {
+    if (!window.confirm(`Удалить категорию «${category.name}»?\n\nУдаление возможно только если в категории нет товаров и на неё не ссылаются баннеры.`)) return;
     setLoading(true);
-    const res = await getCategoryMedicines(cat.slug);
-    if (res.success) {
-      setCategoryItems(res.items);
+    setError('');
+    const result = await deleteCategory(category.id);
+    if (result.success) {
+      setCategories((current) => current.filter((item) => item.id !== category.id));
+    } else {
+      setError(result.error || 'Не удалось удалить категорию');
+      window.alert(result.error || 'Не удалось удалить категорию');
     }
     setLoading(false);
   };
 
-  const searchMedicines = async (q: string) => {
-    setSearchQuery(q);
-    if (q.length < 3) {
-      setSearchResults([]);
-      return;
+  const handleManageItems = async (cat: AdminCategory) => {
+    setManagingCategory(cat);
+    setLoading(true);
+    const res = await getCategoryMedicines(cat.id);
+    if (res.success) {
+      setCategoryItems(res.items ?? []);
     }
-    try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      setSearchResults(data.matches || []);
-    } catch (e) {
-      console.error(e);
-    }
+    setLoading(false);
   };
 
-  const handleAddItem = async (medicineName: string) => {
+  const searchMedicines = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      setError('Введите минимум 2 символа или точный medicine_id');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    const result = await searchMedicinesForCategory(q);
+    if (result.success) setSearchResults(result.items);
+    else setError(result.error || 'Ошибка поиска лекарств');
+    setLoading(false);
+  };
+
+  const handleAddItem = async (medicineId: number) => {
     if (!managingCategory) return;
     setLoading(true);
-    const res = await addCategoryMedicine(managingCategory.slug, medicineName);
+    const res = await addCategoryMedicine(managingCategory.id, medicineId);
     if (res.success) {
-      const itemsRes = await getCategoryMedicines(managingCategory.slug);
-      if (itemsRes.success) setCategoryItems(itemsRes.items);
+      const itemsRes = await getCategoryMedicines(managingCategory.id);
+      if (itemsRes.success) setCategoryItems(itemsRes.items ?? []);
       setSearchQuery('');
       setSearchResults([]);
     } else {
@@ -101,13 +129,13 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
     setLoading(false);
   };
 
-  const handleRemoveItem = async (medicineName: string) => {
+  const handleRemoveItem = async (medicineId: number) => {
     if (!managingCategory) return;
     setLoading(true);
-    const res = await removeCategoryMedicine(managingCategory.slug, medicineName);
+    const res = await removeCategoryMedicine(managingCategory.id, medicineId);
     if (res.success) {
-      const itemsRes = await getCategoryMedicines(managingCategory.slug);
-      if (itemsRes.success) setCategoryItems(itemsRes.items);
+      const itemsRes = await getCategoryMedicines(managingCategory.id);
+      if (itemsRes.success) setCategoryItems(itemsRes.items ?? []);
     } else {
       alert(res.error || 'Ошибка удаления товара');
     }
@@ -128,10 +156,10 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
             <h3 style={{ margin: '0 0 15px 0' }}>Товары ({categoryItems.length})</h3>
             {loading ? <p>Загрузка...</p> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {categoryItems.map((item: any, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
-                    <span style={{ fontSize: '14px', fontWeight: '500' }}>{item.medicine_name}</span>
-                    <button onClick={() => handleRemoveItem(item.medicine_name)} style={{ background: '#ffebee', color: '#c62828', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>Удалить</button>
+                {categoryItems.map((item) => (
+                  <div key={item.medicine_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: '500' }}>{item.medicine_name}<small style={{ display: 'block', color: '#777' }}>ID {item.medicine_id} · {item.in_stock ? 'в наличии' : 'архив'}</small></span>
+                    <button onClick={() => handleRemoveItem(item.medicine_id)} style={{ background: '#ffebee', color: '#c62828', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>Удалить</button>
                   </div>
                 ))}
                 {categoryItems.length === 0 && <p style={{ color: '#888' }}>Нет товаров в категории</p>}
@@ -141,31 +169,24 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
 
           <div style={{ background: 'white', padding: '24px', borderRadius: '12px', border: '1px solid #E8E8E8' }}>
             <h3 style={{ margin: '0 0 15px 0' }}>Добавить товар</h3>
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+            <form onSubmit={searchMedicines} style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
               <input 
                 type="text" 
-                placeholder="Поиск или точное название..."
+                placeholder="Название, medicine_id или SKU"
                 value={searchQuery}
-                onChange={(e) => searchMedicines(e.target.value)}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none' }}
               />
-              {searchQuery.trim().length > 0 && (
-                <button 
-                  onClick={() => handleAddItem(searchQuery.trim())}
-                  disabled={loading}
-                  style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '0 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
-                >
-                  Добавить
-                </button>
-              )}
-            </div>
+              <button type="submit" disabled={loading}>Найти</button>
+            </form>
+            {error && <p style={{ color: '#c62828' }}>{error}</p>}
             
             {searchResults.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {searchResults.map((res: any, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: '#F9F9F9', borderRadius: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: '500' }}>{res.name} <div style={{ fontSize: '12px', color: '#888', fontWeight: 'normal' }}>{res.country}</div></div>
-                    <button onClick={() => handleAddItem(res.name)} style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '5px 15px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Добавить</button>
+                {searchResults.map((res) => (
+                  <div key={res.medicine_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: '#F9F9F9', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: '500' }}>{res.medicine_name} <div style={{ fontSize: '12px', color: '#888', fontWeight: 'normal' }}>ID {res.medicine_id} · {res.country || '—'} · {res.vendor || '—'} · {res.in_stock ? 'в наличии' : 'архив'}</div></div>
+                    <button onClick={() => handleAddItem(res.medicine_id)} style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '5px 15px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Добавить</button>
                   </div>
                 ))}
               </div>
@@ -187,7 +208,8 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-        {categories.map((cat: any) => (
+        {error && <div className="admin-inline-error" role="alert" style={{ gridColumn: '1 / -1' }}>{error}</div>}
+        {categories.map((cat) => (
           <div key={cat.id} style={{ background: 'white', borderRadius: '12px', padding: '20px', border: '1px solid #E8E8E8', position: 'relative' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '15px' }}>
               <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: cat.color || '#eee', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
@@ -195,14 +217,22 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
               </div>
               <div>
                 <h3 style={{ margin: '0 0 5px 0', fontSize: '18px' }}>{cat.name}</h3>
-                <div style={{ fontSize: '12px', color: '#888' }}>{cat.slug}</div>
+                <div style={{ fontSize: '12px', color: '#888' }}>{cat.slug} · порядок {cat.sort_order}</div>
+                <div style={{ marginTop: 5, fontSize: 12, color: cat.is_active ? '#166534' : '#991b1b' }}>
+                  {cat.is_active ? 'Активна' : 'Отключена'}
+                </div>
               </div>
             </div>
             
-            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'wrap' }}>
               <button onClick={() => handleManageItems(cat)} style={{ flex: 1, background: '#f5f5f5', border: 'none', padding: '8px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Товары</button>
               <button onClick={() => handleOpenModal(cat)} style={{ background: '#e3f2fd', color: '#1976d2', border: 'none', padding: '8px 15px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Изменить</button>
-              <button onClick={() => handleDelete(cat.id)} disabled={loading} style={{ background: '#ffebee', color: '#c62828', border: 'none', padding: '8px 15px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Удалить</button>
+              <button onClick={() => handleToggleActive(cat)} disabled={loading} style={{ background: cat.is_active ? '#ffebee' : '#e8f5e9', color: cat.is_active ? '#c62828' : '#2e7d32', border: 'none', padding: '8px 15px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
+                {cat.is_active ? 'Отключить' : 'Включить'}
+              </button>
+              <button className="admin-danger-button" onClick={() => handleDelete(cat)} disabled={loading} type="button">
+                Удалить
+              </button>
             </div>
           </div>
         ))}
@@ -233,6 +263,10 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
                   <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '5px' }}>Цвет (HEX)</label>
                   <input type="text" value={formData.color} onChange={e => setFormData({...formData, color: e.target.value})} placeholder="#FFEBEE" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }} />
                 </div>
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '5px' }}>Порядок отображения</label>
+                <input required min="0" max="100000" type="number" value={formData.sort_order} onChange={e => setFormData({...formData, sort_order: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }} />
               </div>
               
               <div style={{ display: 'flex', gap: '10px', marginTop: '30px' }}>

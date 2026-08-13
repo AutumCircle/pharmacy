@@ -1,67 +1,45 @@
-import { fetchAdminData } from '../../../lib/api';
 import Link from 'next/link';
+import { requireAdminSession } from '@/lib/admin-auth';
+import { listAdminDuplicateGroups } from '@/lib/api-v1/admin-server';
+
+export const metadata = { title: 'Дубликаты — Vatan Admin' };
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminDuplicates() {
-  let duplicatesData: any = null;
-  let error = null;
-
-  try {
-    const res = await fetchAdminData('duplicates');
-    duplicatesData = res;
-  } catch (err: any) {
-    error = err.message;
-  }
-
-  const items = Array.isArray(duplicatesData?.duplicates) ? duplicatesData.duplicates : (Array.isArray(duplicatesData) ? duplicatesData : []);
+export default async function AdminDuplicatesPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+  await requireAdminSession();
+  const params = await searchParams;
+  const page = Math.max(1, Number.parseInt(params.page || '1', 10) || 1);
+  const response = await listAdminDuplicateGroups(page, 50);
 
   return (
     <div>
-      <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '30px' }}>Управление дубликатами</h1>
-      
-      {error && (
-        <div style={{ background: '#ffebee', padding: '15px', borderRadius: '8px', color: '#c62828', marginBottom: '20px' }}>
-          Ошибка загрузки данных API: {error}
-        </div>
-      )}
-
-      <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #E8E8E8', overflow: 'hidden' }}>
-        {items.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#888' }}>
-            Дубликатов не найдено
-          </div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-            <thead>
-              <tr style={{ background: '#f5f5f5', textAlign: 'left', color: '#666' }}>
-                <th style={{ padding: '15px 20px' }}>Название товара</th>
-                <th style={{ padding: '15px 20px' }}>Количество дублей</th>
-                <th style={{ padding: '15px 20px' }}>Действия</th>
+      <nav aria-label="Хлебные крошки" style={{ marginBottom: 14, color: '#666' }}>
+        <Link href="/admin">Панель управления</Link> → Дубликаты
+      </nav>
+      <h1 style={{ fontSize: 24, marginBottom: 8 }}>Дубликаты</h1>
+      <p style={{ color: '#666' }}>В каждой группе показаны все записи с одинаковым нормализованным названием, включая архивные. Число в колонке «Записей» — полный размер группы. Найдено групп: {response.page.total_items.toLocaleString('ru-RU')}</p>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="admin-table">
+          <thead><tr><th>Название</th><th>Записей</th><th>Доступно</th><th>Диапазон базовых цен</th><th></th></tr></thead>
+          <tbody>
+            {response.data.map((group) => (
+              <tr key={group.group_key}>
+                <td><strong>{group.medicine_name}</strong></td>
+                <td><strong className={group.medicine_count >= 3 ? 'admin-duplicate-count notable' : 'admin-duplicate-count'}>{group.medicine_count}</strong></td>
+                <td>{group.in_stock_count}</td>
+                <td>{Number(group.min_base_price).toFixed(2)}–{Number(group.max_base_price).toFixed(2)} TJS</td>
+                <td><Link href={`/admin/duplicates/${group.group_key}`}>Открыть</Link></td>
               </tr>
-            </thead>
-            <tbody>
-              {items.map((dup: any, idx: number) => (
-                <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={{ padding: '15px 20px', fontWeight: 500, color: '#333' }}>{dup.name}</td>
-                  <td style={{ padding: '12px', textAlign: 'center' }}>
-                    <span style={{ background: '#FFEBEE', color: '#C62828', padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
-                      {dup.count}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px', textAlign: 'right' }}>
-                    <Link 
-                      href={`/admin/duplicates/${encodeURIComponent(dup.name)}`}
-                      style={{ background: 'var(--primary)', color: 'white', padding: '6px 12px', borderRadius: '4px', textDecoration: 'none', fontSize: '12px', fontWeight: 'bold' }}
-                    >
-                      Посмотреть все
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+            ))}
+            {response.data.length === 0 && <tr><td colSpan={5}>Лекарства с одинаковым названием не найдены.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="admin-pagination">
+        <Link className={page <= 1 ? 'disabled' : ''} href={`/admin/duplicates?page=${Math.max(1, page - 1)}`}>Назад</Link>
+        <span className="current">Страница {response.page.number} из {response.page.total_pages}</span>
+        <Link className={page >= response.page.total_pages ? 'disabled' : ''} href={`/admin/duplicates?page=${page + 1}`}>Далее</Link>
       </div>
     </div>
   );

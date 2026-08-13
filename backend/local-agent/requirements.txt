@@ -1,0 +1,4 @@
+dbfread==2.0.7
+requests==2.31.0
+watchdog==4.0.0
+pyinstaller==6.4.0

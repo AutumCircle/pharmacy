@@ -1,61 +1,104 @@
 'use server';
 
-import { fetchAdminData } from '../../../lib/api';
 import { revalidatePath } from 'next/cache';
+import { requireAdminSession } from '@/lib/admin-auth';
+import {
+  createAdminCategory,
+  deleteAdminCategory,
+  deleteAdminCategoryMedicine,
+  listAdminMedicines,
+  listAdminCategoryMedicines,
+  putAdminCategoryMedicine,
+  updateAdminCategory,
+} from '@/lib/api-v1/admin-server';
 
-export async function createCategory(data: { slug: string, name: string, icon?: string, color?: string }) {
-  try {
-    await fetchAdminData('create_category', data);
-    revalidatePath('/admin/categories');
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
-  }
-}
-
-export async function updateCategory(data: { id: number, name?: string, icon?: string, color?: string, is_active?: boolean }) {
-  try {
-    await fetchAdminData('update_category', data);
-    revalidatePath('/admin/categories');
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
-  }
+function failure(error: unknown) {
+  return { success: false as const, error: error instanceof Error ? error.message : 'Unknown error' };
 }
 
 export async function deleteCategory(id: number) {
   try {
-    await fetchAdminData('delete_category', { id });
+    await requireAdminSession();
+    await deleteAdminCategory(id);
+    revalidatePath('/');
+    revalidatePath('/catalog');
+    revalidatePath('/admin');
     revalidatePath('/admin/categories');
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: true as const, message: 'Категория удалена' };
+  } catch (error: unknown) {
+    return failure(error);
   }
 }
 
-export async function getCategoryMedicines(slug: string) {
+export async function createCategory(data: { slug: string; name: string; icon?: string; color?: string; sort_order?: number }) {
   try {
-    const res = await fetchAdminData('get_category_medicines', { slug });
-    return { success: true, items: res?.items || [] };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    await requireAdminSession();
+    const response = await createAdminCategory(data);
+    revalidatePath('/admin/categories');
+    return { success: true as const, category: response.data };
+  } catch (error: unknown) {
+    return failure(error);
   }
 }
 
-export async function addCategoryMedicine(slug: string, medicine_name: string) {
+export async function updateCategory(data: {
+  id: number; name?: string; icon?: string; color?: string; sort_order?: number; is_active?: boolean;
+}) {
   try {
-    await fetchAdminData('add_category_medicine', { slug, medicine_name });
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    await requireAdminSession();
+    const { id, ...updates } = data;
+    const response = await updateAdminCategory(id, updates);
+    revalidatePath('/admin/categories');
+    return { success: true as const, category: response.data };
+  } catch (error: unknown) {
+    return failure(error);
   }
 }
 
-export async function removeCategoryMedicine(slug: string, medicine_name: string) {
+export async function disableCategory(id: number) {
+  return updateCategory({ id, is_active: false });
+}
+
+export async function searchMedicinesForCategory(query: string) {
   try {
-    await fetchAdminData('remove_category_medicine', { slug, medicine_name });
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    await requireAdminSession();
+    const q = query.trim();
+    if (q.length < 2) return { success: true as const, items: [] };
+    const response = await listAdminMedicines({ q, availability: 'all', page: 1, limit: 20 });
+    return { success: true as const, items: response.data };
+  } catch (error: unknown) {
+    return failure(error);
+  }
+}
+
+export async function getCategoryMedicines(categoryId: number) {
+  try {
+    await requireAdminSession();
+    const response = await listAdminCategoryMedicines(categoryId);
+    return { success: true as const, items: response.data };
+  } catch (error: unknown) {
+    return failure(error);
+  }
+}
+
+export async function addCategoryMedicine(categoryId: number, medicineId: number) {
+  try {
+    await requireAdminSession();
+    await putAdminCategoryMedicine(categoryId, medicineId);
+    revalidatePath('/admin/categories');
+    return { success: true as const };
+  } catch (error: unknown) {
+    return failure(error);
+  }
+}
+
+export async function removeCategoryMedicine(categoryId: number, medicineId: number) {
+  try {
+    await requireAdminSession();
+    await deleteAdminCategoryMedicine(categoryId, medicineId);
+    revalidatePath('/admin/categories');
+    return { success: true as const };
+  } catch (error: unknown) {
+    return failure(error);
   }
 }

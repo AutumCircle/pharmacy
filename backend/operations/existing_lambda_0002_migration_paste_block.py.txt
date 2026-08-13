@@ -1,0 +1,318 @@
+        # TEMPORARY one-time backup + catalog sync v1 migration action.
+        # Paste after `result = {}` and delete immediately after one successful call.
+        if action == "run_catalog_sync_v1_migration":
+            confirmation = "BACKUP_AND_APPLY_CATALOG_SYNC_V1_20260806"
+            if params.get("confirmation") != confirmation:
+                cur.close()
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({"ok": False, "error": "confirmation does not match"}),
+                }
+
+            backup_schema = "vatan_pre_sync_v1_20260806"
+            backup_tables = ("medicines", "sync_logs")
+            migration_name = "0002_catalog_sync_v1.sql"
+            migration_sql = r"""
+BEGIN;
+
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '60s';
+
+DO $$
+BEGIN
+    IF to_regclass('public.medicines') IS NULL OR to_regclass('public.sync_logs') IS NULL THEN
+        RAISE EXCEPTION '0002 prerequisite tables are missing';
+    END IF;
+    IF to_regclass('public.catalog_syncs') IS NOT NULL
+       OR to_regclass('public.catalog_sync_items') IS NOT NULL
+       OR to_regclass('public.catalog_sync_conflicts') IS NOT NULL THEN
+        RAISE EXCEPTION '0002 sync tables already exist; inspect partial or prior migration state';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'medicines'
+          AND column_name IN ('source_system', 'source_sku', 'source_identity_key', 'last_seen_sync_id', 'source_row_hash')
+    ) THEN
+        RAISE EXCEPTION '0002 medicines columns already exist; inspect partial or prior migration state';
+    END IF;
+END
+$$;
+
+CREATE TABLE catalog_syncs (
+    sync_id UUID PRIMARY KEY,
+    idempotency_key UUID NOT NULL UNIQUE,
+    source_id VARCHAR(100) NOT NULL,
+    initiated_by VARCHAR(100) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'awaiting_upload',
+    object_key TEXT NOT NULL UNIQUE,
+    snapshot_sha256 CHAR(64) NOT NULL,
+    source_updated_at TIMESTAMPTZ NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    compressed_size_bytes INTEGER NOT NULL,
+    expected_row_count INTEGER NOT NULL,
+    received_row_count INTEGER,
+    inserted_count INTEGER NOT NULL DEFAULT 0,
+    updated_count INTEGER NOT NULL DEFAULT 0,
+    in_stock_count INTEGER NOT NULL DEFAULT 0,
+    out_of_stock_count INTEGER NOT NULL DEFAULT 0,
+    conflict_count INTEGER NOT NULL DEFAULT 0,
+    error_code VARCHAR(100),
+    error_summary JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    CONSTRAINT catalog_syncs_status_check CHECK (
+        status IN ('awaiting_upload', 'validating', 'importing', 'succeeded', 'failed')
+    ),
+    CONSTRAINT catalog_syncs_expected_rows_check CHECK (expected_row_count > 0),
+    CONSTRAINT catalog_syncs_compressed_size_check CHECK (compressed_size_bytes > 0),
+    CONSTRAINT catalog_syncs_sha256_check CHECK (snapshot_sha256 ~ '^[0-9a-f]{64}$')
+);
+
+CREATE TABLE catalog_sync_items (
+    sync_id UUID NOT NULL REFERENCES catalog_syncs(sync_id) ON DELETE CASCADE,
+    row_number INTEGER NOT NULL,
+    source_sku VARCHAR(255),
+    raw_name TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    country VARCHAR(100) NOT NULL DEFAULT '',
+    vendor VARCHAR(100) NOT NULL DEFAULT '',
+    base_price NUMERIC(10,2) NOT NULL,
+    in_stock BOOLEAN NOT NULL,
+    identity_key CHAR(64) NOT NULL,
+    source_row_hash CHAR(64) NOT NULL,
+    PRIMARY KEY (sync_id, row_number),
+    CONSTRAINT catalog_sync_items_row_number_check CHECK (row_number > 0),
+    CONSTRAINT catalog_sync_items_price_check CHECK (base_price > 0),
+    CONSTRAINT catalog_sync_items_identity_check CHECK (identity_key ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT catalog_sync_items_row_hash_check CHECK (source_row_hash ~ '^[0-9a-f]{64}$')
+);
+
+CREATE TABLE catalog_sync_conflicts (
+    id BIGSERIAL PRIMARY KEY,
+    sync_id UUID NOT NULL REFERENCES catalog_syncs(sync_id) ON DELETE CASCADE,
+    identity_key CHAR(64) NOT NULL,
+    row_numbers INTEGER[] NOT NULL,
+    reason VARCHAR(100) NOT NULL,
+    safe_summary JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE medicines ADD COLUMN source_system VARCHAR(100);
+ALTER TABLE medicines ADD COLUMN source_sku VARCHAR(255);
+ALTER TABLE medicines ADD COLUMN source_identity_key CHAR(64);
+ALTER TABLE medicines ADD COLUMN last_seen_sync_id UUID REFERENCES catalog_syncs(sync_id);
+ALTER TABLE medicines ADD COLUMN source_row_hash CHAR(64);
+
+CREATE UNIQUE INDEX medicines_source_system_sku_unique
+    ON medicines (source_system, source_sku)
+    WHERE source_system IS NOT NULL AND source_sku IS NOT NULL;
+
+CREATE UNIQUE INDEX medicines_source_system_identity_unique
+    ON medicines (source_system, source_identity_key)
+    WHERE source_system IS NOT NULL AND source_identity_key IS NOT NULL;
+
+CREATE INDEX medicines_last_seen_sync_id
+    ON medicines (last_seen_sync_id)
+    WHERE last_seen_sync_id IS NOT NULL;
+
+CREATE INDEX catalog_syncs_source_created
+    ON catalog_syncs (source_id, created_at DESC);
+
+CREATE INDEX catalog_syncs_status_created
+    ON catalog_syncs (status, created_at DESC);
+
+CREATE INDEX catalog_sync_items_identity
+    ON catalog_sync_items (sync_id, identity_key);
+
+CREATE INDEX catalog_sync_conflicts_sync
+    ON catalog_sync_conflicts (sync_id, id);
+
+COMMIT;
+"""
+            expected_tables = (
+                "catalog_syncs", "catalog_sync_items", "catalog_sync_conflicts",
+            )
+            expected_columns = (
+                "source_system", "source_sku", "source_identity_key",
+                "last_seen_sync_id", "source_row_hash",
+            )
+            expected_indexes = (
+                "medicines_source_system_sku_unique",
+                "medicines_source_system_identity_unique",
+                "medicines_last_seen_sync_id",
+                "catalog_syncs_source_created",
+                "catalog_syncs_status_created",
+                "catalog_sync_items_identity",
+                "catalog_sync_conflicts_sync",
+            )
+
+            migration_conn = get_connection()
+            migration_cur = None
+            old_autocommit = migration_conn.autocommit
+            backup_created = False
+            try:
+                cur.close()
+                migration_conn.autocommit = False
+                migration_cur = migration_conn.cursor(cursor_factory=RealDictCursor)
+
+                migration_cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                migration_cur.execute("SET LOCAL lock_timeout = '5s'")
+                migration_cur.execute("SET LOCAL statement_timeout = '20s'")
+                migration_cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    ("vatan-catalog-sync-v1-migration",),
+                )
+                migration_cur.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = %s) AS exists",
+                    (backup_schema,),
+                )
+                backup_exists = migration_cur.fetchone()["exists"]
+                if not backup_exists:
+                    migration_cur.execute("CREATE SCHEMA vatan_pre_sync_v1_20260806")
+                    migration_cur.execute("""
+                        CREATE TABLE vatan_pre_sync_v1_20260806.backup_manifest (
+                            table_name TEXT PRIMARY KEY,
+                            row_count BIGINT NOT NULL,
+                            copied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    for table_name in backup_tables:
+                        migration_cur.execute(
+                            f"CREATE TABLE {backup_schema}.{table_name} "
+                            f"(LIKE public.{table_name} INCLUDING ALL)"
+                        )
+                        migration_cur.execute(
+                            f"INSERT INTO {backup_schema}.{table_name} "
+                            f"SELECT * FROM public.{table_name}"
+                        )
+                        migration_cur.execute(
+                            f"SELECT COUNT(*) AS count FROM {backup_schema}.{table_name}"
+                        )
+                        copied_count = migration_cur.fetchone()["count"]
+                        migration_cur.execute(
+                            f"INSERT INTO {backup_schema}.backup_manifest "
+                            f"(table_name, row_count) VALUES (%s, %s)",
+                            (table_name, copied_count),
+                        )
+                    migration_conn.commit()
+                    backup_created = True
+                else:
+                    migration_conn.rollback()
+
+                migration_cur.execute(
+                    f"SELECT table_name, row_count FROM {backup_schema}.backup_manifest"
+                )
+                manifest = {
+                    row["table_name"]: row["row_count"]
+                    for row in migration_cur.fetchall()
+                }
+                if set(manifest) != set(backup_tables):
+                    raise RuntimeError("rollback copy manifest is incomplete")
+                for table_name in backup_tables:
+                    migration_cur.execute(
+                        "SELECT to_regclass(%s) AS backup_table",
+                        (f"{backup_schema}.{table_name}",),
+                    )
+                    if migration_cur.fetchone()["backup_table"] is None:
+                        raise RuntimeError("rollback copy table is missing")
+
+                migration_cur.execute("""
+                    SELECT COUNT(*) AS count
+                    FROM (VALUES
+                        ('catalog_syncs'), ('catalog_sync_items'),
+                        ('catalog_sync_conflicts')
+                    ) AS wanted(name)
+                    WHERE to_regclass('public.' || wanted.name) IS NOT NULL
+                """)
+                table_count = migration_cur.fetchone()["count"]
+                migration_cur.execute("""
+                    SELECT COUNT(*) AS count FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'medicines'
+                      AND column_name IN (
+                          'source_system', 'source_sku', 'source_identity_key',
+                          'last_seen_sync_id', 'source_row_hash'
+                      )
+                """)
+                column_count = migration_cur.fetchone()["count"]
+                migration_cur.execute("""
+                    SELECT COUNT(*) AS count
+                    FROM (VALUES
+                        ('medicines_source_system_sku_unique'),
+                        ('medicines_source_system_identity_unique'),
+                        ('medicines_last_seen_sync_id'),
+                        ('catalog_syncs_source_created'),
+                        ('catalog_syncs_status_created'),
+                        ('catalog_sync_items_identity'),
+                        ('catalog_sync_conflicts_sync')
+                    ) AS wanted(name)
+                    WHERE to_regclass('public.' || wanted.name) IS NOT NULL
+                """)
+                index_count = migration_cur.fetchone()["count"]
+
+                fully_applied = (
+                    table_count == len(expected_tables)
+                    and column_count == len(expected_columns)
+                    and index_count == len(expected_indexes)
+                )
+                partially_applied = table_count > 0 or column_count > 0 or index_count > 0
+                if fully_applied:
+                    migration_conn.rollback()
+                    status = "already_applied"
+                elif partially_applied:
+                    raise RuntimeError("partial 0002 state detected; migration was not executed")
+                else:
+                    migration_conn.rollback()
+                    migration_cur.execute(migration_sql)
+                    status = "backup_created_and_migration_applied"
+
+                migration_cur.execute("""
+                    SELECT
+                        to_regclass('public.catalog_syncs') IS NOT NULL
+                            AND to_regclass('public.catalog_sync_items') IS NOT NULL
+                            AND to_regclass('public.catalog_sync_conflicts') IS NOT NULL
+                            AS tables_ready,
+                        (SELECT COUNT(*) FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = 'medicines'
+                           AND column_name IN (
+                               'source_system', 'source_sku', 'source_identity_key',
+                               'last_seen_sync_id', 'source_row_hash'
+                           )) AS medicine_columns,
+                        (SELECT COUNT(*) FROM medicines) AS medicine_rows
+                """)
+                verification = dict(migration_cur.fetchone())
+                migration_conn.rollback()
+                if not verification["tables_ready"] or verification["medicine_columns"] != 5:
+                    raise RuntimeError("post-migration verification failed")
+
+                return {
+                    "statusCode": 200,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({
+                        "ok": True,
+                        "status": status,
+                        "migration": migration_name,
+                        "backup_schema": backup_schema,
+                        "backup_created_this_call": backup_created,
+                        "backup_tables": manifest,
+                        "verification": verification,
+                    }, ensure_ascii=False, default=str),
+                }
+            except Exception:
+                migration_conn.rollback()
+                logger.exception("Temporary catalog sync v1 migration failed")
+                return {
+                    "statusCode": 500,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({
+                        "ok": False,
+                        "status": "migration_failed",
+                        "backup_schema": backup_schema if backup_created else None,
+                        "message": "Stop and send the response and CloudWatch error. Do not retry blindly.",
+                    }),
+                }
+            finally:
+                if migration_cur is not None:
+                    migration_cur.close()
+                migration_conn.autocommit = old_autocommit

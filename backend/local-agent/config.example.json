@@ -1,0 +1,11 @@
+{
+  "server_url": "https://example.execute-api.eu-central-1.amazonaws.com/prod",
+  "api_key": "set-on-the-pharmacy-machine-only",
+  "dbf_file_path": "C:\\Pharmacy\\OSTATKI.DBF",
+  "dbf_encoding": "cp866",
+  "poll_interval_seconds": 60,
+  "heartbeat_interval_seconds": 900,
+  "file_stability_seconds": 30,
+  "file_stability_check_seconds": 3,
+  "file_stability_max_wait_seconds": 300
+}

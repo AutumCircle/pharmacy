@@ -1,0 +1,54 @@
+        # TEMPORARY one-time "Products of the day" migration action.
+        # Paste inside the public API lambda_handler `try:` block, before route matching.
+        # Run once from the Lambda Test tab, then upload the clean Public API ZIP again.
+        migration_payload = _body(event)
+        if migration_payload.get("action") == "apply_featured_products_v1":
+            confirmation = "APPLY_FEATURED_PRODUCTS_V1_20260811"
+            if migration_payload.get("confirmation") != confirmation:
+                raise ContractError("FORBIDDEN", "Migration confirmation is invalid", http_status=403)
+
+            with transaction() as cur:
+                cur.execute("SELECT to_regclass('public.featured_products') IS NOT NULL AS exists")
+                if not bool(cur.fetchone()["exists"]):
+                    raise ContractError("MIGRATION_PREREQUISITE_MISSING", "featured_products table is missing", http_status=409)
+                cur.execute("ALTER TABLE featured_products ADD COLUMN IF NOT EXISTS image_url TEXT")
+                cur.execute(
+                    "ALTER TABLE featured_products ADD COLUMN IF NOT EXISTS updated_at "
+                    "TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                )
+                cur.execute(
+                    "ALTER TABLE featured_products DROP CONSTRAINT IF EXISTS featured_products_medicine_name_key"
+                )
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint
+                            WHERE conname = 'featured_products_image_url_check'
+                        ) THEN
+                            ALTER TABLE featured_products
+                                ADD CONSTRAINT featured_products_image_url_check
+                                CHECK (image_url IS NULL OR image_url ~ '^https://');
+                        END IF;
+                    END $$
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS featured_products_sort_order "
+                    "ON featured_products (sort_order ASC, id ASC)"
+                )
+                cur.execute("SELECT COUNT(*) AS count FROM featured_products")
+                product_count = int(cur.fetchone()["count"])
+
+            return success(
+                {
+                    "status": "featured_products_ready",
+                    "migration": "0004_featured_products_v1.sql",
+                    "existing_featured_count": product_count,
+                },
+                request=current_request_id,
+            )
+
+        # Lambda Test event body:
+        # {"body":"{\"action\":\"apply_featured_products_v1\",\"confirmation\":\"APPLY_FEATURED_PRODUCTS_V1_20260811\"}"}

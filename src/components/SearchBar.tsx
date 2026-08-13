@@ -1,15 +1,18 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
+import type { MedicineSearchResponse, PublicMedicine } from '@/lib/api-v1/types';
 
 export default function SearchBar() {
   const [query, setQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<PublicMedicine[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [searchSubmitted, setSearchSubmitted] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const requestRef = useRef<AbortController | null>(null);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -25,59 +28,95 @@ export default function SearchBar() {
 
   // Clear search when navigating to a new page
   useEffect(() => {
-    setQuery('');
-    setSuggestions([]);
-    setShowDropdown(false);
+    const timer = window.setTimeout(() => {
+      setQuery('');
+      setSuggestions([]);
+      setShowDropdown(false);
+      setSearchSubmitted(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [pathname]);
 
   useEffect(() => {
     const fetchSuggestions = async () => {
-      if (query.trim().length < 2) {
+      const normalizedQuery = query.trim();
+      if (searchSubmitted || normalizedQuery.length < 4) {
+        requestRef.current?.abort();
         setSuggestions([]);
+        setShowDropdown(false);
+        setLoading(false);
         return;
       }
+      requestRef.current?.abort();
+      const controller = new AbortController();
+      requestRef.current = controller;
       setLoading(true);
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(normalizedQuery)}&limit=8`, {
+          signal: controller.signal,
+        });
         if (res.ok) {
-          const data = await res.json();
-          setSuggestions(data.matches || []);
+          const data = await res.json() as MedicineSearchResponse;
+          setSuggestions(data.data || []);
           setShowDropdown(true);
         }
       } catch (err) {
-        console.error("Search error", err);
+        if (!controller.signal.aborted) console.error("Search error", err);
       } finally {
-        setLoading(false);
+        if (requestRef.current === controller) setLoading(false);
       }
     };
 
     const debounce = setTimeout(() => {
       fetchSuggestions();
-    }, 300);
+    }, 180);
 
-    return () => clearTimeout(debounce);
-  }, [query]);
+    return () => {
+      clearTimeout(debounce);
+      requestRef.current?.abort();
+    };
+  }, [query, searchSubmitted]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const runSearch = () => {
     if (query.trim()) {
+      inputRef.current?.blur();
+      requestRef.current?.abort();
+      setSearchSubmitted(true);
+      setSuggestions([]);
       setShowDropdown(false);
       router.push(`/?q=${encodeURIComponent(query)}`);
     }
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    runSearch();
+  };
+
   return (
-    <div ref={wrapperRef} style={{ position: 'relative', width: '100%', maxWidth: '600px' }}>
+    <div ref={wrapperRef} className="search-wrapper">
       <form onSubmit={handleSubmit} className="search-section" style={{ margin: 0, width: '100%' }}>
         <input 
+          ref={inputRef}
           type="text" 
+          enterKeyHint="search"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => { if (suggestions.length > 0) setShowDropdown(true); }}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setSearchSubmitted(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              event.currentTarget.blur();
+              runSearch();
+            }
+          }}
+          onFocus={() => { if (!searchSubmitted && suggestions.length > 0) setShowDropdown(true); }}
           className="search-input" 
-          placeholder="Найти по названию (например, Нимесил)..." 
+          placeholder="Найти по названию среди более 10 000 лекарств"
         />
-        <button type="submit" className="search-submit">
+        <button type="submit" className="search-submit" aria-label="Найти">
           {loading ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="spinner"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a10 10 0 0 1 10 10"></path></svg>
           ) : (
@@ -86,7 +125,7 @@ export default function SearchBar() {
         </button>
       </form>
 
-      {showDropdown && suggestions.length > 0 && (
+      {showDropdown && query.trim().length >= 4 && (
         <div style={{
           position: 'absolute',
           top: '100%',
@@ -100,26 +139,16 @@ export default function SearchBar() {
           overflow: 'hidden',
           border: '1px solid #eee'
         }}>
-          {suggestions.map((item, idx) => {
-            const rawPrice = Number(item.price);
-            const sellingPrice = Math.ceil(rawPrice * 1.05);
-            
-            const isValidText = (text: string | null) => {
-              if (!text) return false;
-              if (text.includes(',')) return false;
-              if (text.includes('*')) return false;
-              return true;
-            };
-
-            const displaySubtitle = isValidText(item.country) ? item.country : (isValidText(item.vendor) ? item.vendor : '');
-
+          {suggestions.map((item) => {
             return (
-              <div 
-                key={idx}
+              <button
+                type="button"
+                key={item.medicine_id}
                 onClick={() => {
-                  setQuery(item.name);
+                  inputRef.current?.blur();
+                  setQuery(item.medicine_name);
                   setShowDropdown(false);
-                  router.push(`/medicine/${encodeURIComponent(item.name)}`);
+                  router.push(`/medicine/${item.medicine_id}`);
                 }}
                 style={{
                   padding: '12px 15px',
@@ -129,35 +158,47 @@ export default function SearchBar() {
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   transition: 'background 0.2s',
-                  opacity: item.in_stock !== false ? 1 : 0.55
+                  border: 0,
+                  width: '100%',
+                  textAlign: 'left',
+                  opacity: item.in_stock ? 1 : 0.55
                 }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = '#f9f9f9')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'white')}
               >
                 <div>
-                  <div style={{ fontWeight: '500', color: '#333' }}>{item.name}</div>
-                  {displaySubtitle && <div style={{ fontSize: '12px', color: '#888' }}>{displaySubtitle}</div>}
+                  <div style={{ fontWeight: '500', color: '#333' }}>{item.medicine_name}</div>
                   {item.in_stock === false && <div style={{ fontSize: '11px', color: '#c62828' }}>Нет в наличии</div>}
                 </div>
                 <div style={{ color: 'var(--primary)', fontWeight: 'bold' }}>
-                  {sellingPrice} с.
+                  {item.selling_unit_price} с.
                 </div>
-              </div>
+              </button>
             );
           })}
-          <div 
-            onClick={handleSubmit}
-            style={{
-              padding: '12px 15px',
-              background: '#f5f5f5',
-              cursor: 'pointer',
-              textAlign: 'center',
-              fontWeight: '500',
-              color: 'var(--primary)'
-            }}
-          >
-            Показать все результаты &rarr;
-          </div>
+          {suggestions.length === 0 && !loading && (
+            <div style={{ padding: '14px 15px', color: '#666', textAlign: 'center' }}>
+              Подходящих товаров не найдено
+            </div>
+          )}
+          {(suggestions.length > 0 || loading) && (
+            <button
+              type="button"
+              onClick={runSearch}
+              style={{
+                padding: '12px 15px',
+                background: '#f5f5f5',
+                cursor: 'pointer',
+                textAlign: 'center',
+                fontWeight: '500',
+                color: 'var(--primary)',
+                border: 0,
+                width: '100%'
+              }}
+            >
+              {loading ? 'Ищем…' : 'Показать все результаты →'}
+            </button>
+          )}
         </div>
       )}
     </div>

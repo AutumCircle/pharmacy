@@ -13,6 +13,12 @@
 # testing
 /coverage
 
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
 # next.js
 /.next/
 /out/
@@ -32,6 +38,16 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+
+# local pharmacy sync agent runtime files
+/backend/local-agent/config.json
+/backend/local-agent/*.db
+/backend/local-agent/*.log
+/backend/local-agent/build/
+/backend/local-agent/dist/
+/backend/v1/local_agent/config.json
+/backend/v1/local_agent/agent_sync_state.json
+/backend/v1/local_agent/*.tmp
 
 # vercel
 .vercel

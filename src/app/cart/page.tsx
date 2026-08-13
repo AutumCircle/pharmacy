@@ -3,6 +3,37 @@
 import { useState, useEffect } from 'react';
 import { useCart } from '../../context/CartContext';
 import Link from 'next/link';
+import type { CreateOrderRequest, CreateOrderResponse, PublicOrder } from '@/lib/api-v1/types';
+import { invalidateTrackedOrders } from '@/lib/api-v1/client-reads';
+
+function orderFingerprint(value: string): string {
+  // This fingerprint only matches a pending retry with the same payload. It is
+  // not used for authentication, so it must also work on local HTTP origins
+  // where mobile browsers do not expose crypto.subtle.
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function createIdempotencyKey(): string {
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 export default function CartPage() {
   const { items, removeItem, updateQuantity, clearCart, totalPrice, totalItems } = useCart();
@@ -14,46 +45,46 @@ export default function CartPage() {
     comment: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [createdOrder, setCreatedOrder] = useState<PublicOrder | null>(null);
   
   const [addresses, setAddresses] = useState<string[]>([]);
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [newAddress, setNewAddress] = useState({ street: '', landmark: '' });
+  const unavailableCount = items.filter((item) => !item.in_stock).length;
 
   useEffect(() => {
-    const saved = localStorage.getItem('vatan_customer');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setFormData(prev => ({
-          ...prev,
-          name: parsed.name || '',
-          phone: parsed.phone || '',
-          address: parsed.address || ''
-        }));
-      } catch (e) {}
-    }
-    
-    const savedAddresses = localStorage.getItem('vatan_addresses');
-    if (savedAddresses) {
-      try {
-        setAddresses(JSON.parse(savedAddresses));
-      } catch (e) {}
-    } else {
-      setAddresses(['г. Душанбе, ул. Айни 24']);
-    }
+    const timer = window.setTimeout(() => {
+      const saved = localStorage.getItem('vatan_customer');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as { name?: string; phone?: string; address?: string };
+          setFormData(prev => ({
+            ...prev,
+            name: parsed.name || '',
+            phone: parsed.phone || '',
+            address: parsed.address || ''
+          }));
+        } catch {}
+      }
+      const savedAddresses = localStorage.getItem('vatan_addresses');
+      if (savedAddresses) {
+        try {
+          setAddresses(JSON.parse(savedAddresses) as string[]);
+        } catch {}
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
-
-  const deliveryCost = 30;
-  const finalTotal = totalPrice + deliveryCost;
 
   // Formatting phone: XXX-XX-XX-XX
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value.replace(/\D/g, '').substring(0, 9);
+    const val = e.target.value.replace(/\D/g, '').substring(0, 9);
     setFormData({ ...formData, phone: val });
   };
 
   const displayPhone = () => {
-    let val = formData.phone;
+    const val = formData.phone;
     let formatted = val;
     if (val.length > 3) formatted = val.slice(0,3) + '-' + val.slice(3);
     if (val.length > 5) formatted = formatted.slice(0,7) + '-' + formatted.slice(7);
@@ -72,52 +103,82 @@ export default function CartPage() {
     setNewAddress({ street: '', landmark: '' });
   };
 
-  const handleAddressSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    if (e.target.value === 'ADD_NEW') {
-      setIsAddressModalOpen(true);
-      // Reset select back to what it was, or keep it on the previous value
-      e.target.value = formData.address || "";
-    } else {
-      setFormData({ ...formData, address: e.target.value });
-    }
-  };
-
   const handleCheckoutSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setCheckoutError(null);
+    if (!formData.address.trim()) {
+      setCheckoutError('Добавьте и выберите адрес доставки.');
+      setIsSubmitting(false);
+      return;
+    }
     
     // Save customer info for future
     localStorage.setItem('vatan_customer', JSON.stringify(formData));
     
     try {
-      const formDataToSend = new FormData();
-      formDataToSend.append('customer_name', formData.name);
-      formDataToSend.append('phone', formData.phone);
-      formDataToSend.append('address', formData.address);
-      formDataToSend.append('comment', formData.comment);
-      formDataToSend.append('items', JSON.stringify(items));
-      formDataToSend.append('total', totalPrice.toString());
-      
+      const order: CreateOrderRequest = {
+        customer_name: formData.name,
+        phone: formData.phone,
+        address: formData.address,
+        comment: formData.comment || null,
+        items: items.map((item) => ({
+          medicine_id: item.medicine_id,
+          quantity: item.quantity,
+        })),
+      };
+      const payloadJson = JSON.stringify(order);
+      const requestHash = orderFingerprint(payloadJson);
+      const pendingRaw = sessionStorage.getItem('vatan_pending_order_v1');
+      let idempotencyKey = createIdempotencyKey();
+      if (pendingRaw) {
+        try {
+          const pending = JSON.parse(pendingRaw) as { requestHash?: string; idempotencyKey?: string };
+          if (pending.requestHash === requestHash && pending.idempotencyKey) idempotencyKey = pending.idempotencyKey;
+        } catch {
+          sessionStorage.removeItem('vatan_pending_order_v1');
+        }
+      }
+      sessionStorage.setItem('vatan_pending_order_v1', JSON.stringify({ requestHash, idempotencyKey }));
       const res = await fetch('/api/checkout', {
         method: 'POST',
-        body: formDataToSend
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: payloadJson,
       });
       
       if (res.ok) {
+        const response = await res.json() as CreateOrderResponse;
         // Save just the phone for tracking purposes globally
         localStorage.setItem('userPhone', formData.phone);
-        
+        localStorage.setItem('lastOrderReference', response.data.order_reference);
+        invalidateTrackedOrders(`+992${formData.phone}`);
+        sessionStorage.removeItem('vatan_pending_order_v1');
+        setCreatedOrder(response.data);
+        setPhase('success');
+        setIsSubmitting(false);
         clearCart();
-        window.location.href = '/tracking';
       } else {
-        window.location.href = '/cart?error=checkout_failed';
+        const payload = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+        const messages: Record<string, string> = {
+          ORDER_ITEMS_UNAVAILABLE: 'Некоторые лекарства больше не доступны. Вернитесь в корзину и обновите товары.',
+          MEDICINE_NOT_FOUND: 'Некоторые лекарства больше не найдены в каталоге.',
+          MINIMUM_ORDER_NOT_REACHED: 'После проверки актуальных цен сумма заказа меньше 50 сомони.',
+          IDEMPOTENCY_CONFLICT: 'Данные заказа изменились. Повторите оформление ещё раз.',
+        };
+        const code = payload?.error?.code || '';
+        setCheckoutError(messages[code] || payload?.error?.message || 'Не удалось оформить заказ. Повторите попытку.');
+        setIsSubmitting(false);
       }
-    } catch (err) {
-      window.location.href = '/cart?error=checkout_failed';
+    } catch {
+      setCheckoutError('Нет связи с сервером. Проверьте интернет и повторите попытку.');
+      setIsSubmitting(false);
     }
   };
 
-  if (items.length === 0) {
+  if (items.length === 0 && phase !== 'success') {
     return (
       <div className="container" style={{ padding: '80px 0', textAlign: 'center' }}>
         <div style={{ marginBottom: '20px', color: 'var(--border)' }}>
@@ -138,29 +199,30 @@ export default function CartPage() {
       {phase === 'cart' && (
         <>
           <h1 className="section-title" style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '30px', color: '#313131' }}>Корзина</h1>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '40px', alignItems: 'start' }}>
+          <div className="cart-layout" style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '40px', alignItems: 'start' }}>
             {/* Left: Cart Items */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-              {items.map((item, index) => (
-                <div key={index} style={{ display: 'flex', gap: '20px', padding: '25px 0', borderBottom: '1px solid #F0F0F0' }}>
-                  <div style={{ width: '80px', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #E8E8E8', borderRadius: '8px' }}>
+              {items.map((item) => (
+                <div className="cart-line-item" key={item.medicine_id} style={{ display: 'flex', gap: '20px', padding: '25px 0', borderBottom: '1px solid #F0F0F0' }}>
+                  <div className="cart-line-image" style={{ width: '80px', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #E8E8E8', borderRadius: '8px' }}>
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="1.5"><rect x="7" y="7" width="10" height="14" rx="2" ry="2"></rect><path d="M5 7h14"></path><path d="M12 11v4"></path><path d="M10 13h4"></path><path d="M9 3h6v4H9z"></path></svg>
                   </div>
-                  <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontWeight: 'bold', fontSize: '18px', color: '#111', marginBottom: '4px' }}>{item.price.toFixed(0)} с.</div>
-                      <div style={{ fontSize: '15px', color: '#333', fontWeight: 500, marginBottom: '4px' }}>{item.name}</div>
-                      <div style={{ fontSize: '13px', color: '#888', marginBottom: '4px' }}>{item.country || 'Индия'}, {item.vendor || 'Не указан'}</div>
-                      <div style={{ fontSize: '13px', color: '#4CAF50', fontWeight: 500 }}>В наличии</div>
+                  <div className="cart-line-body" style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="cart-line-info">
+                      <div style={{ fontWeight: 'bold', fontSize: '18px', color: '#111', marginBottom: '4px' }}>{item.selling_unit_price.toFixed(0)} с.</div>
+                      <div style={{ fontSize: '15px', color: '#333', fontWeight: 500, marginBottom: '4px' }}>{item.medicine_name}</div>
+                      <div style={{ fontSize: '13px', color: item.in_stock ? '#4CAF50' : '#c62828', fontWeight: 500 }}>
+                        {item.in_stock ? 'В наличии' : 'Нет в наличии — удалите из корзины'}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
+                    <div className="cart-line-actions" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', background: '#F5F5F7', borderRadius: '24px', padding: '6px' }}>
-                          <button onClick={() => updateQuantity(item.name, item.quantity - 1)} style={{ background: 'white', border: 'none', width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>−</button>
+                        <div className="cart-line-counter" style={{ display: 'flex', alignItems: 'center', background: '#F5F5F7', borderRadius: '24px', padding: '6px' }}>
+                          <button onClick={() => updateQuantity(item.medicine_id, item.quantity - 1)} style={{ background: 'white', border: 'none', width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>−</button>
                           <span style={{ fontWeight: '600', fontSize: '15px', width: '32px', textAlign: 'center' }}>{item.quantity}</span>
-                          <button onClick={() => updateQuantity(item.name, item.quantity + 1)} style={{ background: 'white', border: 'none', width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>+</button>
+                          <button disabled={!item.in_stock} onClick={() => updateQuantity(item.medicine_id, item.quantity + 1)} style={{ background: 'white', border: 'none', width: '32px', height: '32px', borderRadius: '50%', cursor: item.in_stock ? 'pointer' : 'not-allowed', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', opacity: item.in_stock ? 1 : 0.4 }}>+</button>
                         </div>
-                        <button onClick={() => removeItem(item.name)} style={{ background: '#fff', border: '1px solid #ffcdd2', color: '#d32f2f', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                        <button className="cart-line-remove" aria-label="Удалить из корзины" onClick={() => removeItem(item.medicine_id)} style={{ background: '#fff', border: '1px solid #ffcdd2', color: '#d32f2f', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                         </button>
                       </div>
@@ -187,6 +249,7 @@ export default function CartPage() {
 
               <button 
                 onClick={() => setPhase('checkout')}
+                disabled={unavailableCount > 0}
                 style={{ 
                   width: '100%', 
                   padding: '16px', 
@@ -196,10 +259,11 @@ export default function CartPage() {
                   border: 'none',
                   fontWeight: '600',
                   fontSize: '15px',
-                  cursor: 'pointer'
+                  cursor: unavailableCount > 0 ? 'not-allowed' : 'pointer',
+                  opacity: unavailableCount > 0 ? 0.5 : 1
                 }}
               >
-                Перейти к оформлению
+                {unavailableCount > 0 ? `Удалите недоступные товары (${unavailableCount})` : 'Перейти к оформлению'}
               </button>
             </div>
           </div>
@@ -218,13 +282,13 @@ export default function CartPage() {
                 <h3 style={{ fontSize: '18px', color: '#313131', marginBottom: '15px', fontWeight: 600 }}>Товары на оформление</h3>
                 <div style={{ borderRadius: '12px', border: '1px solid #E8E8E8', overflow: 'hidden' }}>
                   {items.map((item, index) => (
-                    <div key={index} style={{ display: 'flex', gap: '15px', padding: '15px 20px', borderBottom: index < items.length - 1 ? '1px solid #F0F0F0' : 'none', alignItems: 'center' }}>
+                    <div key={item.medicine_id} style={{ display: 'flex', gap: '15px', padding: '15px 20px', borderBottom: index < items.length - 1 ? '1px solid #F0F0F0' : 'none', alignItems: 'center' }}>
                       <div style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #E8E8E8', borderRadius: '8px' }}>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="1.5"><rect x="7" y="7" width="10" height="14" rx="2" ry="2"></rect><path d="M5 7h14"></path><path d="M12 11v4"></path><path d="M10 13h4"></path><path d="M9 3h6v4H9z"></path></svg>
                       </div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '14px', color: '#313131', fontWeight: 500 }}>{item.name}</div>
-                        <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#111', marginTop: '2px' }}>{item.price.toFixed(0)} с.</div>
+                        <div style={{ fontSize: '14px', color: '#313131', fontWeight: 500 }}>{item.medicine_name}</div>
+                        <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#111', marginTop: '2px' }}>{item.selling_unit_price.toFixed(0)} с.</div>
                       </div>
                       <div style={{ fontSize: '14px', color: '#313131', fontWeight: 500 }}>{item.quantity} шт.</div>
                     </div>
@@ -272,6 +336,8 @@ export default function CartPage() {
                     name="customer_name" 
                     placeholder="Ваше имя" 
                     required 
+                    minLength={2}
+                    maxLength={120}
                     value={formData.name}
                     onChange={(e) => setFormData({...formData, name: e.target.value})}
                     style={{ fontFamily: 'inherit', width: '100%', padding: '15px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none', fontSize: '15px' }} 
@@ -281,6 +347,8 @@ export default function CartPage() {
                     name="phone" 
                     placeholder="Ваш номер телефона (без +992)" 
                     required 
+                    inputMode="numeric"
+                    minLength={9}
                     value={displayPhone()}
                     onChange={handlePhoneChange}
                     style={{ fontFamily: 'inherit', width: '100%', padding: '15px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none', fontSize: '15px' }} 
@@ -289,6 +357,7 @@ export default function CartPage() {
                     name="comment"
                     placeholder="Комментарий к заказу (необязательно)" 
                     value={formData.comment}
+                    maxLength={500}
                     onChange={(e) => setFormData({...formData, comment: e.target.value})}
                     style={{ fontFamily: 'inherit', width: '100%', padding: '15px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none', fontSize: '15px', minHeight: '100px', resize: 'vertical' }} 
                   />
@@ -323,6 +392,11 @@ export default function CartPage() {
 
               {/* Summary Block before Submit */}
               <div style={{ border: '1px solid #E8E8E8', borderRadius: '12px', padding: '25px', marginTop: '10px' }}>
+                {checkoutError && (
+                  <div role="alert" style={{ marginBottom: 16, color: '#c62828', background: '#ffebee', padding: 12, borderRadius: 8 }}>
+                    {checkoutError}
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontSize: '14px', color: '#666' }}>
                   <span>Кол-во товаров</span>
                   <span style={{ fontWeight: 500, color: '#111' }}>{totalItems} шт.</span>
@@ -333,13 +407,19 @@ export default function CartPage() {
                   <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#111' }}>{totalPrice.toFixed(0)} с.</span>
                 </div>
 
-                <input type="hidden" name="items" value={JSON.stringify(items)} />
-                <input type="hidden" name="total" value={totalPrice} />
+                <p style={{ margin: '0 0 20px', color: '#666', fontSize: '13px', lineHeight: 1.5 }}>
+                  Стоимость доставки рассчитывается и оплачивается напрямую курьеру при доставке.
+                </p>
                 
                 {totalPrice < 50 && (
                   <div style={{ marginBottom: '15px', color: '#c62828', background: '#ffebee', padding: '12px', borderRadius: '8px', fontSize: '13px', textAlign: 'center' }}>
                     Минимальная сумма заказа — 50 с.<br />
                     Добавьте товаров ещё на {(50 - totalPrice).toFixed(2)} с.
+                  </div>
+                )}
+                {unavailableCount > 0 && (
+                  <div style={{ marginBottom: '15px', color: '#c62828', background: '#ffebee', padding: '12px', borderRadius: '8px', fontSize: '13px', textAlign: 'center' }}>
+                    В корзине есть недоступные товары: {unavailableCount}. Вернитесь в корзину и удалите их.
                   </div>
                 )}
                 
@@ -361,7 +441,7 @@ export default function CartPage() {
                   >
                     В корзину
                   </button>
-                  {totalPrice < 50 ? (
+                  {totalPrice < 50 || unavailableCount > 0 ? (
                     <Link href="/"
                       style={{ 
                         width: '100%', 
@@ -407,17 +487,21 @@ export default function CartPage() {
       )}
       
       {phase === 'success' && (
-        <div style={{ maxWidth: '500px', margin: '40px auto', textAlign: 'center', background: 'white', padding: '40px', borderRadius: '16px', border: '1px solid #E8E8E8' }}>
+        <div className="order-success-card" style={{ maxWidth: '560px', margin: '40px auto', textAlign: 'center', background: 'white', padding: '40px', borderRadius: '16px', border: '1px solid #E8E8E8' }}>
           <div style={{ width: '80px', height: '80px', background: '#e8f5e9', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px auto' }}>
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
           </div>
-          <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#313131', marginBottom: '15px' }}>Спасибо за заказ!</h2>
-          <p style={{ fontSize: '16px', color: '#666', lineHeight: '1.5', marginBottom: '30px' }}>
-            Мы позвоним вам по номеру <strong>{displayPhone()}</strong> для подтверждения заказа, и после этого начнется процесс доставки.
+          <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#313131', marginBottom: '10px' }}>Заказ принят!</h1>
+          {createdOrder && <p style={{ fontSize: '16px', color: '#555', marginBottom: '20px' }}>Номер заказа: <strong>{createdOrder.order_reference}</strong></p>}
+          <p style={{ fontSize: '16px', color: '#444', lineHeight: '1.6', marginBottom: '14px' }}>
+            Спасибо, {formData.name}. Сотрудник аптеки свяжется с вами по телефону <strong>+992 {displayPhone()}</strong>, чтобы подтвердить заказ и уточнить доставку.
           </p>
-          <Link href="/tracking" style={{ display: 'inline-block', width: '100%', padding: '16px', borderRadius: '24px', background: 'var(--primary)', color: 'white', textDecoration: 'none', fontWeight: '600', fontSize: '15px' }}>
-            Отследить мои заказы
-          </Link>
+          <p style={{ fontSize: '14px', color: '#777', lineHeight: '1.5', marginBottom: '24px' }}>Пожалуйста, держите телефон доступным. Оплата производится наличными курьеру при получении.</p>
+          {createdOrder && <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', padding: '16px', marginBottom: '24px', borderRadius: '12px', background: '#f7f7f7' }}><span style={{ color: '#666' }}>Сумма товаров</span><strong>{createdOrder.order_total.toFixed(0)} с.</strong></div>}
+          <div className="order-success-actions" style={{ display: 'flex', gap: '12px' }}>
+            <Link href="/tracking" style={{ display: 'inline-block', flex: 1, padding: '14px', borderRadius: '24px', background: 'var(--primary)', color: 'white', textDecoration: 'none', fontWeight: '600', fontSize: '15px' }}>Посмотреть заказ</Link>
+            <Link href="/" style={{ display: 'inline-block', flex: 1, padding: '14px', borderRadius: '24px', background: '#f2f2f2', color: '#333', textDecoration: 'none', fontWeight: '600', fontSize: '15px' }}>Продолжить покупки</Link>
+          </div>
         </div>
       )}
       
@@ -454,8 +538,8 @@ export default function CartPage() {
               <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
                 <button 
                   onClick={handleAddAddress}
-                  disabled={!newAddress.street}
-                  style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '12px 30px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', cursor: newAddress.street ? 'pointer' : 'not-allowed', opacity: newAddress.street ? 1 : 0.5 }}
+                  disabled={newAddress.street.trim().length < 5}
+                  style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '12px 30px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', cursor: newAddress.street.trim().length >= 5 ? 'pointer' : 'not-allowed', opacity: newAddress.street.trim().length >= 5 ? 1 : 0.5 }}
                 >
                   Добавить
                 </button>
@@ -465,11 +549,6 @@ export default function CartPage() {
         </div>
       )}
 
-      <style dangerouslySetInnerHTML={{__html: `
-        @media (max-width: 768px) {
-          form > div, .container > div { grid-template-columns: 1fr !important; }
-        }
-      `}} />
     </div>
   );
 }

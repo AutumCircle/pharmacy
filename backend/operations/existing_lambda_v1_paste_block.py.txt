@@ -1,0 +1,264 @@
+        # TEMPORARY API v1 migration action. Delete immediately after success.
+        if action == "run_migration_backup":
+            confirmation = "CREATE_BACKUP_AND_APPLY_VATAN_V1_20260806"
+            if params.get("confirmation") != confirmation:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({"ok": False, "error": "confirmation does not match"}),
+                }
+
+            backup_schema = "vatan_pre_v1_20260806"
+            backup_tables = (
+                "users", "orders", "order_items", "categories",
+                "category_medicines", "featured_products", "medicines", "sync_logs",
+            )
+            migration_name = "0001_api_v1_foundation.sql"
+            migration_sql = r"""
+CREATE TABLE IF NOT EXISTS order_status_history (
+    id BIGSERIAL PRIMARY KEY,
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    from_status VARCHAR(50),
+    to_status VARCHAR(50) NOT NULL,
+    actor_type VARCHAR(30) NOT NULL,
+    actor_id VARCHAR(100),
+    reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT order_status_history_actor_type_check
+        CHECK (actor_type IN ('system', 'customer', 'admin', 'legacy_import')),
+    CONSTRAINT order_status_history_to_status_check
+        CHECK (to_status IN ('pending', 'confirmed', 'delivering', 'delivered', 'cancelled'))
+);
+
+CREATE TABLE IF NOT EXISTS order_idempotency (
+    id BIGSERIAL PRIMARY KEY,
+    idempotency_key UUID NOT NULL UNIQUE,
+    request_hash CHAR(64) NOT NULL,
+    order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+    response_status SMALLINT,
+    response_body JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMPTZ
+);
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS public_id VARCHAR(40);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_reference VARCHAR(64);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS items_subtotal NUMERIC(10,2);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_total NUMERIC(10,2);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS currency CHAR(3) NOT NULL DEFAULT 'TJS';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(30) NOT NULL DEFAULT 'cash_on_delivery';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone_normalized VARCHAR(13);
+
+UPDATE orders
+SET items_subtotal = total_price,
+    order_total = total_price
+WHERE items_subtotal IS NULL OR order_total IS NULL;
+
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS medicine_id INTEGER REFERENCES medicines(id);
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS base_unit_price NUMERIC(10,2);
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS selling_unit_price NUMERIC(10,2);
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS line_total NUMERIC(10,2);
+
+UPDATE order_items
+SET selling_unit_price = price,
+    line_total = price * quantity
+WHERE selling_unit_price IS NULL OR line_total IS NULL;
+
+ALTER TABLE category_medicines ADD COLUMN IF NOT EXISTS medicine_id INTEGER REFERENCES medicines(id);
+ALTER TABLE featured_products ADD COLUMN IF NOT EXISTS medicine_id INTEGER REFERENCES medicines(id);
+
+WITH unique_medicine_names AS (
+    SELECT name, MIN(id) AS medicine_id
+    FROM medicines
+    GROUP BY name
+    HAVING COUNT(*) = 1
+)
+UPDATE category_medicines AS cm
+SET medicine_id = u.medicine_id
+FROM unique_medicine_names AS u
+WHERE cm.medicine_id IS NULL AND cm.medicine_name = u.name;
+
+WITH unique_medicine_names AS (
+    SELECT name, MIN(id) AS medicine_id
+    FROM medicines
+    GROUP BY name
+    HAVING COUNT(*) = 1
+)
+UPDATE featured_products AS fp
+SET medicine_id = u.medicine_id
+FROM unique_medicine_names AS u
+WHERE fp.medicine_id IS NULL AND fp.medicine_name = u.name;
+
+UPDATE orders
+SET phone_normalized = CASE
+    WHEN regexp_replace(phone, '\D', '', 'g') ~ '^[0-9]{9}$'
+        THEN '+992' || regexp_replace(phone, '\D', '', 'g')
+    WHEN regexp_replace(phone, '\D', '', 'g') ~ '^992[0-9]{9}$'
+        THEN '+' || regexp_replace(phone, '\D', '', 'g')
+    ELSE NULL
+END
+WHERE phone_normalized IS NULL;
+
+INSERT INTO order_status_history (order_id, from_status, to_status, actor_type, created_at)
+SELECT o.id, NULL, o.status, 'legacy_import', o.created_at
+FROM orders AS o
+WHERE o.status IN ('pending', 'confirmed', 'delivering', 'delivered', 'cancelled')
+  AND NOT EXISTS (
+      SELECT 1 FROM order_status_history AS h
+      WHERE h.order_id = o.id AND h.actor_type = 'legacy_import'
+  );
+
+CREATE UNIQUE INDEX IF NOT EXISTS orders_public_id_unique
+    ON orders (public_id) WHERE public_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS orders_order_reference_unique
+    ON orders (order_reference) WHERE order_reference IS NOT NULL;
+CREATE INDEX IF NOT EXISTS medicines_public_search_trgm
+    ON medicines USING GIN (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS medicines_public_available_id
+    ON medicines (id) WHERE in_stock IS TRUE;
+CREATE INDEX IF NOT EXISTS orders_tracking_phone_created
+    ON orders (phone_normalized, created_at DESC, id DESC)
+    WHERE phone_normalized IS NOT NULL;
+CREATE INDEX IF NOT EXISTS orders_admin_status_created
+    ON orders (status, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS order_items_order_id ON order_items (order_id);
+CREATE UNIQUE INDEX IF NOT EXISTS category_medicines_category_medicine_unique
+    ON category_medicines (category_id, medicine_id) WHERE medicine_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS featured_products_medicine_unique
+    ON featured_products (medicine_id) WHERE medicine_id IS NOT NULL;
+"""
+
+            migration_conn = get_connection()
+            migration_cur = None
+            old_autocommit = migration_conn.autocommit
+            backup_created = False
+            try:
+                migration_conn.autocommit = False
+                migration_cur = migration_conn.cursor(cursor_factory=RealDictCursor)
+
+                # Phase 1: one consistent, committed rollback copy.
+                migration_cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                migration_cur.execute("SET LOCAL lock_timeout = '5s'")
+                migration_cur.execute("SET LOCAL statement_timeout = '20000ms'")
+                migration_cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    ("vatan-v1-migration",),
+                )
+                migration_cur.execute(
+                    "SELECT 1 FROM pg_namespace WHERE nspname = %s",
+                    (backup_schema,),
+                )
+                backup_exists = migration_cur.fetchone() is not None
+
+                if not backup_exists:
+                    migration_cur.execute("CREATE SCHEMA vatan_pre_v1_20260806")
+                    migration_cur.execute("""
+                        CREATE TABLE vatan_pre_v1_20260806.backup_manifest (
+                            table_name TEXT PRIMARY KEY,
+                            row_count BIGINT NOT NULL,
+                            copied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    migration_cur.execute("""
+                        CREATE TABLE vatan_pre_v1_20260806.migration_journal (
+                            migration_name TEXT PRIMARY KEY,
+                            applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    for table_name in backup_tables:
+                        # table_name comes only from the fixed tuple above.
+                        migration_cur.execute(
+                            f"CREATE TABLE {backup_schema}.{table_name} AS TABLE public.{table_name}"
+                        )
+                        migration_cur.execute(
+                            f"SELECT COUNT(*) AS count FROM {backup_schema}.{table_name}"
+                        )
+                        copied_count = migration_cur.fetchone()["count"]
+                        migration_cur.execute(
+                            f"INSERT INTO {backup_schema}.backup_manifest (table_name, row_count) VALUES (%s, %s)",
+                            (table_name, copied_count),
+                        )
+                    migration_conn.commit()
+                    backup_created = True
+                else:
+                    migration_conn.rollback()
+
+                # Verify every rollback table before touching the public schema.
+                migration_cur.execute("BEGIN")
+                migration_cur.execute("SET LOCAL lock_timeout = '5s'")
+                migration_cur.execute("SET LOCAL statement_timeout = '20000ms'")
+                migration_cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    ("vatan-v1-migration",),
+                )
+                migration_cur.execute(
+                    f"SELECT table_name, row_count FROM {backup_schema}.backup_manifest"
+                )
+                manifest = {
+                    row["table_name"]: row["row_count"]
+                    for row in migration_cur.fetchall()
+                }
+                if set(manifest) != set(backup_tables):
+                    raise RuntimeError("rollback copy manifest is incomplete")
+                for table_name in backup_tables:
+                    migration_cur.execute(
+                        "SELECT to_regclass(%s) AS backup_table",
+                        (f"{backup_schema}.{table_name}",),
+                    )
+                    if migration_cur.fetchone()["backup_table"] is None:
+                        raise RuntimeError("rollback copy table is missing")
+
+                migration_cur.execute(
+                    f"SELECT 1 FROM {backup_schema}.migration_journal WHERE migration_name = %s",
+                    (migration_name,),
+                )
+                if migration_cur.fetchone():
+                    migration_conn.rollback()
+                    result = {
+                        "ok": True,
+                        "status": "already_applied",
+                        "backup_schema": backup_schema,
+                        "backup_created_this_call": backup_created,
+                        "tables": manifest,
+                        "migration": migration_name,
+                    }
+                else:
+                    # Phase 2: all DDL/backfills succeed together or roll back together.
+                    migration_cur.execute(migration_sql)
+                    migration_cur.execute(
+                        f"INSERT INTO {backup_schema}.migration_journal (migration_name) VALUES (%s)",
+                        (migration_name,),
+                    )
+                    migration_conn.commit()
+                    result = {
+                        "ok": True,
+                        "status": "backup_created_and_migration_applied",
+                        "backup_schema": backup_schema,
+                        "backup_created_this_call": backup_created,
+                        "tables": manifest,
+                        "migration": migration_name,
+                    }
+
+                return {
+                    "statusCode": 200,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps(result, ensure_ascii=False, default=str),
+                }
+            except Exception:
+                migration_conn.rollback()
+                logger.exception("Temporary API v1 migration failed")
+                return {
+                    "statusCode": 500,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({
+                        "ok": False,
+                        "status": "migration_failed",
+                        "backup_schema": backup_schema if backup_created else None,
+                        "message": "Stop and inspect the Lambda CloudWatch log. Do not delete the rollback schema.",
+                    }),
+                }
+            finally:
+                if migration_cur is not None:
+                    migration_cur.close()
+                migration_conn.autocommit = old_autocommit

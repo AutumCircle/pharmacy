@@ -1,0 +1,71 @@
+-- Reusable storefront product carousels and product-level images.
+BEGIN;
+
+ALTER TABLE medicines ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'medicines_image_url_check'
+    ) THEN
+        ALTER TABLE medicines
+            ADD CONSTRAINT medicines_image_url_check
+            CHECK (image_url IS NULL OR image_url ~ '^https://');
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS product_carousels (
+    id BIGSERIAL PRIMARY KEY,
+    slug VARCHAR(80) NOT NULL UNIQUE,
+    title VARCHAR(120) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT product_carousels_slug_check
+        CHECK (slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'),
+    CONSTRAINT product_carousels_title_check
+        CHECK (length(btrim(title)) BETWEEN 2 AND 120),
+    CONSTRAINT product_carousels_sort_order_check
+        CHECK (sort_order BETWEEN 0 AND 100000)
+);
+
+CREATE TABLE IF NOT EXISTS product_carousel_items (
+    id BIGSERIAL PRIMARY KEY,
+    carousel_id BIGINT NOT NULL REFERENCES product_carousels(id) ON DELETE CASCADE,
+    medicine_id INTEGER NOT NULL REFERENCES medicines(id) ON DELETE CASCADE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT product_carousel_items_unique UNIQUE (carousel_id, medicine_id),
+    CONSTRAINT product_carousel_items_sort_order_check
+        CHECK (sort_order BETWEEN 0 AND 100000)
+);
+
+CREATE INDEX IF NOT EXISTS product_carousels_public_order
+    ON product_carousels (is_active, sort_order, id);
+CREATE INDEX IF NOT EXISTS product_carousel_items_order
+    ON product_carousel_items (carousel_id, sort_order, id);
+
+INSERT INTO product_carousels (slug, title, is_active, sort_order)
+VALUES
+    ('items-of-the-day', 'Товары дня', TRUE, 10),
+    ('best-sellers', 'Хиты продаж', TRUE, 20)
+ON CONFLICT (slug) DO NOTHING;
+
+-- Preserve images and ordering configured by the old single-carousel feature.
+UPDATE medicines AS m
+SET image_url = fp.image_url
+FROM featured_products AS fp
+WHERE fp.medicine_id = m.id
+  AND fp.image_url IS NOT NULL
+  AND m.image_url IS NULL;
+
+INSERT INTO product_carousel_items (carousel_id, medicine_id, sort_order, updated_at)
+SELECT pc.id, fp.medicine_id, COALESCE(fp.sort_order, 0), CURRENT_TIMESTAMP
+FROM featured_products AS fp
+JOIN product_carousels AS pc ON pc.slug = 'items-of-the-day'
+WHERE fp.medicine_id IS NOT NULL
+ON CONFLICT (carousel_id, medicine_id) DO NOTHING;
+
+COMMIT;

@@ -1,0 +1,5 @@
+{
+  "httpMethod": "GET",
+  "path": "/v1/public/product-carousels",
+  "queryStringParameters": null
+}

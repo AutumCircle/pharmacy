@@ -23,18 +23,5 @@ export function calculateSellingPrice(basePrice: string | number): number {
 }
 
 export function sanitizeText(text: string | null | undefined): string {
-  if (!text) return '';
-  let clean = text.trim();
-  
-  // Remove asterisks
-  if (clean.startsWith('*')) {
-    clean = clean.substring(1).trim();
-  }
-  
-  // If the text is just commas or empty spaces (e.g. ",,,,,", ", , ,"), return empty string
-  if (/^[, \s]+$/.test(clean)) {
-    return '';
-  }
-  
-  return clean;
+  return text ?? '';
 }

@@ -1,0 +1,11 @@
+{
+  "httpMethod": "GET",
+  "path": "/v1/admin/product-carousels",
+  "requestContext": {
+    "authorizer": {
+      "role": "admin",
+      "principalId": "deployment-smoke-test"
+    }
+  },
+  "queryStringParameters": null
+}

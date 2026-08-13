@@ -1,19 +1,21 @@
 import { NextResponse } from 'next/server';
-import { searchMedicines } from '@/lib/api';
+import { searchPublicMedicines } from '@/lib/api-v1/server';
+import { apiRouteError } from '@/lib/api-v1/route-response';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get('q');
 
-  if (!q) {
-    return NextResponse.json({ matches: [] });
+  if (!q || q.trim().length < 2) {
+    return NextResponse.json({ data: [], page: { next_cursor: null, has_more: false }, request_id: 'local_validation' });
   }
 
   try {
-    const res = await searchMedicines(q, 10);
-    return NextResponse.json({ matches: res.matches || [] });
+    const limit = Math.min(Number(searchParams.get('limit')) || 10, 100);
+    const cursor = searchParams.get('cursor') || undefined;
+    const response = await searchPublicMedicines(q.trim(), limit, cursor);
+    return NextResponse.json(response);
   } catch (error) {
-    console.error('Search proxy error:', error);
-    return NextResponse.json({ error: 'Failed to search' }, { status: 500 });
+    return apiRouteError(error);
   }
 }

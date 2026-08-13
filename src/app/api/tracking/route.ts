@@ -1,33 +1,27 @@
 import { NextResponse } from 'next/server';
-import { fetchAdminData } from '../../../lib/api';
+import { trackPublicOrders } from '@/lib/api-v1/server';
+import { apiRouteError } from '@/lib/api-v1/route-response';
+import { parseTrackingPhone } from '@/lib/tracking-phone';
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const phone = searchParams.get('phone');
-
-  if (!phone) {
-    return NextResponse.json({ error: 'Phone is required' }, { status: 400 });
-  }
-
+export async function POST(request: Request) {
   try {
-    const data = await fetchAdminData('list_orders');
-    const orders = data?.orders || [];
-    
-    // Filter orders by phone number (removing any non-digits for comparison)
-    const cleanSearchPhone = phone.replace(/\D/g, '');
-    const userOrders = orders.filter((o: any) => {
-      const orderPhone = (o.phone || '').replace(/\D/g, '');
-      return orderPhone === cleanSearchPhone || orderPhone.endsWith(cleanSearchPhone) || cleanSearchPhone.endsWith(orderPhone);
-    });
-
-    // Sort by most recent first
-    userOrders.sort((a: any, b: any) => {
-      return new Date(b.created_at || b.date).getTime() - new Date(a.created_at || a.date).getTime();
-    });
-
-    return NextResponse.json({ orders: userOrders });
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || typeof (body as { phone?: unknown }).phone !== 'string') {
+      return NextResponse.json(
+        { error: { code: 'VALIDATION_ERROR', message: 'Введите ровно 9 цифр номера телефона.' } },
+        { status: 400 },
+      );
+    }
+    const parsedPhone = parseTrackingPhone((body as { phone: string }).phone);
+    if (!parsedPhone.valid || !parsedPhone.normalized) {
+      return NextResponse.json(
+        { error: { code: 'VALIDATION_ERROR', message: parsedPhone.error || 'Введите ровно 9 цифр номера телефона.' } },
+        { status: 400 },
+      );
+    }
+    const response = await trackPublicOrders(parsedPhone.normalized);
+    return NextResponse.json(response);
   } catch (error) {
-    console.error('Tracking API error:', error);
-    return NextResponse.json({ orders: [] });
+    return apiRouteError(error);
   }
 }

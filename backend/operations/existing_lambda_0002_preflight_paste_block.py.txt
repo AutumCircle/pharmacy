@@ -1,0 +1,113 @@
+        # TEMPORARY READ-ONLY preflight for 0002_catalog_sync_v1.sql.
+        # Paste immediately after `result = {}` and delete after one successful call.
+        if action == "preflight_catalog_sync_v1":
+            checks = []
+
+            def add_check(name, status, observed, message):
+                checks.append({
+                    "name": name,
+                    "status": status,
+                    "observed": observed,
+                    "message": message,
+                })
+
+            try:
+                # The database itself enforces read-only mode for every query below.
+                cur.execute("BEGIN TRANSACTION READ ONLY")
+                cur.execute("SET LOCAL statement_timeout = '15000ms'")
+
+                cur.execute("SELECT current_setting('server_version_num')::integer AS version_num, current_setting('server_version') AS version")
+                row = cur.fetchone()
+                add_check("postgres_version", "pass" if row["version_num"] >= 130000 else "fail", row["version"], "PostgreSQL 13 or newer is required.")
+
+                cur.execute("""
+                    SELECT COUNT(*) AS count FROM (VALUES ('public.medicines'), ('public.sync_logs')) required(table_name)
+                    WHERE to_regclass(required.table_name) IS NOT NULL
+                """)
+                count = cur.fetchone()["count"]
+                add_check("required_base_tables", "pass" if count == 2 else "fail", count, "Both medicines and sync_logs must exist.")
+
+                cur.execute("""
+                    SELECT COUNT(*) AS count FROM (VALUES
+                        ('public.catalog_syncs'), ('public.catalog_sync_items'), ('public.catalog_sync_conflicts')
+                    ) candidate(table_name) WHERE to_regclass(candidate.table_name) IS NOT NULL
+                """)
+                count = cur.fetchone()["count"]
+                add_check("new_sync_tables_absent", "pass" if count == 0 else "fail", count, "Existing sync tables indicate a prior or partial 0002 attempt.")
+
+                cur.execute("""
+                    SELECT COUNT(*) AS count FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'medicines'
+                      AND column_name IN ('source_system', 'source_sku', 'source_identity_key', 'last_seen_sync_id', 'source_row_hash')
+                """)
+                count = cur.fetchone()["count"]
+                add_check("new_medicine_columns_absent", "pass" if count == 0 else "fail", count, "Existing source columns indicate a prior or partial 0002 attempt.")
+
+                cur.execute("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') AS installed")
+                installed = cur.fetchone()["installed"]
+                add_check("pg_trgm_installed", "pass" if installed else "fail", installed, "Public search requires pg_trgm.")
+
+                cur.execute("SELECT COUNT(*) AS count FROM medicines WHERE name IS NULL OR btrim(name) = ''")
+                count = cur.fetchone()["count"]
+                add_check("medicine_names_valid", "pass" if count == 0 else "fail", count, "Blank medicine names must be corrected.")
+
+                cur.execute("SELECT COUNT(*) AS count FROM medicines WHERE price IS NULL OR price <= 0")
+                count = cur.fetchone()["count"]
+                add_check("medicine_prices_valid", "pass" if count == 0 else "fail", count, "Null or non-positive prices cannot be published.")
+
+                cur.execute("""
+                    SELECT COUNT(*) AS count FROM (
+                        SELECT lower(btrim(name)), lower(btrim(COALESCE(country, ''))), lower(btrim(COALESCE(vendor, '')))
+                        FROM medicines GROUP BY 1, 2, 3 HAVING COUNT(*) > 1
+                    ) duplicate_groups
+                """)
+                count = cur.fetchone()["count"]
+                add_check("normalized_identity_unique", "pass" if count == 0 else "warn", count, "Fallback identity duplicates will be merged deterministically and recorded during sync.")
+
+                cur.execute("SELECT COUNT(*) AS count FROM medicines WHERE country IS NULL OR vendor IS NULL OR in_stock IS NULL")
+                count = cur.fetchone()["count"]
+                add_check("nullable_catalog_attributes", "pass" if count == 0 else "warn", count, "Null optional catalogue attributes are supported but should be monitored.")
+
+                cur.execute("SELECT COUNT(*) AS count FROM category_medicines WHERE medicine_id IS NULL")
+                count = cur.fetchone()["count"]
+                add_check("category_links_without_medicine_id", "pass" if count == 0 else "warn", count, "Legacy category links without medicine_id are invisible to API v1.")
+
+                cur.execute("SELECT to_regnamespace('vatan_pre_v1_20260806') IS NOT NULL AS present")
+                present = cur.fetchone()["present"]
+                add_check("rds_backup_schema_present", "pass" if present else "warn", present, "Same-database backup is an extra safeguard, not an RDS snapshot.")
+
+                cur.execute("SELECT COUNT(*) AS count FROM medicines")
+                add_check("medicine_row_count", "info", cur.fetchone()["count"], "Count only; no catalogue rows returned.")
+
+                cur.execute("SELECT COUNT(*) AS count FROM pg_stat_activity WHERE datname = current_database()")
+                add_check("active_database_connections", "info", cur.fetchone()["count"], "Compare with max_connections before rollout.")
+
+                cur.execute("SELECT current_setting('max_connections')::integer AS value")
+                add_check("max_connections", "info", cur.fetchone()["value"], "PostgreSQL connection ceiling.")
+
+                conn.rollback()
+                summary = {
+                    status: sum(1 for check in checks if check["status"] == status)
+                    for status in ("pass", "warn", "fail", "info")
+                }
+                report = {
+                    "format": "vatan-0002-preflight/v1",
+                    "ready": summary["fail"] == 0,
+                    "summary": summary,
+                    "checks": checks,
+                }
+                cur.close()
+                return {
+                    "statusCode": 200,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({"ok": True, "data": report}, ensure_ascii=False, default=str),
+                }
+            except Exception:
+                conn.rollback()
+                cur.close()
+                logger.exception("Read-only 0002 preflight failed")
+                return {
+                    "statusCode": 500,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({"ok": False, "error": "PREFLIGHT_FAILED"}),
+                }

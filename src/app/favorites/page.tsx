@@ -27,8 +27,8 @@ export default function FavoritesPage() {
       <h1 className="section-title" style={{ marginBottom: '30px' }}>Избранные товары ({items.length})</h1>
       
       <div className="medicine-grid">
-        {items.map((item, index) => (
-          <ProductCard key={`${item.name}-${index}`} item={item} />
+        {items.map((item) => (
+          <ProductCard key={item.medicine_id} item={item} />
         ))}
       </div>
     </div>

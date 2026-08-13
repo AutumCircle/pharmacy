@@ -1,0 +1,615 @@
+{
+  "statusCode": 200,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "format": "pharmacy-schema-export/v1",
+    "extensions": [
+      {
+        "extname": "pg_trgm",
+        "extversion": "1.6"
+      },
+      {
+        "extname": "plpgsql",
+        "extversion": "1.0"
+      }
+    ],
+    "tables": {
+      "categories": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "default": "nextval('categories_id_seq'::regclass)"
+          },
+          {
+            "name": "slug",
+            "type": "character varying(100)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "name",
+            "type": "character varying(255)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "icon",
+            "type": "character varying(50)",
+            "nullable": true,
+            "default": "'💊'::character varying"
+          },
+          {
+            "name": "color",
+            "type": "character varying(20)",
+            "nullable": true,
+            "default": "'#E31E24'::character varying"
+          },
+          {
+            "name": "sort_order",
+            "type": "integer",
+            "nullable": true,
+            "default": "0"
+          },
+          {
+            "name": "is_active",
+            "type": "boolean",
+            "nullable": true,
+            "default": "true"
+          },
+          {
+            "name": "created_at",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          }
+        ],
+        "constraints": [
+          {
+            "name": "categories_id_not_null",
+            "type": "n",
+            "definition": "NOT NULL id"
+          },
+          {
+            "name": "categories_name_not_null",
+            "type": "n",
+            "definition": "NOT NULL name"
+          },
+          {
+            "name": "categories_pkey",
+            "type": "p",
+            "definition": "PRIMARY KEY (id)"
+          },
+          {
+            "name": "categories_slug_key",
+            "type": "u",
+            "definition": "UNIQUE (slug)"
+          },
+          {
+            "name": "categories_slug_not_null",
+            "type": "n",
+            "definition": "NOT NULL slug"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "categories_pkey",
+            "definition": "CREATE UNIQUE INDEX categories_pkey ON public.categories USING btree (id)"
+          },
+          {
+            "name": "categories_slug_key",
+            "definition": "CREATE UNIQUE INDEX categories_slug_key ON public.categories USING btree (slug)"
+          }
+        ]
+      },
+      "category_medicines": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "default": "nextval('category_medicines_id_seq'::regclass)"
+          },
+          {
+            "name": "category_id",
+            "type": "integer",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "medicine_name",
+            "type": "text",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "sort_order",
+            "type": "integer",
+            "nullable": true,
+            "default": "0"
+          }
+        ],
+        "constraints": [
+          {
+            "name": "category_medicines_category_id_fkey",
+            "type": "f",
+            "definition": "FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE"
+          },
+          {
+            "name": "category_medicines_category_id_medicine_name_key",
+            "type": "u",
+            "definition": "UNIQUE (category_id, medicine_name)"
+          },
+          {
+            "name": "category_medicines_id_not_null",
+            "type": "n",
+            "definition": "NOT NULL id"
+          },
+          {
+            "name": "category_medicines_medicine_name_not_null",
+            "type": "n",
+            "definition": "NOT NULL medicine_name"
+          },
+          {
+            "name": "category_medicines_pkey",
+            "type": "p",
+            "definition": "PRIMARY KEY (id)"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "category_medicines_category_id_medicine_name_key",
+            "definition": "CREATE UNIQUE INDEX category_medicines_category_id_medicine_name_key ON public.category_medicines USING btree (category_id, medicine_name)"
+          },
+          {
+            "name": "category_medicines_pkey",
+            "definition": "CREATE UNIQUE INDEX category_medicines_pkey ON public.category_medicines USING btree (id)"
+          }
+        ]
+      },
+      "featured_products": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "default": "nextval('featured_products_id_seq'::regclass)"
+          },
+          {
+            "name": "medicine_name",
+            "type": "text",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "sort_order",
+            "type": "integer",
+            "nullable": true,
+            "default": "0"
+          },
+          {
+            "name": "created_at",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          }
+        ],
+        "constraints": [
+          {
+            "name": "featured_products_id_not_null",
+            "type": "n",
+            "definition": "NOT NULL id"
+          },
+          {
+            "name": "featured_products_medicine_name_key",
+            "type": "u",
+            "definition": "UNIQUE (medicine_name)"
+          },
+          {
+            "name": "featured_products_medicine_name_not_null",
+            "type": "n",
+            "definition": "NOT NULL medicine_name"
+          },
+          {
+            "name": "featured_products_pkey",
+            "type": "p",
+            "definition": "PRIMARY KEY (id)"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "featured_products_medicine_name_key",
+            "definition": "CREATE UNIQUE INDEX featured_products_medicine_name_key ON public.featured_products USING btree (medicine_name)"
+          },
+          {
+            "name": "featured_products_pkey",
+            "definition": "CREATE UNIQUE INDEX featured_products_pkey ON public.featured_products USING btree (id)"
+          }
+        ]
+      },
+      "medicines": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "default": "nextval('medicines_id_seq'::regclass)"
+          },
+          {
+            "name": "name",
+            "type": "character varying(255)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "price",
+            "type": "numeric(10,2)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "country",
+            "type": "character varying(100)",
+            "nullable": true,
+            "default": "''::character varying"
+          },
+          {
+            "name": "vendor",
+            "type": "character varying(100)",
+            "nullable": true,
+            "default": "''::character varying"
+          },
+          {
+            "name": "in_stock",
+            "type": "boolean",
+            "nullable": true,
+            "default": "true"
+          },
+          {
+            "name": "updated_at",
+            "type": "timestamp with time zone",
+            "nullable": true,
+            "default": "CURRENT_TIMESTAMP"
+          },
+          {
+            "name": "created_at",
+            "type": "timestamp with time zone",
+            "nullable": true,
+            "default": "CURRENT_TIMESTAMP"
+          }
+        ],
+        "constraints": [
+          {
+            "name": "medicines_id_not_null",
+            "type": "n",
+            "definition": "NOT NULL id"
+          },
+          {
+            "name": "medicines_name_country_vendor_key",
+            "type": "u",
+            "definition": "UNIQUE (name, country, vendor)"
+          },
+          {
+            "name": "medicines_name_not_null",
+            "type": "n",
+            "definition": "NOT NULL name"
+          },
+          {
+            "name": "medicines_pkey",
+            "type": "p",
+            "definition": "PRIMARY KEY (id)"
+          },
+          {
+            "name": "medicines_price_not_null",
+            "type": "n",
+            "definition": "NOT NULL price"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "medicines_name_country_vendor_key",
+            "definition": "CREATE UNIQUE INDEX medicines_name_country_vendor_key ON public.medicines USING btree (name, country, vendor)"
+          },
+          {
+            "name": "medicines_pkey",
+            "definition": "CREATE UNIQUE INDEX medicines_pkey ON public.medicines USING btree (id)"
+          }
+        ]
+      },
+      "order_items": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "default": "nextval('order_items_id_seq'::regclass)"
+          },
+          {
+            "name": "order_id",
+            "type": "integer",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "medicine_name",
+            "type": "text",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "price",
+            "type": "numeric(10,2)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "quantity",
+            "type": "integer",
+            "nullable": false,
+            "default": null
+          }
+        ],
+        "constraints": [
+          {
+            "name": "order_items_id_not_null",
+            "type": "n",
+            "definition": "NOT NULL id"
+          },
+          {
+            "name": "order_items_medicine_name_not_null",
+            "type": "n",
+            "definition": "NOT NULL medicine_name"
+          },
+          {
+            "name": "order_items_order_id_fkey",
+            "type": "f",
+            "definition": "FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE"
+          },
+          {
+            "name": "order_items_pkey",
+            "type": "p",
+            "definition": "PRIMARY KEY (id)"
+          },
+          {
+            "name": "order_items_price_not_null",
+            "type": "n",
+            "definition": "NOT NULL price"
+          },
+          {
+            "name": "order_items_quantity_not_null",
+            "type": "n",
+            "definition": "NOT NULL quantity"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "order_items_pkey",
+            "definition": "CREATE UNIQUE INDEX order_items_pkey ON public.order_items USING btree (id)"
+          }
+        ]
+      },
+      "orders": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "default": "nextval('orders_id_seq'::regclass)"
+          },
+          {
+            "name": "user_id",
+            "type": "integer",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "customer_name",
+            "type": "character varying(255)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "phone",
+            "type": "character varying(20)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "address",
+            "type": "text",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "total_price",
+            "type": "numeric(10,2)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "status",
+            "type": "character varying(50)",
+            "nullable": true,
+            "default": "'pending'::character varying"
+          },
+          {
+            "name": "notes",
+            "type": "text",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "created_at",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          }
+        ],
+        "constraints": [
+          {
+            "name": "orders_address_not_null",
+            "type": "n",
+            "definition": "NOT NULL address"
+          },
+          {
+            "name": "orders_customer_name_not_null",
+            "type": "n",
+            "definition": "NOT NULL customer_name"
+          },
+          {
+            "name": "orders_id_not_null",
+            "type": "n",
+            "definition": "NOT NULL id"
+          },
+          {
+            "name": "orders_phone_not_null",
+            "type": "n",
+            "definition": "NOT NULL phone"
+          },
+          {
+            "name": "orders_pkey",
+            "type": "p",
+            "definition": "PRIMARY KEY (id)"
+          },
+          {
+            "name": "orders_total_price_not_null",
+            "type": "n",
+            "definition": "NOT NULL total_price"
+          },
+          {
+            "name": "orders_user_id_fkey",
+            "type": "f",
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id)"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "orders_pkey",
+            "definition": "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)"
+          }
+        ]
+      },
+      "sync_logs": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "default": "nextval('sync_logs_id_seq'::regclass)"
+          },
+          {
+            "name": "sync_time",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          },
+          {
+            "name": "upserted_count",
+            "type": "integer",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "in_stock_count",
+            "type": "integer",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "out_of_stock_count",
+            "type": "integer",
+            "nullable": true,
+            "default": null
+          }
+        ],
+        "constraints": [
+          {
+            "name": "sync_logs_id_not_null",
+            "type": "n",
+            "definition": "NOT NULL id"
+          },
+          {
+            "name": "sync_logs_pkey",
+            "type": "p",
+            "definition": "PRIMARY KEY (id)"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "sync_logs_pkey",
+            "definition": "CREATE UNIQUE INDEX sync_logs_pkey ON public.sync_logs USING btree (id)"
+          }
+        ]
+      },
+      "users": {
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false,
+            "default": "nextval('users_id_seq'::regclass)"
+          },
+          {
+            "name": "phone",
+            "type": "character varying(20)",
+            "nullable": false,
+            "default": null
+          },
+          {
+            "name": "name",
+            "type": "character varying(255)",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "address",
+            "type": "text",
+            "nullable": true,
+            "default": null
+          },
+          {
+            "name": "created_at",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          }
+        ],
+        "constraints": [
+          {
+            "name": "users_id_not_null",
+            "type": "n",
+            "definition": "NOT NULL id"
+          },
+          {
+            "name": "users_phone_key",
+            "type": "u",
+            "definition": "UNIQUE (phone)"
+          },
+          {
+            "name": "users_phone_not_null",
+            "type": "n",
+            "definition": "NOT NULL phone"
+          },
+          {
+            "name": "users_pkey",
+            "type": "p",
+            "definition": "PRIMARY KEY (id)"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "users_phone_key",
+            "definition": "CREATE UNIQUE INDEX users_phone_key ON public.users USING btree (phone)"
+          },
+          {
+            "name": "users_pkey",
+            "definition": "CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)"
+          }
+        ]
+      }
+    }
+  }
+}

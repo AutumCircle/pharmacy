@@ -1,72 +1,82 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { formatOrderNumber } from '../../lib/utils';
+import { useState, useEffect, useCallback } from 'react';
+import type { PublicOrder } from '@/lib/api-v1/types';
+import { trackOrdersClient } from '@/lib/api-v1/client-reads';
+import { parseTrackingPhone, TRACKING_PHONE_ERROR } from '@/lib/tracking-phone';
 
 export default function TrackingPage() {
   const [phone, setPhone] = useState('');
   const [inputPhone, setInputPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [orders, setOrders] = useState<any[]>([]);
-  const [selectedOrder, setSelectedOrder] = useState<any>(null);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    const savedPhone = localStorage.getItem('userPhone');
-    if (savedPhone) {
-      setPhone(savedPhone);
-      fetchOrders(savedPhone);
-    }
-  }, []);
-
-  const fetchOrders = async (phoneNumber: string) => {
+  const [inputRejected, setInputRejected] = useState(false);
+  const [orders, setOrders] = useState<PublicOrder[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<PublicOrder | null>(null);
+  const fetchOrders = useCallback(async (phoneNumber: string, force = false) => {
     if (!phoneNumber) return;
     setLoading(true);
     setError('');
     
     try {
-      const res = await fetch(`/api/tracking?phone=${encodeURIComponent(phoneNumber)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setOrders(data.orders || []);
-        if (data.orders && data.orders.length > 0) {
-          setSelectedOrder(data.orders[0]); // Auto-select first order
-        }
-      } else {
-        setError('Не удалось загрузить заказы.');
+      const data = await trackOrdersClient(phoneNumber, force);
+      setOrders(data.data || []);
+      if (data.data && data.data.length > 0) {
+        setSelectedOrder(data.data[0]);
       }
-    } catch (err) {
+    } catch {
       setError('Ошибка при загрузке заказов.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const savedPhone = localStorage.getItem('userPhone');
+      if (savedPhone) {
+        const parsed = parseTrackingPhone(savedPhone);
+        if (parsed.valid && parsed.normalized) {
+          setPhone(parsed.formatted);
+          void fetchOrders(parsed.normalized);
+        } else {
+          localStorage.removeItem('userPhone');
+        }
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchOrders]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputPhone) {
-      setError('Пожалуйста, введите номер телефона');
+    const parsed = parseTrackingPhone(inputPhone);
+    if (inputRejected || !parsed.valid || !parsed.normalized) {
+      setError(parsed.error || TRACKING_PHONE_ERROR);
       return;
     }
-    setPhone(inputPhone);
-    localStorage.setItem('userPhone', inputPhone);
-    fetchOrders(inputPhone);
+    setPhone(parsed.formatted);
+    localStorage.setItem('userPhone', parsed.formatted);
+    void fetchOrders(parsed.normalized, true);
   };
 
   const renderStepper = (status: string) => {
+    if (status === 'cancelled') {
+      return (
+        <div style={{ margin: '30px 0', padding: '16px', borderRadius: '10px', background: '#ffebee', color: '#c62828', fontWeight: 600 }}>
+          Заказ отменён
+        </div>
+      );
+    }
     const steps = [
       { id: 'pending', label: 'В обработке' },
       { id: 'confirmed', label: 'Сборка' },
-      { id: 'shipping', label: 'В пути' },
+      { id: 'delivering', label: 'В пути' },
       { id: 'delivered', label: 'Доставлен' },
     ];
     
     let currentIndex = 0;
     if (status === 'confirmed') currentIndex = 1;
-    if (status === 'shipping' || status === 'delivering') currentIndex = 2;
+    if (status === 'delivering') currentIndex = 2;
     if (status === 'delivered') currentIndex = 3;
 
     return (
@@ -78,7 +88,7 @@ export default function TrackingPage() {
           const isCompleted = idx <= currentIndex;
           const isActive = idx === currentIndex;
           return (
-            <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, width: '25%' }}>
+            <div key={step.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, width: '25%' }}>
               <div style={{ 
                 width: '34px', height: '34px', borderRadius: '50%', 
                 background: isCompleted ? 'var(--primary)' : '#fff', 
@@ -99,8 +109,6 @@ export default function TrackingPage() {
     );
   };
 
-  if (!mounted) return null;
-
   return (
     <div className="container" style={{ paddingTop: '40px', paddingBottom: '60px' }}>
       
@@ -114,11 +122,22 @@ export default function TrackingPage() {
             <input 
               type="tel" 
               value={inputPhone}
-              onChange={(e) => setInputPhone(e.target.value.replace(/\D/g, ''))}
+              onChange={(e) => {
+                const parsed = parseTrackingPhone(e.target.value);
+                const rejected = parsed.localDigits.length > 9 || parsed.error !== null && parsed.error !== TRACKING_PHONE_ERROR;
+                setInputPhone(parsed.formatted);
+                setInputRejected(rejected);
+                setError(rejected ? (parsed.error || TRACKING_PHONE_ERROR) : '');
+              }}
+              inputMode="numeric"
+              autoComplete="tel-national"
+              maxLength={12}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'tracking-phone-error' : undefined}
               placeholder="Номер телефона" 
               style={{ width: '100%', padding: '16px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none', fontSize: '16px', marginBottom: '15px', textAlign: 'center' }}
             />
-            {error && <div style={{ color: '#c62828', marginBottom: '15px', fontSize: '14px' }}>{error}</div>}
+            {error && <div id="tracking-phone-error" role="alert" style={{ color: '#c62828', marginBottom: '15px', fontSize: '14px' }}>{error}</div>}
             <button 
               type="submit" 
               style={{ width: '100%', padding: '16px', borderRadius: '24px', fontSize: '16px', background: 'var(--primary)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600, display: 'flex', justifyContent: 'center' }}
@@ -141,10 +160,10 @@ export default function TrackingPage() {
             </button>
           </div>
 
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: '1fr 2fr', 
-            gap: '30px', 
+          <div className="tracking-layout" style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 2fr',
+            gap: '30px',
             alignItems: 'start'
           }}>
             
@@ -159,13 +178,11 @@ export default function TrackingPage() {
                   <div style={{ textAlign: 'center', padding: '20px', color: '#888' }}>У вас пока нет заказов</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {orders.map((o: any, idx) => {
-                      const isActive = selectedOrder?.id === o.id;
-                      const displayId = formatOrderNumber(o.phone || phone, o.id);
-                      
+                    {orders.map((o) => {
+                      const isActive = selectedOrder?.order_id === o.order_id;
                       return (
                         <div 
-                          key={idx} 
+                          key={o.order_id}
                           onClick={() => setSelectedOrder(o)}
                           style={{ 
                             padding: '15px', 
@@ -177,7 +194,7 @@ export default function TrackingPage() {
                           }}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                            <span style={{ fontWeight: 'bold', fontSize: '15px', color: '#313131' }}>Заказ #{displayId}</span>
+                            <span style={{ fontWeight: 'bold', fontSize: '15px', color: '#313131' }}>Заказ #{o.order_reference}</span>
                             <span style={{ fontSize: '12px', color: '#888' }}>{new Date(o.created_at).toLocaleDateString('ru-RU')}</span>
                           </div>
                           <div style={{ fontSize: '13px', color: isActive ? 'var(--primary)' : '#666', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -202,7 +219,7 @@ export default function TrackingPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '20px', marginBottom: '20px' }}>
                     <div>
                       <h2 style={{ margin: '0 0 5px 0', fontSize: '24px', color: '#313131' }}>
-                        Заказ #{formatOrderNumber(selectedOrder.phone || phone, selectedOrder.id)}
+                        Заказ #{selectedOrder.order_reference}
                       </h2>
                       <div style={{ color: '#888', fontSize: '14px' }}>
                         Оформлен: {new Date(selectedOrder.created_at).toLocaleString('ru-RU')}
@@ -212,29 +229,26 @@ export default function TrackingPage() {
                   
                   {renderStepper(selectedOrder.status)}
 
-                  <div style={{ background: '#F9F9F9', padding: '20px', borderRadius: '12px', marginBottom: '25px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px' }}>
-                    <div style={{ display: 'flex' }}><span style={{ color: '#888', width: '140px' }}>Получатель:</span> <span style={{ fontWeight: 500, color: '#313131' }}>{selectedOrder.customer_name}</span></div>
-                    <div style={{ display: 'flex' }}><span style={{ color: '#888', width: '140px' }}>Телефон:</span> <span style={{ fontWeight: 500, color: '#313131' }}>{selectedOrder.phone}</span></div>
-                    <div style={{ display: 'flex' }}><span style={{ color: '#888', width: '140px' }}>Адрес:</span> <span style={{ fontWeight: 500, color: '#313131' }}>{selectedOrder.address}</span></div>
-                    {selectedOrder.comment && (
-                      <div style={{ display: 'flex' }}><span style={{ color: '#888', width: '140px' }}>Комментарий:</span> <span style={{ fontWeight: 500, color: '#313131' }}>{selectedOrder.comment}</span></div>
-                    )}
-                  </div>
-
                   <h3 style={{ fontSize: '18px', marginBottom: '15px', fontWeight: 600, color: '#313131' }}>Состав заказа</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '25px' }}>
-                    {(selectedOrder.items || []).map((item: any, idx: number) => (
-                      <div key={idx} style={{ display: 'flex', gap: '15px', alignItems: 'center', borderBottom: '1px solid #F0F0F0', paddingBottom: '15px' }}>
+                    {selectedOrder.items.map((item, index) => (
+                      <div key={`${item.medicine_id ?? 'legacy'}-${index}`} style={{ display: 'flex', gap: '15px', alignItems: 'center', borderBottom: '1px solid #F0F0F0', paddingBottom: '15px' }}>
                         <div style={{ width: '60px', height: '60px', background: 'white', border: '1px solid #E8E8E8', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#ddd" strokeWidth="1.5"><rect x="7" y="7" width="10" height="14" rx="2" ry="2"></rect><path d="M5 7h14"></path><path d="M12 11v4"></path><path d="M10 13h4"></path><path d="M9 3h6v4H9z"></path></svg>
                         </div>
                         <div style={{ flex: 1 }}>
-                          <a href={`/medicine/${encodeURIComponent(item.medicine_name || item.name)}`} style={{ fontWeight: '500', color: '#313131', textDecoration: 'none', display: 'block', marginBottom: '5px' }}>
-                            {item.medicine_name || item.name}
-                          </a>
+                          {item.medicine_id == null ? (
+                            <span style={{ fontWeight: '500', color: '#313131', display: 'block', marginBottom: '5px' }}>
+                              {item.medicine_name}
+                            </span>
+                          ) : (
+                            <a href={`/medicine/${item.medicine_id}`} style={{ fontWeight: '500', color: '#313131', textDecoration: 'none', display: 'block', marginBottom: '5px' }}>
+                              {item.medicine_name}
+                            </a>
+                          )}
                           <div style={{ fontSize: '13px', color: '#888' }}>{item.quantity} шт.</div>
                         </div>
-                        <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#111' }}>{((item.quantity || 1) * (item.price || 0)).toFixed(2)} с.</div>
+                        <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#111' }}>{item.line_total.toFixed(0)} с.</div>
                       </div>
                     ))}
                   </div>
@@ -243,15 +257,11 @@ export default function TrackingPage() {
                     <div style={{ textAlign: 'right', minWidth: '200px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#666', marginBottom: '10px' }}>
                         <span>Сумма товаров:</span>
-                        <span style={{ fontWeight: 500, color: '#111' }}>{Number(selectedOrder.total_price || 0).toFixed(2)} с.</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#666', marginBottom: '15px' }}>
-                        <span>Доставка:</span>
-                        <span style={{ fontWeight: 500, color: '#111' }}>30.00 с.</span>
+                        <span style={{ fontWeight: 500, color: '#111' }}>{selectedOrder.items_subtotal.toFixed(0)} с.</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', color: '#313131', fontWeight: 'bold', borderTop: '1px solid #F0F0F0', paddingTop: '15px' }}>
                         <span>Итого:</span>
-                        <span style={{ color: 'var(--primary)', fontSize: '20px' }}>{(Number(selectedOrder.total_price || 0) + 30).toFixed(2)} с.</span>
+                        <span style={{ color: 'var(--primary)', fontSize: '20px' }}>{selectedOrder.order_total.toFixed(0)} с.</span>
                       </div>
                     </div>
                   </div>
@@ -262,12 +272,6 @@ export default function TrackingPage() {
         </>
       )}
 
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        @media (max-width: 768px) {
-          .container > div { grid-template-columns: 1fr !important; }
-        }
-      `}} />
     </div>
   );
 }

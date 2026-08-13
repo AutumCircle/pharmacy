@@ -1,13 +1,15 @@
 import CategoriesClient from './CategoriesClient';
-import { fetchAdminData } from '../../../lib/api';
+import { listAdminCategories } from '@/lib/api-v1/admin-server';
+import { requireAdminSession } from '@/lib/admin-auth';
+import type { AdminCategory } from '@/lib/api-v1/admin-types';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminCategoriesPage() {
-  let initialCategories = [];
+  let initialCategories: AdminCategory[] = [];
   try {
-    const res = await fetchAdminData('list_categories');
-    initialCategories = res?.categories || [];
+    await requireAdminSession();
+    initialCategories = (await listAdminCategories()).data;
   } catch (e) {
     console.error('Failed to fetch categories', e);
   }

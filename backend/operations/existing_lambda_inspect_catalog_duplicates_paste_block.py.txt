@@ -1,0 +1,65 @@
+        # TEMPORARY READ-ONLY inspection for duplicate groups reported by the
+        # catalogue v1 preflight. Paste after `result = {}` and remove after use.
+        if action == "inspect_catalog_duplicates":
+            try:
+                cur.execute("BEGIN TRANSACTION READ ONLY")
+                cur.execute("SET LOCAL statement_timeout = '15s'")
+                cur.execute("""
+                    WITH duplicate_keys AS (
+                        SELECT
+                            lower(btrim(name)) AS normalized_name,
+                            lower(btrim(COALESCE(country, ''))) AS normalized_country,
+                            lower(btrim(COALESCE(vendor, ''))) AS normalized_vendor
+                        FROM medicines
+                        GROUP BY 1, 2, 3
+                        HAVING COUNT(*) > 1
+                    )
+                    SELECT
+                        m.id,
+                        m.name,
+                        m.price,
+                        m.country,
+                        m.vendor,
+                        m.in_stock,
+                        m.created_at::text AS created_at,
+                        m.updated_at::text AS updated_at,
+                        (SELECT COUNT(*) FROM category_medicines cm
+                         WHERE cm.medicine_id = m.id) AS category_id_links,
+                        (SELECT COUNT(*) FROM category_medicines cm
+                         WHERE cm.medicine_name = m.name) AS category_name_links,
+                        (SELECT COUNT(*) FROM featured_products fp
+                         WHERE fp.medicine_name = m.name) AS featured_links,
+                        (SELECT COUNT(*) FROM order_items oi
+                         WHERE oi.medicine_name = m.name) AS historical_order_item_refs
+                    FROM medicines m
+                    JOIN duplicate_keys d
+                      ON lower(btrim(m.name)) = d.normalized_name
+                     AND lower(btrim(COALESCE(m.country, ''))) = d.normalized_country
+                     AND lower(btrim(COALESCE(m.vendor, ''))) = d.normalized_vendor
+                    ORDER BY d.normalized_name, d.normalized_country,
+                             d.normalized_vendor, m.id
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+                conn.rollback()
+                cur.close()
+                return {
+                    "statusCode": 200,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({
+                        "ok": True,
+                        "data": {
+                            "format": "vatan-catalog-duplicate-inspection/v1",
+                            "row_count": len(rows),
+                            "rows": rows,
+                        },
+                    }, ensure_ascii=False, default=str),
+                }
+            except Exception:
+                conn.rollback()
+                cur.close()
+                logger.exception("Read-only catalogue duplicate inspection failed")
+                return {
+                    "statusCode": 500,
+                    "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+                    "body": json.dumps({"ok": False, "error": "DUPLICATE_INSPECTION_FAILED"}),
+                }

@@ -1,0 +1,61 @@
+        # TEMPORARY one-time homepage banners migration action.
+        # Paste inside the public API lambda_handler `try:` block, before route matching.
+        # Run once from the Lambda Test tab, then delete this block and Deploy again.
+        migration_payload = _body(event)
+        if migration_payload.get("action") == "apply_homepage_banners_v1":
+            confirmation = "APPLY_HOMEPAGE_BANNERS_V1_20260811"
+            if migration_payload.get("confirmation") != confirmation:
+                raise ContractError("FORBIDDEN", "Migration confirmation is invalid", http_status=403)
+
+            with transaction() as cur:
+                cur.execute("SELECT to_regclass('public.homepage_banners') IS NOT NULL AS existed")
+                existed = bool(cur.fetchone()["existed"])
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS homepage_banners (
+                        slot VARCHAR(30) PRIMARY KEY,
+                        title VARCHAR(120) NOT NULL,
+                        subtitle VARCHAR(240),
+                        image_url TEXT,
+                        link_url TEXT,
+                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT homepage_banners_slot_check
+                            CHECK (slot IN ('left', 'center', 'right_top', 'right_bottom')),
+                        CONSTRAINT homepage_banners_image_url_check
+                            CHECK (image_url IS NULL OR image_url ~ '^https://'),
+                        CONSTRAINT homepage_banners_link_url_check
+                            CHECK (
+                                link_url IS NULL OR link_url ~ '^https://'
+                                OR (link_url LIKE '/%' AND link_url NOT LIKE '//%')
+                            )
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    INSERT INTO homepage_banners (slot, title, subtitle)
+                    VALUES
+                        ('left', 'Витамины, минералы и добавки', NULL),
+                        ('center', 'Скидка на все виды лекарств',
+                         'Без выходных · Работаем днём и ночью · Доставим быстро'),
+                        ('right_top', 'Лучшие цены на лекарства', NULL),
+                        ('right_bottom', 'Бонус к чеку', NULL)
+                    ON CONFLICT (slot) DO NOTHING
+                    """
+                )
+                cur.execute("SELECT COUNT(*) AS count FROM homepage_banners")
+                banner_count = int(cur.fetchone()["count"])
+
+            return success(
+                {
+                    "status": "homepage_banners_ready",
+                    "migration": "0003_homepage_banners.sql",
+                    "table_created_this_call": not existed,
+                    "banner_count": banner_count,
+                },
+                request=current_request_id,
+            )
+
+        # Lambda Test event body:
+        # {"body":"{\"action\":\"apply_homepage_banners_v1\",\"confirmation\":\"APPLY_HOMEPAGE_BANNERS_V1_20260811\"}"}

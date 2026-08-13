@@ -1,0 +1,16 @@
+{
+  "dbf_path": "C:\\Pharmacy\\OSTATKI.DBF",
+  "dbf_encoding": "cp866",
+  "api_base_url": "https://example.execute-api.eu-central-1.amazonaws.com/prod",
+  "api_key": "REPLACE_WITH_USAGE_PLAN_KEY_IF_REQUIRED",
+  "authorization_token": "REPLACE_WITH_SHORT_LIVED_MACHINE_TOKEN",
+  "source_id": "vatan-main-pharmacy",
+  "min_expected_rows": 5000,
+  "fields": {
+    "name": "NAME",
+    "price": "PRICE",
+    "country": "COUNTRY",
+    "vendor": "PROIZVOD",
+    "source_sku": null
+  }
+}
