@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import psycopg2
@@ -136,6 +137,85 @@ def _image_url(value: Any) -> str | None:
 
 def _page_number(query: dict[str, Any]) -> int:
     return _positive_int(query.get("page") or 1, "page")
+
+
+def get_pricing_settings() -> dict[str, Any]:
+    with transaction() as cur:
+        cur.execute(
+            """
+            SELECT markup_enabled, markup_percent, updated_at, updated_by
+            FROM pricing_settings
+            WHERE singleton_id = 1
+            """
+        )
+        row = cur.fetchone()
+    if not row:
+        raise ContractError("PRICING_SETTINGS_NOT_FOUND", "Pricing settings were not found", http_status=500)
+    return {
+        "markup_enabled": bool(row["markup_enabled"]),
+        "markup_percent": row["markup_percent"],
+        "updated_at": row["updated_at"],
+        "updated_by": row["updated_by"],
+    }
+
+
+def update_pricing_settings(
+    payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    if set(payload) != {"markup_enabled", "markup_percent"}:
+        raise ContractError("VALIDATION_ERROR", "markup_enabled and markup_percent are required")
+    enabled = payload["markup_enabled"]
+    if not isinstance(enabled, bool):
+        raise ContractError("VALIDATION_ERROR", "markup_enabled must be a boolean")
+    if isinstance(payload["markup_percent"], bool):
+        raise ContractError("VALIDATION_ERROR", "markup_percent must be a number")
+    try:
+        percent = Decimal(str(payload["markup_percent"])).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ContractError("VALIDATION_ERROR", "markup_percent must be a number") from exc
+    if not percent.is_finite() or not Decimal("0") <= percent <= Decimal("100"):
+        raise ContractError("VALIDATION_ERROR", "markup_percent must be between 0 and 100")
+
+    with transaction() as cur:
+        cur.execute(
+            """
+            SELECT markup_enabled, markup_percent
+            FROM pricing_settings WHERE singleton_id = 1 FOR UPDATE
+            """
+        )
+        previous = cur.fetchone()
+        if not previous:
+            raise ContractError("PRICING_SETTINGS_NOT_FOUND", "Pricing settings were not found", http_status=500)
+        cur.execute(
+            """
+            UPDATE pricing_settings
+            SET markup_enabled = %s, markup_percent = %s,
+                updated_at = CURRENT_TIMESTAMP, updated_by = %s
+            WHERE singleton_id = 1
+            RETURNING markup_enabled, markup_percent, updated_at, updated_by
+            """,
+            (enabled, percent, actor_id),
+        )
+        updated = dict(cur.fetchone())
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="pricing_settings.updated",
+            resource_type="pricing_settings",
+            resource_id="1",
+            request=current_request_id,
+            details={
+                "before": {
+                    "markup_enabled": bool(previous["markup_enabled"]),
+                    "markup_percent": str(previous["markup_percent"]),
+                },
+                "after": {
+                    "markup_enabled": enabled,
+                    "markup_percent": str(percent),
+                },
+            },
+        )
+    return updated
 
 
 def catalog_stats() -> dict[str, Any]:
@@ -275,7 +355,7 @@ def list_medicines(query: dict[str, Any]) -> dict[str, Any]:
         cur.execute(
             f"""
             SELECT id AS medicine_id, name AS medicine_name, price AS base_unit_price,
-                   CEIL(price * 1.05) AS selling_unit_price,
+                   vatan_selling_unit_price(price) AS selling_unit_price,
                    source_sku, country, vendor, in_stock, updated_at, image_url
             FROM medicines m
             {where}
@@ -306,7 +386,7 @@ def list_medicine_duplicates(query: dict[str, Any]) -> dict[str, Any]:
         with transaction() as cur:
             cur.execute(f"""
                 SELECT id AS medicine_id, name AS medicine_name, price AS base_unit_price,
-                       CEIL(price * 1.05) AS selling_unit_price,
+                       vatan_selling_unit_price(price) AS selling_unit_price,
                        source_sku, country, vendor, in_stock, updated_at, image_url
                 FROM medicines
                 WHERE name IS NOT NULL AND btrim(name) <> ''
@@ -848,7 +928,7 @@ def _featured_response(row: dict[str, Any]) -> dict[str, Any]:
         "medicine_id": row["medicine_id"],
         "medicine_name": row["medicine_name"],
         "base_unit_price": row["base_unit_price"],
-        "selling_unit_price": calculate_selling_unit_price(row["base_unit_price"]),
+        "selling_unit_price": int(row.get("selling_unit_price") or calculate_selling_unit_price(row["base_unit_price"])),
         "country": row["country"] or None,
         "vendor": row["vendor"] or None,
         "in_stock": bool(row["in_stock"]),
@@ -863,7 +943,9 @@ def list_featured_products() -> dict[str, Any]:
         cur.execute(
             """
             SELECT m.id AS medicine_id, m.name AS medicine_name,
-                   m.price AS base_unit_price, m.country, m.vendor, m.in_stock,
+                   m.price AS base_unit_price,
+                   vatan_selling_unit_price(m.price) AS selling_unit_price,
+                   m.country, m.vendor, m.in_stock,
                    fp.image_url, COALESCE(fp.sort_order, 0) AS sort_order,
                    fp.updated_at
             FROM featured_products fp
@@ -920,7 +1002,9 @@ def get_featured_product(medicine_id: int) -> dict[str, Any]:
         cur.execute(
             """
             SELECT m.id AS medicine_id, m.name AS medicine_name,
-                   m.price AS base_unit_price, m.country, m.vendor, m.in_stock,
+                   m.price AS base_unit_price,
+                   vatan_selling_unit_price(m.price) AS selling_unit_price,
+                   m.country, m.vendor, m.in_stock,
                    fp.image_url, COALESCE(fp.sort_order, 0) AS sort_order,
                    fp.updated_at
             FROM featured_products fp
@@ -964,7 +1048,7 @@ def _carousel_product_response(row: dict[str, Any]) -> dict[str, Any]:
         "medicine_id": row["medicine_id"],
         "medicine_name": row["medicine_name"],
         "base_unit_price": row["base_unit_price"],
-        "selling_unit_price": calculate_selling_unit_price(row["base_unit_price"]),
+        "selling_unit_price": int(row.get("selling_unit_price") or calculate_selling_unit_price(row["base_unit_price"])),
         "country": row["country"] or None,
         "vendor": row["vendor"] or None,
         "in_stock": bool(row["in_stock"]),
@@ -991,7 +1075,9 @@ def list_product_carousels() -> dict[str, Any]:
         cur.execute(
             """
             SELECT pci.carousel_id, m.id AS medicine_id, m.name AS medicine_name,
-                   m.price AS base_unit_price, m.country, m.vendor, m.in_stock,
+                   m.price AS base_unit_price,
+                   vatan_selling_unit_price(m.price) AS selling_unit_price,
+                   m.country, m.vendor, m.in_stock,
                    m.image_url, pci.sort_order AS item_sort_order,
                    pci.updated_at AS item_updated_at
             FROM product_carousel_items pci
@@ -1160,6 +1246,43 @@ def delete_product_carousel_item(carousel_id: int, medicine_id: int) -> dict[str
     return {"carousel_id": carousel_id, "medicine_id": medicine_id, "deleted": True}
 
 
+def reorder_product_carousel_items(carousel_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    if set(payload) != {"medicine_ids"} or not isinstance(payload["medicine_ids"], list):
+        raise ContractError("VALIDATION_ERROR", "medicine_ids must be an array")
+    medicine_ids = payload["medicine_ids"]
+    if len(medicine_ids) > 100 or any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in medicine_ids
+    ) or len(set(medicine_ids)) != len(medicine_ids):
+        raise ContractError("VALIDATION_ERROR", "medicine_ids must contain unique positive integers")
+    with transaction() as cur:
+        cur.execute(
+            """
+            SELECT medicine_id FROM product_carousel_items
+            WHERE carousel_id = %s FOR UPDATE
+            """,
+            (carousel_id,),
+        )
+        existing = {int(row["medicine_id"]) for row in cur.fetchall()}
+        if existing != set(medicine_ids):
+            raise ContractError(
+                "CAROUSEL_CHANGED",
+                "Carousel contents changed; refresh before reordering",
+                http_status=409,
+            )
+        if medicine_ids:
+            cur.execute(
+                """
+                UPDATE product_carousel_items AS item
+                SET sort_order = ordered.position * 10,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM unnest(%s::bigint[]) WITH ORDINALITY AS ordered(medicine_id, position)
+                WHERE item.carousel_id = %s AND item.medicine_id = ordered.medicine_id
+                """,
+                (medicine_ids, carousel_id),
+            )
+    return {"carousel_id": carousel_id, "medicine_ids": medicine_ids}
+
+
 def list_syncs(query: dict[str, Any]) -> dict[str, Any]:
     limit = _limit(query)
     with transaction() as cur:
@@ -1217,6 +1340,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         tail = parts[parts.index("admin") + 1:] if "admin" in parts else []
         if method == "GET" and tail == ["dashboard"]:
             return success(dashboard_summary(query), request=current_request_id)
+        if method == "GET" and tail == ["pricing-settings"]:
+            return success(get_pricing_settings(), request=current_request_id)
+        if method == "PATCH" and tail == ["pricing-settings"]:
+            return success(
+                update_pricing_settings(_body(event), actor_id, current_request_id),
+                request=current_request_id,
+            )
         if method == "GET" and tail == ["catalog", "stats"]:
             return success(catalog_stats(), request=current_request_id)
         if method == "GET" and tail == ["medicines"]:
@@ -1275,6 +1405,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if len(tail) == 3 and tail[0] == "product-carousels" and tail[2] == "products" and method == "POST":
             carousel_id = _positive_int(tail[1], "carousel_id")
             return success(add_product_carousel_item(carousel_id, _body(event)), status_code=201, request=current_request_id)
+        if len(tail) == 4 and tail[0] == "product-carousels" and tail[2:] == ["products", "reorder"] and method == "PATCH":
+            carousel_id = _positive_int(tail[1], "carousel_id")
+            return success(reorder_product_carousel_items(carousel_id, _body(event)), request=current_request_id)
         if len(tail) == 4 and tail[0] == "product-carousels" and tail[2] == "products" and method in {"PATCH", "DELETE"}:
             carousel_id = _positive_int(tail[1], "carousel_id")
             medicine_id = _positive_int(tail[3], "medicine_id")

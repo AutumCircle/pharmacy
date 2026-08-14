@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { AdminCarouselProduct, AdminMedicine, AdminProductCarousel } from '@/lib/api-v1/admin-types';
 import {
   addCarouselProduct,
   createCarousel,
   removeCarousel,
   removeCarouselProduct,
+  reorderCarouselProducts,
   saveCarousel,
   saveCarouselProduct,
   searchCarouselCandidates,
@@ -29,20 +30,33 @@ function ProductPreview({ product }: { product: AdminCarouselProduct }) {
   );
 }
 
+type ActionResponse =
+  | { success: true; carousels: AdminProductCarousel[] }
+  | { success: false; error: string };
+
 export default function CarouselsClient({ initialCarousels }: { initialCarousels: AdminProductCarousel[] }) {
   const [carousels, setCarousels] = useState(initialCarousels);
+  const [selectedId, setSelectedId] = useState<number | null>(initialCarousels[0]?.id ?? null);
   const [newSlug, setNewSlug] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [queries, setQueries] = useState<Record<number, string>>({});
   const [results, setResults] = useState<Record<number, AdminMedicine[]>>({});
+  const [draggedMedicineId, setDraggedMedicineId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
-  const accept = (response: { success: true; carousels: AdminProductCarousel[] } | { success: false; error: string }, ok: string) => {
+  const selected = useMemo(
+    () => carousels.find((carousel) => carousel.id === selectedId) ?? carousels[0] ?? null,
+    [carousels, selectedId],
+  );
+
+  const accept = (response: ActionResponse, ok: string) => {
     if (response.success) {
       setCarousels(response.carousels);
       setMessage(ok);
-    } else setMessage(`Ошибка: ${response.error}`);
+    } else {
+      setMessage(`Ошибка: ${response.error}`);
+    }
   };
 
   const create = async (event: React.FormEvent) => {
@@ -51,7 +65,12 @@ export default function CarouselsClient({ initialCarousels }: { initialCarousels
     const nextOrder = carousels.reduce((max, item) => Math.max(max, item.sort_order), 0) + 10;
     const response = await createCarousel(newSlug, newTitle, nextOrder);
     accept(response, 'Карусель создана');
-    if (response.success) { setNewSlug(''); setNewTitle(''); }
+    if (response.success) {
+      setNewSlug('');
+      setNewTitle('');
+      const created = response.carousels.find((item) => item.slug === newSlug.trim());
+      if (created) setSelectedId(created.id);
+    }
     setBusy(false);
   };
 
@@ -85,15 +104,15 @@ export default function CarouselsClient({ initialCarousels }: { initialCarousels
     setBusy(true);
     const nextOrder = carousel.products.reduce((max, item) => Math.max(max, item.sort_order), 0) + 10;
     const response = await addCarouselProduct(carousel.id, medicineId, nextOrder);
+    // Keep the query and result list visible so several medicines can be added in one search.
     accept(response, 'Товар добавлен');
-    if (response.success) setResults((current) => ({ ...current, [carousel.id]: [] }));
     setBusy(false);
   };
 
-  const updateProduct = (carouselId: number, medicineId: number, field: 'image_url' | 'sort_order', value: string | number) => {
+  const updateProduct = (carouselId: number, medicineId: number, imageUrl: string) => {
     setCarousels((current) => current.map((carousel) => carousel.id !== carouselId ? carousel : {
       ...carousel,
-      products: carousel.products.map((product) => product.medicine_id === medicineId ? { ...product, [field]: value } : product),
+      products: carousel.products.map((product) => product.medicine_id === medicineId ? { ...product, image_url: imageUrl } : product),
     }));
   };
 
@@ -110,53 +129,129 @@ export default function CarouselsClient({ initialCarousels }: { initialCarousels
     setBusy(false);
   };
 
+  const dropProduct = async (carousel: AdminProductCarousel, targetMedicineId: number) => {
+    const sourceMedicineId = draggedMedicineId;
+    setDraggedMedicineId(null);
+    if (sourceMedicineId === null || sourceMedicineId === targetMedicineId || busy) return;
+    const previous = carousel.products;
+    const from = previous.findIndex((item) => item.medicine_id === sourceMedicineId);
+    const to = previous.findIndex((item) => item.medicine_id === targetMedicineId);
+    if (from < 0 || to < 0) return;
+    const reordered = [...previous];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    const orderedProducts = reordered.map((item, index) => ({ ...item, sort_order: (index + 1) * 10 }));
+    setCarousels((current) => current.map((item) => item.id === carousel.id ? { ...item, products: orderedProducts } : item));
+    setBusy(true);
+    const response = await reorderCarouselProducts(carousel.id, orderedProducts.map((item) => item.medicine_id));
+    if (response.success) {
+      setCarousels(response.carousels);
+      setMessage('Новый порядок товаров сохранён');
+    } else {
+      setCarousels((current) => current.map((item) => item.id === carousel.id ? { ...item, products: previous } : item));
+      setMessage(`Ошибка: ${response.error}`);
+    }
+    setBusy(false);
+  };
+
   return (
     <div>
       <h1 style={{ margin: '0 0 8px', fontSize: 28 }}>Карусели товаров</h1>
-      <p style={{ margin: '0 0 24px', color: '#666' }}>Создавайте секции главной страницы и управляйте их товарами. Изображение принадлежит лекарству и используется во всех каруселях.</p>
-
-      <form className="admin-carousel-create" onSubmit={create} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(220px, 2fr) auto', gap: 12, background: 'white', padding: 18, border: '1px solid #e8e8e8', borderRadius: 12, marginBottom: 20 }}>
-        <input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={80} value={newSlug} onChange={(event) => setNewSlug(event.target.value)} placeholder="slug: seasonal-offers" style={inputStyle} />
-        <input required minLength={2} maxLength={120} value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Название карусели" style={inputStyle} />
-        <button disabled={busy} type="submit">Создать</button>
-      </form>
+      <p style={{ margin: '0 0 24px', color: '#666' }}>
+        Выберите карусель слева. Справа показаны только её настройки и лекарства.
+      </p>
 
       {message && <p role="status" style={{ color: message.startsWith('Ошибка') ? '#b42318' : '#166534' }}>{message}</p>}
 
-      <div style={{ display: 'grid', gap: 22 }}>
-        {carousels.map((carousel) => (
-          <section key={carousel.id} style={{ background: 'white', border: '1px solid #e4e4e4', borderRadius: 14, padding: 20 }}>
-            <div className="admin-carousel-heading" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) 110px auto auto', gap: 12, alignItems: 'end', marginBottom: 18 }}>
-              <label><span style={{ display: 'block', fontSize: 12, marginBottom: 5 }}>Название · {carousel.slug}</span><input value={carousel.title} onChange={(event) => updateCarousel(carousel.id, 'title', event.target.value)} style={inputStyle} /></label>
-              <label><span style={{ display: 'block', fontSize: 12, marginBottom: 5 }}>Порядок</span><input type="number" min={0} max={100000} value={carousel.sort_order} onChange={(event) => updateCarousel(carousel.id, 'sort_order', Number(event.target.value))} style={inputStyle} /></label>
-              <label style={{ paddingBottom: 10 }}><input type="checkbox" checked={carousel.is_active} onChange={(event) => updateCarousel(carousel.id, 'is_active', event.target.checked)} /> Активна</label>
-              <div style={{ display: 'flex', gap: 8 }}><button disabled={busy} type="button" onClick={() => saveSection(carousel)}>Сохранить</button><button disabled={busy} type="button" onClick={() => deleteSection(carousel)} style={{ color: '#b42318' }}>Удалить</button></div>
-            </div>
+      <div className="admin-carousel-workspace">
+        <aside className="admin-carousel-list-panel">
+          <h2 style={{ fontSize: 18, marginTop: 0 }}>Список каруселей</h2>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {carousels.map((carousel) => (
+              <button
+                key={carousel.id}
+                type="button"
+                onClick={() => setSelectedId(carousel.id)}
+                className={`admin-carousel-list-button${selected?.id === carousel.id ? ' active' : ''}`}
+              >
+                <strong>{carousel.title}</strong>
+                <small>{carousel.products.length} товаров · {carousel.is_active ? 'активна' : 'отключена'}</small>
+              </button>
+            ))}
+            {carousels.length === 0 && <p style={{ color: '#777' }}>Каруселей пока нет.</p>}
+          </div>
 
-            <form onSubmit={(event) => search(event, carousel.id)} style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              <input value={queries[carousel.id] || ''} onChange={(event) => setQueries((current) => ({ ...current, [carousel.id]: event.target.value }))} placeholder="Найти лекарство по названию или medicine_id" style={inputStyle} />
-              <button disabled={busy} type="submit">Найти</button>
-            </form>
-            {(results[carousel.id] || []).map((medicine) => {
-              const duplicate = carousel.products.some((item) => item.medicine_id === medicine.medicine_id);
-              return <div key={medicine.medicine_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: 10, background: '#f7f7f7', marginBottom: 6, borderRadius: 8 }}><span><strong>{medicine.medicine_name}</strong><small style={{ display: 'block', color: '#777' }}>ID {medicine.medicine_id} · {medicine.selling_unit_price} с.</small></span><button type="button" disabled={busy || duplicate} onClick={() => addProduct(carousel, medicine.medicine_id)}>{duplicate ? 'Уже добавлен' : 'Добавить'}</button></div>;
-            })}
+          <form onSubmit={create} style={{ borderTop: '1px solid #eee', marginTop: 20, paddingTop: 18, display: 'grid', gap: 10 }}>
+            <strong>Новая карусель</strong>
+            <input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxLength={80} value={newSlug} onChange={(event) => setNewSlug(event.target.value)} placeholder="slug: seasonal-offers" style={inputStyle} />
+            <input required minLength={2} maxLength={120} value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Название карусели" style={inputStyle} />
+            <button disabled={busy} type="submit">Создать</button>
+          </form>
+        </aside>
 
-            <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
-              {carousel.products.map((product) => (
-                <article className="admin-carousel-product-row" key={product.medicine_id} style={{ display: 'grid', gridTemplateColumns: '90px minmax(180px, 1.3fr) minmax(220px, 2fr) 100px auto', gap: 14, alignItems: 'center', padding: 12, border: '1px solid #eee', borderRadius: 10 }}>
-                  <ProductPreview product={product} />
-                  <div><strong>{product.medicine_name}</strong><small style={{ display: 'block', color: '#777', marginTop: 4 }}>ID {product.medicine_id} · {product.in_stock ? 'в наличии' : 'нет в наличии'}</small></div>
-                  <label><span style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>HTTPS-ссылка на изображение</span><input type="url" value={product.image_url || ''} onChange={(event) => updateProduct(carousel.id, product.medicine_id, 'image_url', event.target.value)} placeholder="https://..." style={inputStyle} /></label>
-                  <label><span style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>Порядок</span><input type="number" min={0} max={100000} value={product.sort_order} onChange={(event) => updateProduct(carousel.id, product.medicine_id, 'sort_order', Number(event.target.value))} style={inputStyle} /></label>
-                  <div style={{ display: 'flex', gap: 7 }}><button disabled={busy} type="button" onClick={() => saveProduct(carousel.id, product)}>Сохранить</button><button disabled={busy} type="button" onClick={() => deleteProduct(carousel.id, product)} style={{ color: '#b42318' }}>Убрать</button></div>
-                </article>
-              ))}
-              {carousel.products.length === 0 && <div style={{ padding: 18, color: '#777', background: '#fafafa', borderRadius: 9 }}>В этой карусели пока нет товаров.</div>}
-            </div>
-          </section>
-        ))}
-        {carousels.length === 0 && <div style={{ background: 'white', padding: 30, borderRadius: 12, color: '#777' }}>Карусели ещё не созданы.</div>}
+        <div className="admin-carousel-detail-panel">
+          {!selected ? (
+            <div style={{ background: 'white', padding: 30, borderRadius: 12, color: '#777' }}>Выберите или создайте карусель.</div>
+          ) : (
+            <section style={{ display: 'grid', gap: 18 }}>
+              <div style={{ background: 'white', border: '1px solid #e4e4e4', borderRadius: 14, padding: 20 }}>
+                <div style={{ marginBottom: 15 }}>
+                  <small style={{ color: '#777' }}>Карусель · {selected.slug}</small>
+                  <h2 style={{ margin: '4px 0 0' }}>{selected.title}</h2>
+                </div>
+                <div className="admin-carousel-heading" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) 110px auto auto', gap: 12, alignItems: 'end' }}>
+                  <label><span style={{ display: 'block', fontSize: 12, marginBottom: 5 }}>Название карусели</span><input value={selected.title} onChange={(event) => updateCarousel(selected.id, 'title', event.target.value)} style={inputStyle} /></label>
+                  <label><span style={{ display: 'block', fontSize: 12, marginBottom: 5 }}>Порядок секции</span><input type="number" min={0} max={100000} value={selected.sort_order} onChange={(event) => updateCarousel(selected.id, 'sort_order', Number(event.target.value))} style={inputStyle} /></label>
+                  <label style={{ paddingBottom: 10 }}><input type="checkbox" checked={selected.is_active} onChange={(event) => updateCarousel(selected.id, 'is_active', event.target.checked)} /> Активна</label>
+                  <div style={{ display: 'flex', gap: 8 }}><button disabled={busy} type="button" onClick={() => saveSection(selected)}>Сохранить</button><button disabled={busy} type="button" onClick={() => deleteSection(selected)} style={{ color: '#b42318' }}>Удалить</button></div>
+                </div>
+              </div>
+
+              <div style={{ background: 'white', border: '1px solid #e4e4e4', borderRadius: 14, padding: 20 }}>
+                <h3 style={{ marginTop: 0 }}>Добавить лекарства</h3>
+                <form onSubmit={(event) => search(event, selected.id)} style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+                  <input value={queries[selected.id] || ''} onChange={(event) => setQueries((current) => ({ ...current, [selected.id]: event.target.value }))} placeholder="Название или артикул лекарства" style={inputStyle} />
+                  <button disabled={busy} type="submit">Найти</button>
+                </form>
+                {(results[selected.id] || []).map((medicine) => {
+                  const duplicate = selected.products.some((item) => item.medicine_id === medicine.medicine_id);
+                  return (
+                    <div key={medicine.medicine_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: 10, background: '#f7f7f7', marginBottom: 6, borderRadius: 8 }}>
+                      <span><strong>{medicine.medicine_name}</strong><small style={{ display: 'block', color: '#777' }}>Артикул {medicine.medicine_id} · {medicine.selling_unit_price} с.</small></span>
+                      <button type="button" disabled={busy || duplicate} onClick={() => addProduct(selected, medicine.medicine_id)}>{duplicate ? 'Добавлен' : 'Добавить'}</button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ background: 'white', border: '1px solid #e4e4e4', borderRadius: 14, padding: 20 }}>
+                <h3 style={{ margin: '0 0 5px' }}>Товары в карусели «{selected.title}»</h3>
+                <p style={{ color: '#777', marginTop: 0 }}>Перетащите строку за значок ↕, чтобы изменить порядок.</p>
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {selected.products.map((product, index) => (
+                    <article
+                      className="admin-carousel-product-row"
+                      key={product.medicine_id}
+                      draggable={!busy}
+                      onDragStart={() => setDraggedMedicineId(product.medicine_id)}
+                      onDragEnd={() => setDraggedMedicineId(null)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => void dropProduct(selected, product.medicine_id)}
+                      style={{ display: 'grid', gridTemplateColumns: '40px 90px minmax(180px, 1.3fr) minmax(220px, 2fr) auto', gap: 14, alignItems: 'center', padding: 12, border: draggedMedicineId === product.medicine_id ? '2px solid var(--primary)' : '1px solid #eee', borderRadius: 10 }}
+                    >
+                      <div title="Перетащить" style={{ cursor: 'grab', fontSize: 24, color: '#888', textAlign: 'center' }}>↕<small style={{ display: 'block', fontSize: 10 }}>{index + 1}</small></div>
+                      <ProductPreview product={product} />
+                      <div><strong>{product.medicine_name}</strong><small style={{ display: 'block', color: '#777', marginTop: 4 }}>Артикул {product.medicine_id} · {product.in_stock ? 'в наличии' : 'нет в наличии'}</small></div>
+                      <label><span style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>HTTPS-ссылка на изображение</span><input type="url" value={product.image_url || ''} onChange={(event) => updateProduct(selected.id, product.medicine_id, event.target.value)} placeholder="https://..." style={inputStyle} /></label>
+                      <div style={{ display: 'flex', gap: 7 }}><button disabled={busy} type="button" onClick={() => saveProduct(selected.id, product)}>Сохранить</button><button disabled={busy} type="button" onClick={() => deleteProduct(selected.id, product)} style={{ color: '#b42318' }}>Убрать</button></div>
+                    </article>
+                  ))}
+                  {selected.products.length === 0 && <div style={{ padding: 18, color: '#777', background: '#fafafa', borderRadius: 9 }}>В этой карусели пока нет товаров.</div>}
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

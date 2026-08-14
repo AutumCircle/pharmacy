@@ -15,6 +15,7 @@ import type {
   AdminNumberedListResponse,
   AdminOrderDetail,
   AdminOrderSummary,
+  AdminPricingSettings,
   AdminProductCarousel,
   CatalogSyncSummary,
 } from './admin-types';
@@ -217,6 +218,17 @@ export function getAdminDashboardSummary(days: 7 | 30 | 90): Promise<ApiSuccessR
   return request(`/v1/admin/dashboard${queryString({ days })}`);
 }
 
+export function getAdminPricingSettings(): Promise<ApiSuccessResponse<AdminPricingSettings>> {
+  return request('/v1/admin/pricing-settings');
+}
+
+export function updateAdminPricingSettings(body: {
+  markup_enabled: boolean;
+  markup_percent: number;
+}): Promise<ApiSuccessResponse<AdminPricingSettings>> {
+  return request('/v1/admin/pricing-settings', { method: 'PATCH', body });
+}
+
 export function listAdminMedicines(values: {
   availability?: 'all' | 'in_stock' | 'out_of_stock';
   page?: number;
@@ -327,5 +339,12 @@ export function deleteAdminProductCarouselItem(carouselId: number, medicineId: n
   return request<ApiSuccessResponse<{ carousel_id: number; medicine_id: number; deleted: boolean }>>(
     `/v1/admin/product-carousels/${carouselId}/products/${medicineId}`,
     { method: 'DELETE' },
+  );
+}
+
+export function reorderAdminProductCarouselItems(carouselId: number, medicineIds: number[]) {
+  return request<ApiSuccessResponse<{ carousel_id: number; medicine_ids: number[] }>>(
+    `/v1/admin/product-carousels/${carouselId}/products/reorder`,
+    { method: 'PATCH', body: { medicine_ids: medicineIds } },
   );
 }

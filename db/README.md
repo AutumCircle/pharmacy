@@ -9,6 +9,10 @@ by Lambda. It contains no table rows, credentials, or executable DDL.
   2026-08-06.
 - `migrations/0002_catalog_sync_v1.sql` was applied to production on
   2026-08-06. Backup schema: `vatan_pre_sync_v1_20260806`.
+- `migrations/0007_pricing_settings.sql` adds one singleton pricing row and a
+  stable SQL price function. It does not rewrite medicines or historical order
+  snapshots. Apply it before deploying the Public/Admin Lambda packages that
+  reference `vatan_selling_unit_price`.
 - `preflight/0002_catalog_sync_v1_preflight.sql` returns one JSON report with
   metadata and counts only. It explicitly starts a read-only transaction.
 - `ROLLBACK_0002.md` explains recovery boundaries. There is intentionally no

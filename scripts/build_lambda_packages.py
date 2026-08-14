@@ -92,6 +92,19 @@ def build() -> Path:
         "sha256": hashlib.sha256(migration_payload).hexdigest(),
         "size_bytes": len(migration_payload),
     })
+    pricing_migration_destination = OUTPUT / "migration-0007-pricing-once.zip"
+    pricing_migration_source = ROOT / "backend" / "operations" / "pricing_migration_once" / "lambda_function.py"
+    _write_deterministic_zip(
+        pricing_migration_destination,
+        [("lambda_function.py", pricing_migration_source)],
+    )
+    pricing_migration_payload = pricing_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": pricing_migration_destination.name,
+        "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(pricing_migration_payload).hexdigest(),
+        "size_bytes": len(pricing_migration_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

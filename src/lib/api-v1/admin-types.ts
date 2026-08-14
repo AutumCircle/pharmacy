@@ -38,6 +38,13 @@ export type AdminDashboardSummary = {
   currency: 'TJS';
 };
 
+export type AdminPricingSettings = {
+  markup_enabled: boolean;
+  markup_percent: number | string;
+  updated_at: string;
+  updated_by: string | null;
+};
+
 export type AdminMedicine = {
   medicine_id: number;
   medicine_name: string;

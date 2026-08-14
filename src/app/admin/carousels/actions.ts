@@ -9,6 +9,7 @@ import {
   deleteAdminProductCarouselItem,
   listAdminMedicines,
   listAdminProductCarousels,
+  reorderAdminProductCarouselItems,
   updateAdminProductCarousel,
   updateAdminProductCarouselItem,
 } from '@/lib/api-v1/admin-server';
@@ -97,6 +98,16 @@ export async function removeCarouselProduct(carouselId: number, medicineId: numb
   try {
     await requireAdminSession();
     await deleteAdminProductCarouselItem(carouselId, medicineId);
+    return { success: true as const, carousels: await refreshed() };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function reorderCarouselProducts(carouselId: number, medicineIds: number[]) {
+  try {
+    await requireAdminSession();
+    await reorderAdminProductCarouselItems(carouselId, medicineIds);
     return { success: true as const, carousels: await refreshed() };
   } catch (error) {
     return failure(error);

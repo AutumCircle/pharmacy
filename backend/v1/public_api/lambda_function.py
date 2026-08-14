@@ -90,7 +90,7 @@ def _medicine_response(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "medicine_id": row["id"],
         "medicine_name": row["name"],
-        "selling_unit_price": calculate_selling_unit_price(row["price"]),
+        "selling_unit_price": int(row.get("selling_unit_price") or calculate_selling_unit_price(row["price"])),
         "currency": "TJS",
         "country": row["country"] or None,
         "vendor": row["vendor"] or None,
@@ -136,6 +136,7 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
             ranked AS MATERIALIZED (
                 SELECT m.id, m.name, m.price, m.country, m.vendor, m.in_stock,
                        m.updated_at, m.image_url,
+                       vatan_selling_unit_price(m.price) AS selling_unit_price,
                        ROUND((
                            CASE
                                WHEN lower(m.name) = input.q THEN 10000
@@ -174,7 +175,8 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
                       )
                   )
             )
-            SELECT id, name, price, country, vendor, in_stock, updated_at, image_url, relevance
+            SELECT id, name, price, country, vendor, in_stock, updated_at, image_url,
+                   selling_unit_price, relevance
             FROM ranked
             ORDER BY relevance DESC, name ASC, id ASC
             LIMIT %s
@@ -208,7 +210,8 @@ def get_medicine(medicine_id: str) -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(
             """
-            SELECT id, name, price, country, vendor, in_stock, updated_at, image_url
+            SELECT id, name, price, country, vendor, in_stock, updated_at, image_url,
+                   vatan_selling_unit_price(price) AS selling_unit_price
             FROM medicines
             WHERE id = %s AND in_stock IS TRUE
             """,
@@ -240,6 +243,7 @@ def list_featured_products() -> dict[str, Any]:
         cur.execute(
             """
             SELECT m.id, m.name, m.price, m.country, m.vendor, m.in_stock, m.updated_at,
+                   vatan_selling_unit_price(m.price) AS selling_unit_price,
                    fp.image_url, COALESCE(fp.sort_order, 0) AS sort_order
             FROM featured_products fp
             JOIN medicines m ON m.id = fp.medicine_id
@@ -278,10 +282,11 @@ def list_product_carousels() -> dict[str, Any]:
             """
             SELECT ranked.carousel_id, ranked.id, ranked.name, ranked.price,
                    ranked.country, ranked.vendor, ranked.in_stock, ranked.updated_at,
-                   ranked.image_url, ranked.item_sort_order
+                   ranked.image_url, ranked.selling_unit_price, ranked.item_sort_order
             FROM (
                 SELECT pci.carousel_id, m.id, m.name, m.price, m.country, m.vendor,
                        m.in_stock, m.updated_at, m.image_url,
+                       vatan_selling_unit_price(m.price) AS selling_unit_price,
                        pci.sort_order AS item_sort_order,
                        ROW_NUMBER() OVER (
                            PARTITION BY pci.carousel_id
@@ -328,7 +333,8 @@ def resolve_medicines(payload: dict[str, Any]) -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(
             """
-            SELECT id, name, price, country, vendor, in_stock, updated_at, image_url
+            SELECT id, name, price, country, vendor, in_stock, updated_at, image_url,
+                   vatan_selling_unit_price(price) AS selling_unit_price
             FROM medicines
             WHERE id = ANY(%s)
             ORDER BY id ASC
@@ -396,7 +402,8 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
         medicine_ids = [item["medicine_id"] for item in request["items"]]
         cur.execute(
             """
-            SELECT id, name, price, in_stock
+            SELECT id, name, price, in_stock,
+                   vatan_selling_unit_price(price) AS selling_unit_price
             FROM medicines
             WHERE id = ANY(%s)
             FOR UPDATE
@@ -415,7 +422,7 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
         subtotal = 0
         for item in request["items"]:
             medicine = medicines[item["medicine_id"]]
-            selling_price = calculate_selling_unit_price(medicine["price"])
+            selling_price = int(medicine["selling_unit_price"])
             line_total = selling_price * item["quantity"]
             subtotal += line_total
             order_items.append({
@@ -551,7 +558,8 @@ def category_medicines(slug: str, query: dict[str, Any]) -> dict[str, Any]:
             raise ContractError("CATEGORY_NOT_FOUND", "Category was not found", http_status=404)
         cur.execute(
             """
-            SELECT m.id, m.name, m.price, m.country, m.vendor, m.in_stock, m.updated_at, m.image_url
+            SELECT m.id, m.name, m.price, m.country, m.vendor, m.in_stock, m.updated_at, m.image_url,
+                   vatan_selling_unit_price(m.price) AS selling_unit_price
             FROM category_medicines cm
             JOIN medicines m ON m.id = cm.medicine_id
             WHERE cm.category_id = %s AND m.in_stock IS TRUE {cursor_filter}
