@@ -40,8 +40,19 @@ export default async function AdminMedicinesPage({ searchParams }: {
 
   return (
     <div>
-      <h1 style={{ fontSize: 24, marginBottom: 8 }}>Каталог лекарств</h1>
-      <p style={{ color: '#666' }}>Найдено: {response.page.total_items.toLocaleString('ru-RU')}</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div>
+          <h1 style={{ fontSize: 24, marginBottom: 8 }}>Каталог лекарств</h1>
+          <p style={{ color: '#666', margin: 0 }}>Найдено: {response.page.total_items.toLocaleString('ru-RU')}</p>
+        </div>
+        <a
+          href="/api/admin/medicines/out-of-stock-export"
+          className="admin-export-button"
+          download
+        >
+          Скачать отсутствующие (.xlsx)
+        </a>
+      </div>
 
       <form method="get" className="admin-search-section" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: 10 }}>
         <input type="hidden" name="availability" value={availability} />

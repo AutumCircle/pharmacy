@@ -58,6 +58,13 @@ export type AdminMedicine = {
   image_url: string | null;
 };
 
+export type AdminMedicineExport = {
+  filename: string;
+  content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  content_base64: string;
+  row_count: number;
+};
+
 export type AdminFeaturedProduct = {
   medicine_id: number;
   medicine_name: string;

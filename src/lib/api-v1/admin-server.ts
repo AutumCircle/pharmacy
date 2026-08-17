@@ -10,6 +10,7 @@ import type {
   AdminDuplicateGroup,
   AdminDashboardSummary,
   AdminMedicine,
+  AdminMedicineExport,
   AdminFeaturedProduct,
   AdminHomepageBanner,
   AdminNumberedListResponse,
@@ -29,6 +30,7 @@ const MUTATION_TIMEOUT_MS = 8_000;
 type AdminRequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
+  timeoutMs?: number;
 };
 
 function configuration() {
@@ -83,7 +85,10 @@ async function request<T>(path: string, options: AdminRequestOptions = {}): Prom
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), isRead ? READ_TIMEOUT_MS : MUTATION_TIMEOUT_MS);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      options.timeoutMs ?? (isRead ? READ_TIMEOUT_MS : MUTATION_TIMEOUT_MS),
+    );
     try {
       const response = await fetch(`${baseUrl}${path}`, {
         method,
@@ -245,6 +250,10 @@ export function listAdminMedicines(values: {
     country: values.country,
     vendor: values.vendor,
   })}`);
+}
+
+export function exportAdminOutOfStockMedicines(): Promise<ApiSuccessResponse<AdminMedicineExport>> {
+  return request('/v1/admin/medicines/out-of-stock-export', { timeoutMs: 30_000 });
 }
 
 export function listAdminDuplicateGroups(page = 1, limit = 50): Promise<AdminNumberedListResponse<AdminDuplicateGroup>> {

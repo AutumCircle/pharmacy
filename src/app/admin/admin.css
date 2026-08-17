@@ -492,3 +492,20 @@
 @media (max-width: 480px) {
   .admin-stats-bar { grid-template-columns: 1fr; }
 }
+.admin-export-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  background: #ed1c24;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 4px 12px rgba(237, 28, 36, 0.2);
+}
+
+.admin-export-button:hover {
+  background: #c9141b;
+}

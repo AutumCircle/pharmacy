@@ -6,7 +6,7 @@ import base64
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -21,10 +21,12 @@ from backend.v1.shared.contract import (
 from backend.v1.shared.authorization import require_admin_identity
 from backend.v1.shared.database import transaction
 from backend.v1.shared.responses import error_response, request_id, success, success_document
+from backend.v1.shared.xlsx_export import build_out_of_stock_workbook
 
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+MAX_EXPORT_ROWS = 25_000
 DELETABLE_ORDER_STATUSES = frozenset({"pending", "cancelled"})
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -374,6 +376,37 @@ def list_medicines(query: dict[str, Any]) -> dict[str, Any]:
             "total_items": total_items,
             "total_pages": total_pages,
         },
+    }
+
+
+def export_out_of_stock_medicines() -> dict[str, Any]:
+    with transaction() as cur:
+        cur.execute("SELECT COUNT(*) AS count FROM medicines WHERE in_stock IS NOT TRUE")
+        row_count = int(cur.fetchone()["count"])
+        if row_count > MAX_EXPORT_ROWS:
+            raise ContractError(
+                "EXPORT_TOO_LARGE",
+                f"Export contains more than {MAX_EXPORT_ROWS} medicines",
+                http_status=413,
+            )
+        cur.execute(
+            """
+            SELECT id AS medicine_id, name AS medicine_name, price AS base_unit_price,
+                   vatan_selling_unit_price(price) AS selling_unit_price,
+                   vendor, country, updated_at
+            FROM medicines
+            WHERE in_stock IS NOT TRUE
+            ORDER BY updated_at DESC NULLS LAST, id ASC
+            """
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    generated_at = datetime.now(timezone.utc)
+    workbook = build_out_of_stock_workbook(rows, generated_at)
+    return {
+        "filename": f"vatan-out-of-stock-{generated_at:%Y-%m-%d}.xlsx",
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "content_base64": base64.b64encode(workbook).decode("ascii"),
+        "row_count": row_count,
     }
 
 
@@ -1351,6 +1384,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(catalog_stats(), request=current_request_id)
         if method == "GET" and tail == ["medicines"]:
             return success_document(list_medicines(query), request=current_request_id)
+        if method == "GET" and tail == ["medicines", "out-of-stock-export"]:
+            return success(export_out_of_stock_medicines(), request=current_request_id)
         if method == "GET" and tail == ["medicine-duplicates"]:
             return success_document(list_medicine_duplicates(query), request=current_request_id)
         if method == "GET" and path.endswith("/admin/orders"):
