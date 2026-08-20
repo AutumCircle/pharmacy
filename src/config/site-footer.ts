@@ -1,16 +1,20 @@
 export const SITE_FOOTER = {
   pharmacyName: 'Аптека Ватан',
   description: 'Лекарства и товары для здоровья в одном месте.',
-  address: 'г. Душанбе, проспект Рудаки, 00',
-  phoneLabel: '+992 00 000 00 00',
-  phoneHref: 'tel:+992000000000',
-  email: 'info@vatan.tj',
-  workingDays: 'Понедельник–воскресенье',
-  workingHours: '08:00–22:00',
+  highlights: [
+    'Большой ассортимент лекарств',
+    'БАДы и дермокосметика',
+  ],
+  address: 'г. Душанбе, ул. Айни, 29',
+  phones: [
+    { label: '+992 44 625 00 77', href: 'tel:+992446250077' },
+    { label: '+992 71 050 05 00', href: 'tel:+992710500500' },
+    { label: '+992 71 550 05 00', href: 'tel:+992715500500' },
+  ],
+  workingDays: 'Ежедневно',
+  workingHours: '07:00–01:00',
   socialLinks: [
-    { label: 'Instagram', href: 'https://instagram.com/' },
-    { label: 'Facebook', href: 'https://facebook.com/' },
-    { label: 'Telegram', href: 'https://t.me/' },
+    { label: 'Instagram', href: 'https://www.instagram.com/aptekavatan/' },
   ],
   usefulLinks: [
     { label: 'Главная', href: '/' },

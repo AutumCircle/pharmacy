@@ -43,7 +43,7 @@ async function SearchResults({ q, cursor, page }: { q: string; cursor?: string; 
               ← Предыдущая
             </Link>
           ) : <span />}
-          <span aria-current="page" style={{ color: '#666' }}>Страница {page}</span>
+          <span aria-current="page" aria-label={`Страница ${page}`} className="pagination-page-number">{page}</span>
           {response.page.has_more && response.page.next_cursor ? (
             <Link href={`/?q=${encodeURIComponent(q)}&cursor=${encodeURIComponent(response.page.next_cursor)}&page=${page + 1}`}>
               Следующая →

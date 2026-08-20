@@ -12,13 +12,19 @@ export default function Footer() {
             <Image src="/brand/vatan-apteka-name.png" alt="Аптека Ватан" width={145} height={50} />
           </Link>
           <p>{SITE_FOOTER.description}</p>
+          <ul className="footer-highlights">
+            {SITE_FOOTER.highlights.map((item) => <li key={item}>{item}</li>)}
+          </ul>
         </div>
 
         <div className="footer-column">
           <h2>Контакты</h2>
-          <p>{SITE_FOOTER.address}</p>
-          <a className="footer-contact-link" href={SITE_FOOTER.phoneHref}>{SITE_FOOTER.phoneLabel}</a>
-          <a className="footer-contact-link" href={`mailto:${SITE_FOOTER.email}`}>{SITE_FOOTER.email}</a>
+          <p className="footer-address">{SITE_FOOTER.address}</p>
+          <div className="footer-phone-list">
+            {SITE_FOOTER.phones.map((phone) => (
+              <a className="footer-contact-link" href={phone.href} key={phone.href}>{phone.label}</a>
+            ))}
+          </div>
         </div>
 
         <div className="footer-column">
@@ -36,7 +42,14 @@ export default function Footer() {
           <h2>Мы в социальных сетях</h2>
           <div className="footer-socials">
             {SITE_FOOTER.socialLinks.map((item) => (
-              <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer">{item.label}</a>
+              <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer" aria-label="Instagram аптеки Ватан">
+                <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="5" />
+                  <circle cx="12" cy="12" r="4" />
+                  <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+                </svg>
+                {item.label}
+              </a>
             ))}
           </div>
         </div>

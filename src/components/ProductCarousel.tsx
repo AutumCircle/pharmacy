@@ -47,36 +47,42 @@ export default function ProductCarousel({ carousel }: { carousel: ProductCarouse
     <section className="featured-products-section" aria-labelledby={titleId}>
       <div className="featured-products-heading">
         <h2 id={titleId} className="section-title">{carousel.title}</h2>
-        <div className="featured-products-controls">
-          <button type="button" disabled={boundaries.atStart} onClick={() => move(-1)} aria-label={`Предыдущие товары: ${carousel.title}`}>←</button>
-          <button type="button" disabled={boundaries.atEnd} onClick={() => move(1)} aria-label={`Следующие товары: ${carousel.title}`}>→</button>
-        </div>
       </div>
-      <div
-        className="featured-products-track"
-        ref={trackRef}
-        tabIndex={0}
-        role="region"
-        aria-label={`Карусель: ${carousel.title}`}
-        onKeyDown={(event) => {
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-            event.preventDefault();
-            move(event.key === 'ArrowLeft' ? -1 : 1);
-          } else if (event.key === 'Home') {
-            event.preventDefault();
-            trackRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
-          } else if (event.key === 'End' && trackRef.current) {
-            event.preventDefault();
-            const track = trackRef.current;
-            track.scrollTo({ left: track.scrollWidth - track.clientWidth, behavior: 'smooth' });
-          }
-        }}
-      >
-        {carousel.products.map((product) => (
-          <div className="featured-product-slide" key={product.medicine_id}>
-            <ProductCard item={product} imageUrl={product.image_url} />
-          </div>
-        ))}
+      <div className="featured-products-viewport">
+        <div className="featured-products-controls">
+          <button className="featured-products-control featured-products-control--previous" type="button" disabled={boundaries.atStart} onClick={() => move(-1)} aria-label={`Предыдущие товары: ${carousel.title}`}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="m15 18-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          <button className="featured-products-control featured-products-control--next" type="button" disabled={boundaries.atEnd} onClick={() => move(1)} aria-label={`Следующие товары: ${carousel.title}`}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="m9 18 6-6-6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+        </div>
+        <div
+          className="featured-products-track"
+          ref={trackRef}
+          tabIndex={0}
+          role="region"
+          aria-label={`Карусель: ${carousel.title}`}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              event.preventDefault();
+              move(event.key === 'ArrowLeft' ? -1 : 1);
+            } else if (event.key === 'Home') {
+              event.preventDefault();
+              trackRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+            } else if (event.key === 'End' && trackRef.current) {
+              event.preventDefault();
+              const track = trackRef.current;
+              track.scrollTo({ left: track.scrollWidth - track.clientWidth, behavior: 'smooth' });
+            }
+          }}
+        >
+          {carousel.products.map((product) => (
+            <div className="featured-product-slide" key={product.medicine_id}>
+              <ProductCard item={product} imageUrl={product.image_url} />
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
