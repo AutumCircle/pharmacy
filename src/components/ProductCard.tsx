@@ -54,18 +54,15 @@ export default function ProductCard({
         filter: inStock ? 'none' : 'grayscale(100%)'
       }}
     >
-      <div className="card-top-icons" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+      <div className="card-media">
         <button type="button" aria-label={favorite ? 'Удалить из избранного' : 'Добавить в избранное'} className={`card-icon-btn ${favorite ? 'active-fav' : ''}`} onClick={(e) => { e.preventDefault(); toggleFavorite(); }} style={{ color: favorite ? 'var(--primary)' : '#ccc' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill={favorite ? 'var(--primary)' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
         </button>
-      </div>
-      
-      <a href={`/medicine/${item.medicine_id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-        <div className="card-image" style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px', height: '120px' }}>
+        <a href={`/medicine/${item.medicine_id}`} className="card-image" aria-label={`Открыть ${item.medicine_name}`}>
           {resolvedImageUrl && failedImageUrl !== resolvedImageUrl ? (
             // Admin API accepts only HTTPS image URLs.
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={resolvedImageUrl} alt={item.medicine_name} referrerPolicy="no-referrer" onError={() => setFailedImageUrl(resolvedImageUrl)} />
+            <img src={resolvedImageUrl} alt={item.medicine_name} referrerPolicy="no-referrer" loading="lazy" decoding="async" width="600" height="600" onError={() => setFailedImageUrl(resolvedImageUrl)} />
           ) : (
             <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#eee" strokeWidth="1.5">
               <rect x="7" y="7" width="10" height="14" rx="2" ry="2"></rect>
@@ -75,8 +72,10 @@ export default function ProductCard({
               <path d="M9 3h6v4H9z"></path>
             </svg>
           )}
-        </div>
-        
+        </a>
+      </div>
+
+      <a href={`/medicine/${item.medicine_id}`} className="card-details-link">
         <div>
           <h3 className="card-name" title={item.medicine_name} style={{ fontSize: '14px', fontWeight: 500, lineHeight: 1.4, color: '#333', margin: 0 }}>
             {item.medicine_name}

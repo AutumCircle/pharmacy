@@ -275,6 +275,14 @@ export function updateAdminHomepageBanner(
   return request(`/v1/admin/homepage-banners/${slot}`, { method: 'PATCH', body });
 }
 
+export function uploadAdminMediaImage(body: {
+  content_type: 'image/jpeg' | 'image/png' | 'image/webp';
+  data_base64: string;
+  scope: 'banners' | 'products';
+}): Promise<ApiSuccessResponse<{ url: string; key: string; size_bytes: number }>> {
+  return request('/v1/admin/media/images', { method: 'POST', body, timeoutMs: 20_000 });
+}
+
 export function listAdminFeaturedProducts(): Promise<AdminApiListResponse<AdminFeaturedProduct>> {
   return request('/v1/admin/featured-products');
 }

@@ -17,6 +17,23 @@ const inputStyle: React.CSSProperties = {
   width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, boxSizing: 'border-box',
 };
 
+async function optimizeProductImage(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1200 / bitmap.width, 1200 / bitmap.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Браузер не смог обработать изображение');
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.86));
+  if (!blob || blob.size > 3 * 1024 * 1024) throw new Error('Не удалось подготовить изображение размером до 3 МБ');
+  return new File([blob], 'product.webp', { type: 'image/webp' });
+}
+
 function ProductPreview({ product }: { product: AdminCarouselProduct }) {
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
   return (
@@ -24,7 +41,7 @@ function ProductPreview({ product }: { product: AdminCarouselProduct }) {
       {product.image_url && failedImageUrl !== product.image_url ? (
         // URLs are validated by the admin Lambda and are not privileged uploads.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={product.image_url} alt={product.medicine_name} onError={() => setFailedImageUrl(product.image_url)} referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        <img src={product.image_url} alt={product.medicine_name} onError={() => setFailedImageUrl(product.image_url)} referrerPolicy="no-referrer" loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
       ) : <span style={{ color: '#888', fontSize: 11, textAlign: 'center' }}>Нет изображения</span>}
     </div>
   );
@@ -120,6 +137,29 @@ export default function CarouselsClient({ initialCarousels }: { initialCarousels
     setBusy(true);
     accept(await saveCarouselProduct(carouselId, product.medicine_id, product.sort_order, product.image_url || ''), 'Товар сохранён');
     setBusy(false);
+  };
+
+  const uploadProductImage = async (carouselId: number, product: AdminCarouselProduct, file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setMessage('Подготовка изображения...');
+    try {
+      const optimized = await optimizeProductImage(file);
+      const form = new FormData();
+      form.set('file', optimized);
+      form.set('scope', 'products');
+      const upload = await fetch('/api/admin/media/images', { method: 'POST', body: form });
+      const payload = await upload.json() as { url?: string; error?: string };
+      if (!upload.ok || !payload.url) throw new Error(payload.error || 'Не удалось загрузить изображение');
+      accept(
+        await saveCarouselProduct(carouselId, product.medicine_id, product.sort_order, payload.url),
+        'Изображение загружено и товар сохранён',
+      );
+    } catch (error) {
+      setMessage(`Ошибка: ${error instanceof Error ? error.message : 'не удалось загрузить изображение'}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const deleteProduct = async (carouselId: number, product: AdminCarouselProduct) => {
@@ -242,7 +282,10 @@ export default function CarouselsClient({ initialCarousels }: { initialCarousels
                       <div title="Перетащить" style={{ cursor: 'grab', fontSize: 24, color: '#888', textAlign: 'center' }}>↕<small style={{ display: 'block', fontSize: 10 }}>{index + 1}</small></div>
                       <ProductPreview product={product} />
                       <div><strong>{product.medicine_name}</strong><small style={{ display: 'block', color: '#777', marginTop: 4 }}>Артикул {product.medicine_id} · {product.in_stock ? 'в наличии' : 'нет в наличии'}</small></div>
-                      <label><span style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>HTTPS-ссылка на изображение</span><input type="url" value={product.image_url || ''} onChange={(event) => updateProduct(selected.id, product.medicine_id, event.target.value)} placeholder="https://..." style={inputStyle} /></label>
+                      <div>
+                        <label><span style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>HTTPS-ссылка на изображение</span><input type="url" value={product.image_url || ''} onChange={(event) => updateProduct(selected.id, product.medicine_id, event.target.value)} placeholder="https://..." style={inputStyle} /></label>
+                        <label style={{ display: 'block', marginTop: 7 }}><span style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>Или загрузить с компьютера</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => void uploadProductImage(selected.id, product, event.target.files?.[0])} style={{ ...inputStyle, padding: 6, fontSize: 12 }} /></label>
+                      </div>
                       <div style={{ display: 'flex', gap: 7 }}><button disabled={busy} type="button" onClick={() => saveProduct(selected.id, product)}>Сохранить</button><button disabled={busy} type="button" onClick={() => deleteProduct(selected.id, product)} style={{ color: '#b42318' }}>Убрать</button></div>
                     </article>
                   ))}

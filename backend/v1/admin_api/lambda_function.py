@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import quote
+from uuid import uuid4
 
+import boto3
 import psycopg2
 
 from backend.v1.shared.contract import (
@@ -32,6 +37,61 @@ SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
+MAX_MEDIA_IMAGE_BYTES = 3 * 1024 * 1024
+MEDIA_IMAGE_TYPES = {
+    "image/jpeg": ("jpg", lambda value: value.startswith(b"\xff\xd8\xff")),
+    "image/png": ("png", lambda value: value.startswith(b"\x89PNG\r\n\x1a\n")),
+    "image/webp": ("webp", lambda value: len(value) >= 12 and value[:4] == b"RIFF" and value[8:12] == b"WEBP"),
+}
+_s3 = None
+
+
+def _s3_client():
+    global _s3
+    if _s3 is None:
+        _s3 = boto3.client("s3")
+    return _s3
+
+
+def upload_media_image(payload: dict[str, Any], actor_id: str, current_request_id: str) -> dict[str, Any]:
+    bucket = os.environ.get("MEDIA_BUCKET", "").strip()
+    public_base_url = os.environ.get("MEDIA_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if not bucket or not public_base_url.startswith("https://"):
+        raise ContractError("MEDIA_CONFIGURATION_ERROR", "Image storage is not configured", http_status=500)
+    if set(payload) != {"content_type", "data_base64", "scope"}:
+        raise ContractError("VALIDATION_ERROR", "content_type, data_base64 and scope are required")
+    content_type = payload.get("content_type")
+    scope = payload.get("scope")
+    encoded = payload.get("data_base64")
+    if content_type not in MEDIA_IMAGE_TYPES or scope not in {"banners", "products"} or not isinstance(encoded, str):
+        raise ContractError("VALIDATION_ERROR", "Only JPEG, PNG or WebP banner/product images are supported")
+    try:
+        content = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ContractError("VALIDATION_ERROR", "Image data is invalid") from exc
+    extension, signature_matches = MEDIA_IMAGE_TYPES[content_type]
+    if not content or len(content) > MAX_MEDIA_IMAGE_BYTES or not signature_matches(content):
+        raise ContractError("VALIDATION_ERROR", "Image is invalid or larger than 3 MB")
+    now = datetime.now(timezone.utc)
+    key = f"images/{scope}/{now:%Y/%m}/{uuid4().hex}.{extension}"
+    _s3_client().put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=content,
+        ContentType=content_type,
+        CacheControl="public, max-age=31536000, immutable",
+    )
+    with transaction() as cur:
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="media.image.uploaded",
+            resource_type="media_image",
+            resource_id=key,
+            request=current_request_id,
+            details={"scope": scope, "content_type": content_type, "size_bytes": len(content)},
+        )
+    return {"url": f"{public_base_url}/{quote(key)}", "key": key, "size_bytes": len(content)}
 
 # Formatting-only normalization shared by all duplicate queries. This avoids
 # unsafe fuzzy matching while treating whitespace and punctuation spacing alike.
@@ -1419,6 +1479,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(list_syncs(query), request=current_request_id)
         if method == "GET" and tail == ["homepage-banners"]:
             return success_document(list_homepage_banners(), request=current_request_id)
+        if method == "POST" and tail == ["media", "images"]:
+            return success(
+                upload_media_image(_body(event), actor_id, current_request_id),
+                status_code=201,
+                request=current_request_id,
+            )
         if method == "PATCH" and len(tail) == 2 and tail[0] == "homepage-banners":
             return success(update_homepage_banner(tail[1], _body(event)), request=current_request_id)
         if method == "GET" and tail == ["featured-products"]:
