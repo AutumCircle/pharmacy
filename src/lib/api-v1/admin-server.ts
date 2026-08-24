@@ -5,6 +5,8 @@ import type {
   AdminApiListResponse,
   AdminCatalogStats,
   AdminCategory,
+  AdminCategoryMedicineBulkAddResult,
+  AdminCategoryMedicineBulkPreviewResponse,
   AdminCategoryMedicine,
   AdminDuplicateDetailResponse,
   AdminDuplicateGroup,
@@ -209,6 +211,29 @@ export function deleteAdminCategoryMedicine(categoryId: number, medicineId: numb
   return request<ApiSuccessResponse<{ category_id: number; medicine_id: number; deleted: boolean }>>(
     `/v1/admin/categories/${categoryId}/medicines/${medicineId}`, { method: 'DELETE' },
   );
+}
+
+export function previewAdminCategoryMedicineBulkAdd(
+  categoryId: number,
+  fragment: string,
+  page = 1,
+  limit = 20,
+): Promise<AdminCategoryMedicineBulkPreviewResponse> {
+  return request(
+    `/v1/admin/categories/${categoryId}/medicines/bulk-preview${queryString({ fragment, page, limit })}`,
+  );
+}
+
+export function bulkAddAdminCategoryMedicines(
+  categoryId: number,
+  fragment: string,
+  confirmedCount: number,
+): Promise<ApiSuccessResponse<AdminCategoryMedicineBulkAddResult>> {
+  return request(`/v1/admin/categories/${categoryId}/medicines/bulk-add`, {
+    method: 'POST',
+    body: { fragment, confirmed_count: confirmedCount },
+    timeoutMs: 15_000,
+  });
 }
 
 export function listCatalogSyncs(limit = 50): Promise<AdminApiListResponse<CatalogSyncSummary>> {

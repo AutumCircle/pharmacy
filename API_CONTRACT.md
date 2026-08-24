@@ -94,6 +94,8 @@ Browser
 | `GET /v1/admin/categories/{category_id}/medicines` | Все связи категории | Новая операция |
 | `PUT /v1/admin/categories/{category_id}/medicines/{medicine_id}` | Добавить связь | `add_category_medicine` |
 | `DELETE /v1/admin/categories/{category_id}/medicines/{medicine_id}` | Удалить связь | `remove_category_medicine` |
+| `GET /v1/admin/categories/{category_id}/medicines/bulk-preview` | Предпросмотр буквального поиска по фрагменту имени | Новая операция |
+| `POST /v1/admin/categories/{category_id}/medicines/bulk-add` | Подтверждённое массовое добавление найденных связей | Новая операция |
 | `GET /v1/admin/catalog-syncs` | История синхронизаций | `history` |
 
 ### 4.3 Internal sync
@@ -305,6 +307,9 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
 - Успешное удаление категории и request ID записываются в `admin_audit_log`.
 - Category/medicine relation использует `medicine_id` и требует существующую категорию и существующее лекарство.
 - Admin list связей включает недоступные товары, чтобы связь можно было удалить после изменения наличия.
+- Bulk preview требует `fragment` длиной 2–120 символов, ищет без учёта регистра и трактует `%`, `_` и `\` буквально. Ответ содержит `total`, numbered page и признак `already_present` для каждой строки.
+- Bulk mutation принимает только `fragment` и `confirmed_count`. Если актуальный `matched` отличается от подтверждённого числа, запись не выполняется и возвращается `409 BULK_PREVIEW_STALE`.
+- Bulk mutation использует один set-based `INSERT ... SELECT` в транзакции, не удаляет другие категории и возвращает `matched`, `added`, `already_present`.
 - Повторные `PUT`/`DELETE` relation идемпотентны.
 
 ## 9. Internal catalog sync

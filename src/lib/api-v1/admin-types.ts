@@ -128,6 +128,26 @@ export type AdminCategoryMedicine = {
   updated_at: string | null;
 };
 
+export type AdminCategoryMedicineMatch = AdminCategoryMedicine & {
+  already_present: boolean;
+};
+
+export type AdminCategoryMedicineBulkPreviewResponse = {
+  data: AdminCategoryMedicineMatch[];
+  fragment: string;
+  total: number;
+  page: AdminNumberedPage;
+  request_id: string;
+};
+
+export type AdminCategoryMedicineBulkAddResult = {
+  category_id: number;
+  fragment: string;
+  matched: number;
+  added: number;
+  already_present: number;
+};
+
 export type AdminOrderSummary = {
   order_id: string;
   order_reference: string | null;

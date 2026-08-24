@@ -3,12 +3,14 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/admin-auth';
 import {
+  bulkAddAdminCategoryMedicines,
   createAdminCategory,
   deleteAdminCategory,
   deleteAdminCategoryMedicine,
   listAdminMedicines,
   listAdminCategoryMedicines,
   putAdminCategoryMedicine,
+  previewAdminCategoryMedicineBulkAdd,
   updateAdminCategory,
 } from '@/lib/api-v1/admin-server';
 
@@ -98,6 +100,33 @@ export async function removeCategoryMedicine(categoryId: number, medicineId: num
     await deleteAdminCategoryMedicine(categoryId, medicineId);
     revalidatePath('/admin/categories');
     return { success: true as const };
+  } catch (error: unknown) {
+    return failure(error);
+  }
+}
+
+export async function previewCategoryMedicineBulkAdd(categoryId: number, fragment: string, page = 1) {
+  try {
+    await requireAdminSession();
+    const response = await previewAdminCategoryMedicineBulkAdd(categoryId, fragment, page, 20);
+    return { success: true as const, preview: response };
+  } catch (error: unknown) {
+    return failure(error);
+  }
+}
+
+export async function bulkAddCategoryMedicines(
+  categoryId: number,
+  fragment: string,
+  confirmedCount: number,
+) {
+  try {
+    await requireAdminSession();
+    const response = await bulkAddAdminCategoryMedicines(categoryId, fragment, confirmedCount);
+    revalidatePath('/');
+    revalidatePath('/catalog');
+    revalidatePath('/admin/categories');
+    return { success: true as const, result: response.data };
   } catch (error: unknown) {
     return failure(error);
   }

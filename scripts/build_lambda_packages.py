@@ -105,6 +105,21 @@ def build() -> Path:
         "sha256": hashlib.sha256(pricing_migration_payload).hexdigest(),
         "size_bytes": len(pricing_migration_payload),
     })
+    identity_migration_destination = OUTPUT / "migration-0008-category-medicine-identity-once.zip"
+    identity_migration_source = (
+        ROOT / "backend" / "operations" / "category_medicine_identity_migration_once" / "lambda_function.py"
+    )
+    _write_deterministic_zip(
+        identity_migration_destination,
+        [("lambda_function.py", identity_migration_source)],
+    )
+    identity_migration_payload = identity_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": identity_migration_destination.name,
+        "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(identity_migration_payload).hexdigest(),
+        "size_bytes": len(identity_migration_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

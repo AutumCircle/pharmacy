@@ -13,6 +13,10 @@ by Lambda. It contains no table rows, credentials, or executable DDL.
   stable SQL price function. It does not rewrite medicines or historical order
   snapshots. Apply it before deploying the Public/Admin Lambda packages that
   reference `vatan_selling_unit_price`.
+- `migrations/0008_category_medicine_identity.sql` removes the legacy category
+  uniqueness rule based on `medicine_name` and keeps the partial unique index on
+  `(category_id, medicine_id)`. Apply it before enabling category bulk-add so
+  distinct medicine IDs with the same display name can all be linked.
 - `preflight/0002_catalog_sync_v1_preflight.sql` returns one JSON report with
   metadata and counts only. It explicitly starts a read-only transaction.
 - `ROLLBACK_0002.md` explains recovery boundaries. There is intentionally no

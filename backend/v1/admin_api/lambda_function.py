@@ -201,6 +201,22 @@ def _page_number(query: dict[str, Any]) -> int:
     return _positive_int(query.get("page") or 1, "page")
 
 
+def _medicine_name_fragment(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ContractError("VALIDATION_ERROR", "fragment must be a string")
+    fragment = value.strip()
+    if not 2 <= len(fragment) <= 120:
+        raise ContractError("VALIDATION_ERROR", "fragment must contain between 2 and 120 characters")
+    return fragment
+
+
+def _literal_ilike_pattern(fragment: str) -> str:
+    """Escape LIKE metacharacters so the admin fragment is always literal."""
+
+    escaped = fragment.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 def get_pricing_settings() -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(
@@ -935,6 +951,125 @@ def list_category_medicines(category_id: int, query: dict[str, Any]) -> dict[str
     return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
+def preview_category_medicine_bulk_add(category_id: int, query: dict[str, Any]) -> dict[str, Any]:
+    fragment = _medicine_name_fragment(query.get("fragment"))
+    limit = _limit(query)
+    page = _page_number(query)
+    offset = (page - 1) * limit
+    pattern = _literal_ilike_pattern(fragment)
+    with transaction() as cur:
+        cur.execute("SELECT 1 FROM categories WHERE id = %s", (category_id,))
+        if not cur.fetchone():
+            raise ContractError("CATEGORY_NOT_FOUND", "Category was not found", http_status=404)
+        cur.execute(
+            "SELECT COUNT(*) AS count FROM medicines m WHERE m.name ILIKE %s ESCAPE '\\'",
+            (pattern,),
+        )
+        matched = int(cur.fetchone()["count"])
+        cur.execute(
+            """
+            SELECT m.id AS medicine_id, m.name AS medicine_name, m.country, m.vendor,
+                   m.in_stock, m.updated_at,
+                   EXISTS (
+                       SELECT 1 FROM category_medicines cm
+                       WHERE cm.category_id = %s AND cm.medicine_id = m.id
+                   ) AS already_present
+            FROM medicines m
+            WHERE m.name ILIKE %s ESCAPE '\\'
+            ORDER BY lower(m.name) ASC, m.id ASC
+            LIMIT %s OFFSET %s
+            """,
+            (category_id, pattern, limit, offset),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    return {
+        "data": rows,
+        "total": matched,
+        "fragment": fragment,
+        "page": {
+            "number": page,
+            "size": limit,
+            "total_items": matched,
+            "total_pages": max(1, (matched + limit - 1) // limit),
+        },
+    }
+
+
+def bulk_add_category_medicines(
+    category_id: int,
+    payload: dict[str, Any],
+    actor_id: str,
+    current_request_id: str,
+) -> dict[str, Any]:
+    if set(payload) != {"fragment", "confirmed_count"}:
+        raise ContractError("VALIDATION_ERROR", "fragment and confirmed_count are required")
+    fragment = _medicine_name_fragment(payload.get("fragment"))
+    confirmed_count = payload.get("confirmed_count")
+    if isinstance(confirmed_count, bool) or not isinstance(confirmed_count, int) or confirmed_count < 0:
+        raise ContractError("VALIDATION_ERROR", "confirmed_count must be a non-negative integer")
+    pattern = _literal_ilike_pattern(fragment)
+    with transaction() as cur:
+        cur.execute("SELECT id FROM categories WHERE id = %s FOR UPDATE", (category_id,))
+        if not cur.fetchone():
+            raise ContractError("CATEGORY_NOT_FOUND", "Category was not found", http_status=404)
+        cur.execute(
+            """
+            WITH matched AS MATERIALIZED (
+                SELECT m.id AS medicine_id, m.name AS medicine_name
+                FROM medicines m
+                WHERE m.name ILIKE %s ESCAPE '\\'
+            ),
+            match_count AS (
+                SELECT COUNT(*)::integer AS matched FROM matched
+            ),
+            inserted AS (
+                INSERT INTO category_medicines (category_id, medicine_id, medicine_name)
+                SELECT %s, matched.medicine_id, matched.medicine_name
+                FROM matched CROSS JOIN match_count
+                WHERE match_count.matched = %s
+                ON CONFLICT DO NOTHING
+                RETURNING medicine_id
+            )
+            SELECT match_count.matched, COUNT(inserted.medicine_id)::integer AS added
+            FROM match_count LEFT JOIN inserted ON TRUE
+            GROUP BY match_count.matched
+            """,
+            (pattern, category_id, confirmed_count),
+        )
+        counts = cur.fetchone()
+        matched = int(counts["matched"])
+        if matched != confirmed_count:
+            raise ContractError(
+                "BULK_PREVIEW_STALE",
+                "The number of matching medicines changed. Preview the list again before adding",
+                http_status=409,
+                fields={"confirmed_count": str(confirmed_count), "matched": str(matched)},
+            )
+        added = int(counts["added"])
+        result = {
+            "category_id": category_id,
+            "fragment": fragment,
+            "matched": matched,
+            "added": added,
+            "already_present": matched - added,
+        }
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="category.medicines.bulk_add",
+            resource_type="category",
+            resource_id=str(category_id),
+            request=current_request_id,
+            details={
+                "fragment": fragment,
+                "matched": matched,
+                "added": added,
+                "already_present": matched - added,
+            },
+        )
+    return result
+
+
 def delete_category_medicine(category_id: int, medicine_id: int) -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(
@@ -1470,6 +1605,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if method == "GET" and len(tail) == 3 and tail[0] == "categories" and tail[2] == "medicines":
             category_id = _positive_int(tail[1], "category_id")
             return success_document(list_category_medicines(category_id, query), request=current_request_id)
+        if method == "GET" and len(tail) == 4 and tail[0] == "categories" and tail[2:] == ["medicines", "bulk-preview"]:
+            category_id = _positive_int(tail[1], "category_id")
+            return success_document(
+                preview_category_medicine_bulk_add(category_id, query),
+                request=current_request_id,
+            )
+        if method == "POST" and len(tail) == 4 and tail[0] == "categories" and tail[2:] == ["medicines", "bulk-add"]:
+            category_id = _positive_int(tail[1], "category_id")
+            return success(
+                bulk_add_category_medicines(category_id, _body(event), actor_id, current_request_id),
+                request=current_request_id,
+            )
         if method in {"PUT", "DELETE"} and len(tail) == 4 and tail[0] == "categories" and tail[2] == "medicines":
             category_id = _positive_int(tail[1], "category_id")
             medicine_id = _positive_int(tail[3], "medicine_id")

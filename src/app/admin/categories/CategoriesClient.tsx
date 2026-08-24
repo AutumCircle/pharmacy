@@ -1,8 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { createCategory, updateCategory, disableCategory, deleteCategory, getCategoryMedicines, addCategoryMedicine, removeCategoryMedicine, searchMedicinesForCategory } from './actions';
-import type { AdminCategory, AdminCategoryMedicine } from '@/lib/api-v1/admin-types';
+import {
+  addCategoryMedicine,
+  bulkAddCategoryMedicines,
+  createCategory,
+  deleteCategory,
+  disableCategory,
+  getCategoryMedicines,
+  previewCategoryMedicineBulkAdd,
+  removeCategoryMedicine,
+  searchMedicinesForCategory,
+  updateCategory,
+} from './actions';
+import type {
+  AdminCategory,
+  AdminCategoryMedicine,
+  AdminCategoryMedicineBulkAddResult,
+  AdminCategoryMedicineBulkPreviewResponse,
+} from '@/lib/api-v1/admin-types';
 
 type SearchResult = { medicine_id: number; medicine_name: string; country?: string | null; vendor?: string | null; in_stock?: boolean };
 
@@ -20,6 +36,11 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
   const [categoryItems, setCategoryItems] = useState<AdminCategoryMedicine[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [bulkFragment, setBulkFragment] = useState('');
+  const [bulkPreview, setBulkPreview] = useState<AdminCategoryMedicineBulkPreviewResponse | null>(null);
+  const [bulkResult, setBulkResult] = useState<AdminCategoryMedicineBulkAddResult | null>(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkError, setBulkError] = useState('');
 
   const handleOpenModal = (cat?: AdminCategory) => {
     if (cat) {
@@ -90,6 +111,10 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
 
   const handleManageItems = async (cat: AdminCategory) => {
     setManagingCategory(cat);
+    setBulkFragment('');
+    setBulkPreview(null);
+    setBulkResult(null);
+    setBulkError('');
     setLoading(true);
     const res = await getCategoryMedicines(cat.id);
     if (res.success) {
@@ -142,6 +167,64 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
     setLoading(false);
   };
 
+  const loadBulkPreview = async (page = 1, fragment = bulkFragment.trim()) => {
+    if (!managingCategory) return;
+    if (fragment.length < 2) {
+      setBulkPreview(null);
+      setBulkError('Введите минимум 2 символа');
+      return;
+    }
+    setBulkLoading(true);
+    setBulkError('');
+    setBulkResult(null);
+    const response = await previewCategoryMedicineBulkAdd(managingCategory.id, fragment, page);
+    if (response.success) {
+      setBulkPreview(response.preview);
+      setBulkFragment(response.preview.fragment);
+    } else {
+      setBulkPreview(null);
+      setBulkError(response.error || 'Не удалось получить предпросмотр');
+    }
+    setBulkLoading(false);
+  };
+
+  const handleBulkPreview = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await loadBulkPreview();
+  };
+
+  const handleBulkAdd = async () => {
+    if (!managingCategory || !bulkPreview || bulkPreview.total === 0) return;
+    const confirmed = window.confirm(
+      `Добавить в категорию «${managingCategory.name}» все найденные лекарства: ${bulkPreview.total}?\n\n` +
+      'Уже добавленные связи останутся без изменений.',
+    );
+    if (!confirmed) return;
+    setBulkLoading(true);
+    setBulkError('');
+    const response = await bulkAddCategoryMedicines(
+      managingCategory.id,
+      bulkPreview.fragment,
+      bulkPreview.total,
+    );
+    if (response.success) {
+      setBulkResult(response.result);
+      const [itemsResponse, previewResponse] = await Promise.all([
+        getCategoryMedicines(managingCategory.id),
+        previewCategoryMedicineBulkAdd(
+          managingCategory.id,
+          bulkPreview.fragment,
+          bulkPreview.page.number,
+        ),
+      ]);
+      if (itemsResponse.success) setCategoryItems(itemsResponse.items ?? []);
+      if (previewResponse.success) setBulkPreview(previewResponse.preview);
+    } else {
+      setBulkError(response.error || 'Не удалось добавить найденные лекарства');
+    }
+    setBulkLoading(false);
+  };
+
   if (managingCategory) {
     return (
       <div>
@@ -168,6 +251,86 @@ export default function CategoriesClient({ initialCategories }: { initialCategor
           </div>
 
           <div style={{ background: 'white', padding: '24px', borderRadius: '12px', border: '1px solid #E8E8E8' }}>
+            <h3 style={{ margin: '0 0 8px 0' }}>Массовое добавление</h3>
+            <p style={{ color: '#666', fontSize: '13px', lineHeight: 1.5, margin: '0 0 15px 0' }}>
+              Введите буквальный фрагмент названия. Регистр не важен; символы % и _ не являются шаблонами.
+            </p>
+            <form onSubmit={handleBulkPreview} style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+              <input
+                required
+                minLength={2}
+                maxLength={120}
+                type="text"
+                placeholder="Например: now"
+                value={bulkFragment}
+                onChange={(event) => {
+                  setBulkFragment(event.target.value);
+                  setBulkPreview(null);
+                  setBulkResult(null);
+                  setBulkError('');
+                }}
+                style={{ flex: 1, minWidth: 0, padding: '12px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none' }}
+              />
+              <button type="submit" disabled={bulkLoading}>
+                {bulkLoading ? 'Проверка...' : 'Предпросмотр'}
+              </button>
+            </form>
+
+            {bulkError && <div className="admin-inline-error" role="alert">{bulkError}</div>}
+            {bulkResult && (
+              <div style={{ padding: '12px', marginBottom: '15px', borderRadius: '8px', background: '#ecfdf3', color: '#166534', fontSize: '14px' }} role="status">
+                Совпало: {bulkResult.matched}. Добавлено: {bulkResult.added}. Уже было в категории: {bulkResult.already_present}.
+              </div>
+            )}
+
+            {bulkPreview && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                  <strong>Найдено: {bulkPreview.total}</strong>
+                  <span style={{ color: '#777', fontSize: '12px' }}>
+                    Страница {bulkPreview.page.number} из {bulkPreview.page.total_pages}
+                  </span>
+                </div>
+                {bulkPreview.data.map((item) => (
+                  <div key={item.medicine_id} style={{ padding: '10px', background: '#F9F9F9', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600 }}>{item.medicine_name}</div>
+                    <div style={{ fontSize: '12px', color: '#777', marginTop: '3px' }}>
+                      ID {item.medicine_id} · {item.in_stock ? 'в наличии' : 'архив'} · {item.already_present ? 'уже в категории' : 'будет добавлено'}
+                    </div>
+                  </div>
+                ))}
+                {bulkPreview.total === 0 && <p style={{ color: '#777', margin: 0 }}>Совпадений нет.</p>}
+                {bulkPreview.page.total_pages > 1 && (
+                  <div className="admin-pagination">
+                    <button
+                      type="button"
+                      disabled={bulkLoading || bulkPreview.page.number <= 1}
+                      onClick={() => loadBulkPreview(bulkPreview.page.number - 1, bulkPreview.fragment)}
+                    >
+                      Назад
+                    </button>
+                    <span className="current">{bulkPreview.page.number}</span>
+                    <button
+                      type="button"
+                      disabled={bulkLoading || bulkPreview.page.number >= bulkPreview.page.total_pages}
+                      onClick={() => loadBulkPreview(bulkPreview.page.number + 1, bulkPreview.fragment)}
+                    >
+                      Далее
+                    </button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleBulkAdd}
+                  disabled={bulkLoading || bulkPreview.total === 0}
+                  style={{ padding: '12px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+                >
+                  Добавить все найденные ({bulkPreview.total})
+                </button>
+              </div>
+            )}
+
+            <hr style={{ border: 0, borderTop: '1px solid #E8E8E8', margin: '24px 0' }} />
             <h3 style={{ margin: '0 0 15px 0' }}>Добавить товар</h3>
             <form onSubmit={searchMedicines} style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
               <input 
