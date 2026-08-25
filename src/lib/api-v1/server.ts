@@ -176,10 +176,10 @@ export function getPublicCategories(limit = 20, cursor?: string): Promise<Catego
 
 export function getPublicCategoryMedicines(
   slug: string,
-  limit = 20,
-  cursor?: string,
+  page = 1,
+  limit = 24,
 ): Promise<CategoryMedicinesResponse> {
-  return request(`/v1/public/categories/${encodeURIComponent(slug)}/medicines${queryString({ limit, cursor })}`, {
+  return request(`/v1/public/categories/${encodeURIComponent(slug)}/medicines${queryString({ page, limit })}`, {
     cacheSeconds: 30,
   });
 }

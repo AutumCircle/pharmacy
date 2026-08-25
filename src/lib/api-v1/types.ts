@@ -37,6 +37,13 @@ export interface CursorPage {
   has_more: boolean;
 }
 
+export interface NumberedPage {
+  number: number;
+  size: number;
+  total_items: number;
+  total_pages: number;
+}
+
 export interface ApiListResponse<T> {
   data: T[];
   page: CursorPage;
@@ -95,7 +102,7 @@ export interface CategoryMedicines extends PublicCategory {
 
 export interface CategoryMedicinesResponse {
   data: CategoryMedicines;
-  page: CursorPage;
+  page: NumberedPage;
   request_id: string;
 }
 

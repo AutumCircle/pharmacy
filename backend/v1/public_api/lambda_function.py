@@ -68,6 +68,21 @@ def _page_size(query: dict[str, Any]) -> int:
     return limit
 
 
+def _page_number(query: dict[str, Any]) -> int:
+    raw = query.get("page") or 1
+    try:
+        page = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("VALIDATION_ERROR", "Request validation failed", fields={"page": "must be an integer"}) from exc
+    if not 1 <= page <= 100_000:
+        raise ContractError(
+            "VALIDATION_ERROR",
+            "Request validation failed",
+            fields={"page": "must be between 1 and 100000"},
+        )
+    return page
+
+
 def _encode_cursor(value: dict[str, Any]) -> str:
     encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return base64.urlsafe_b64encode(encoded).decode("ascii")
@@ -539,15 +554,7 @@ def category_medicines(slug: str, query: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(slug, str) or not slug.strip():
         raise ContractError("VALIDATION_ERROR", "Category slug is required")
     limit = _page_size(query)
-    cursor = _decode_cursor(query.get("cursor"))
-    cursor_filter = ""
-    cursor_values: list[Any] = []
-    if cursor:
-        try:
-            cursor_filter = "AND (m.name, m.id) > (%s, %s)"
-            cursor_values = [str(cursor["name"]), int(cursor["id"])]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ContractError("VALIDATION_ERROR", "Request validation failed", fields={"cursor": "is invalid"}) from exc
+    requested_page = _page_number(query)
     with transaction() as cur:
         cur.execute(
             "SELECT id, slug, name, icon, color FROM categories WHERE slug = %s AND is_active IS TRUE",
@@ -558,30 +565,42 @@ def category_medicines(slug: str, query: dict[str, Any]) -> dict[str, Any]:
             raise ContractError("CATEGORY_NOT_FOUND", "Category was not found", http_status=404)
         cur.execute(
             """
+            SELECT COUNT(*) AS count
+            FROM category_medicines cm
+            JOIN medicines m ON m.id = cm.medicine_id
+            WHERE cm.category_id = %s AND m.in_stock IS TRUE
+            """,
+            (category["id"],),
+        )
+        total = int(cur.fetchone()["count"])
+        total_pages = max(1, (total + limit - 1) // limit)
+        page = min(requested_page, total_pages)
+        offset = (page - 1) * limit
+        cur.execute(
+            """
             SELECT m.id, m.name, m.price, m.country, m.vendor, m.in_stock, m.updated_at, m.image_url,
                    vatan_selling_unit_price(m.price) AS selling_unit_price
             FROM category_medicines cm
             JOIN medicines m ON m.id = cm.medicine_id
-            WHERE cm.category_id = %s AND m.in_stock IS TRUE {cursor_filter}
+            WHERE cm.category_id = %s AND m.in_stock IS TRUE
             ORDER BY m.name ASC, m.id ASC
-            LIMIT %s
-            """.format(cursor_filter=cursor_filter),
-            (category["id"], *cursor_values, limit + 1),
+            LIMIT %s OFFSET %s
+            """,
+            (category["id"], limit, offset),
         )
         medicines = [dict(row) for row in cur.fetchall()]
-    has_more = len(medicines) > limit
-    medicines = medicines[:limit]
-    next_cursor = None
-    if has_more and medicines:
-        last = medicines[-1]
-        next_cursor = _encode_cursor({"name": last["name"], "id": last["id"]})
     return {
         "data": {
             "id": category["id"], "slug": category["slug"], "name": category["name"],
             "icon": category["icon"], "color": category["color"],
             "medicines": [_medicine_response(row) for row in medicines],
         },
-        "page": {"next_cursor": next_cursor, "has_more": has_more},
+        "page": {
+            "number": page,
+            "size": limit,
+            "total_items": total,
+            "total_pages": total_pages,
+        },
     }
 
 

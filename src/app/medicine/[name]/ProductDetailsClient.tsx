@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useCart } from '@/context/CartContext';
 import { useFavorites } from '@/context/FavoritesContext';
 import type { PublicMedicine } from '@/lib/api-v1/types';
 import { formatVendorCountry } from '@/lib/formatters';
 
 export default function ProductDetailsClient({ product }: { product: PublicMedicine }) {
+  const [imageFailed, setImageFailed] = useState(false);
   const { addItem, items, updateQuantity, removeItem } = useCart();
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
   const favorite = isFavorite(product.medicine_id);
@@ -42,13 +44,29 @@ export default function ProductDetailsClient({ product }: { product: PublicMedic
         
         {/* Left: Image */}
         <div className="product-details-image">
-          <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#eee" strokeWidth="1.5">
-            <rect x="7" y="7" width="10" height="14" rx="2" ry="2"></rect>
-            <path d="M5 7h14"></path>
-            <path d="M12 11v4"></path>
-            <path d="M10 13h4"></path>
-            <path d="M9 3h6v4H9z"></path>
-          </svg>
+          {product.image_url && !imageFailed ? (
+            // Product images are admin-validated HTTPS URLs and may use different CDN hosts.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={product.image_url}
+              alt={product.medicine_name}
+              width="800"
+              height="800"
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              onError={() => setImageFailed(true)}
+            />
+          ) : (
+            <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#eee" strokeWidth="1.5" aria-label="Изображение товара отсутствует">
+              <rect x="7" y="7" width="10" height="14" rx="2" ry="2"></rect>
+              <path d="M5 7h14"></path>
+              <path d="M12 11v4"></path>
+              <path d="M10 13h4"></path>
+              <path d="M9 3h6v4H9z"></path>
+            </svg>
+          )}
         </div>
 
         {/* Middle: Attributes */}

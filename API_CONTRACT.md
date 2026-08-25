@@ -81,7 +81,7 @@ Browser
 | `GET /v1/public/medicines/search` | Поиск лекарств | `search` |
 | `GET /v1/public/medicines/{medicine_id}` | Получение лекарства | `get` |
 | `GET /v1/public/categories` | Активные категории | `list_categories` |
-| `GET /v1/public/categories/{slug}/medicines` | Товары категории | `get_category_medicines` |
+| `GET /v1/public/categories/{slug}/medicines` | Пагинированные доступные товары категории | `get_category_medicines` |
 | `POST /v1/public/orders` | Создание заказа | `create_order` |
 | `POST /v1/public/orders/track` | Tracking по точному телефону | Новая операция вместо `list_orders` |
 
@@ -155,7 +155,8 @@ Medicine response item:
 ### 5.3 Categories
 
 - `GET /v1/public/categories?limit=20&cursor=...` возвращает активные `slug`, `name`, `icon`, `color`.
-- `GET /v1/public/categories/{slug}/medicines?limit=20&cursor=...` возвращает только sellable medicines.
+- `GET /v1/public/categories/{slug}/medicines?page=1&limit=24` возвращает только sellable medicines и numbered page: `number`, `size`, `total_items`, `total_pages`.
+- Total считается по действующим `category_medicines.medicine_id` links, связанным с medicines в наличии; ordering: `medicine.name ASC, medicine.id ASC`.
 - Неизвестная или отключённая категория возвращает `404 CATEGORY_NOT_FOUND`.
 
 ## 6. `create_order` — критический контракт

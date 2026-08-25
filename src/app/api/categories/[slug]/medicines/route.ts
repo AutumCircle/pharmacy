@@ -9,10 +9,13 @@ export async function GET(
 ) {
   const { slug } = await params;
   const searchParams = new URL(request.url).searchParams;
-  const limit = Math.min(Number(searchParams.get('limit')) || 20, 100);
+  const rawLimit = Number(searchParams.get('limit'));
+  const rawPage = Number(searchParams.get('page'));
+  const limit = Number.isInteger(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 100) : 24;
+  const page = Number.isInteger(rawPage) && rawPage >= 1 ? Math.min(rawPage, 100_000) : 1;
   try {
     return NextResponse.json(
-      await getPublicCategoryMedicines(slug, limit, searchParams.get('cursor') || undefined),
+      await getPublicCategoryMedicines(slug, page, limit),
     );
   } catch (error) {
     return apiRouteError(error);
