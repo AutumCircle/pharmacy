@@ -211,16 +211,19 @@ a {
 /* FOOTER */
 .site-footer {
   margin-top: 40px;
-  background: #f3f6fa;
+  padding-top: 10px;
+  background: #f5f6f7;
   border-top: 1px solid var(--border-color);
   color: #555;
 }
 .footer-compact-grid {
   display: grid;
-  grid-template-columns: 1.35fr 1fr 0.8fr 0.9fr;
-  gap: clamp(20px, 3vw, 40px);
-  padding-top: 18px;
-  padding-bottom: 16px;
+  grid-template-columns: 1.15fr 0.85fr 1.05fr 0.9fr;
+  gap: clamp(28px, 4vw, 72px);
+  padding: 18px clamp(24px, 3vw, 42px);
+  border: 1px solid #f1dede;
+  border-radius: 14px 14px 0 0;
+  background: #fff1f1;
 }
 .footer-compact-section {
   display: flex;
@@ -231,23 +234,35 @@ a {
 .footer-compact-section h2 {
   margin: 0 0 2px;
   color: #222;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.25;
 }
-.footer-compact-section p { margin: 0; font-size: 13px; line-height: 1.4; }
+.footer-compact-section h3 {
+  margin: 5px 0 0;
+  color: #222;
+  font-size: 12px;
+}
+.footer-compact-section p { margin: 0; font-size: 14px; line-height: 1.35; }
+.footer-brand-logo {
+  display: block;
+  width: fit-content;
+  line-height: 0;
+}
+.footer-brand-logo img { width: 88px; height: auto; object-fit: contain; }
+.footer-brand-section { gap: 6px; }
 .footer-contact-link {
   display: inline-flex;
   align-items: center;
   font-weight: 600;
   color: #30343a;
-  font-size: 13px;
+  font-size: 14px;
 }
 .footer-contact-link:hover,
 .footer-instagram:hover { color: var(--primary); }
 .footer-phone-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 3px 14px;
+  flex-direction: column;
+  gap: 4px;
 }
 .footer-address {
   color: #30343a;
@@ -258,12 +273,19 @@ a {
   align-items: center;
   gap: 7px;
   color: #30343a;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
+.footer-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.footer-menu a { color: #555; font-size: 14px; }
+.footer-menu a:hover { color: var(--primary); }
 .footer-bottom {
   border-top: 1px solid #eee;
-  padding: 9px 0;
+  padding: 9px 0 10px;
   background: #fff;
   color: #777;
   font-size: 12px;
@@ -732,14 +754,14 @@ a {
   flex: 0 0 64px;
   margin-bottom: 2px;
   border-radius: 50%;
-  background: #f3f6fa;
-  color: var(--primary);
+  background: #ffeded;
+  color: #ed1639;
 }
-.store-benefit-icon svg { width: 36px; height: 36px; stroke-width: 2.4; }
+.store-benefit-icon svg { width: 34px; height: 34px; }
 
 .store-benefit-card h2 {
   margin: 0;
-  font-size: clamp(19px, 1.55vw, 23px);
+  font-size: clamp(20px, 1.65vw, 24px);
   line-height: 1.25;
 }
 
@@ -789,7 +811,7 @@ a {
   .header-inner { gap: 16px; }
   .brand-name { display: none; }
   .header-actions { gap: 18px; }
-  .footer-compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .footer-compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 34px; }
   .hero-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -834,7 +856,7 @@ a {
   .filter-bar { gap: 8px; padding-inline: 0; }
   .category-scroll-button { display: none; }
   .chip { padding: 7px 12px; font-size: 12px; }
-  .footer-compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 14px; padding-top: 16px; padding-bottom: 14px; }
+  .footer-compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 18px; padding: 18px; }
   .site-footer { margin-top: 28px; }
   .hero-grid {
     grid-template-columns: 1fr;

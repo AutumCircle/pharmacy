@@ -19,24 +19,24 @@ const benefits = [
 function BenefitIcon({ type }: { type: typeof benefits[number]['icon'] }) {
   if (type === 'assortment') {
     return (
-      <svg width="50" height="50" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
-        <circle cx="24" cy="24" r="18" />
-        <path d="m15.5 24 5.5 5.5L33.5 17" strokeLinecap="round" strokeLinejoin="round" />
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="currentColor" d="M17 8h14v5h3.5A4.5 4.5 0 0 1 39 17.5v21a4.5 4.5 0 0 1-4.5 4.5h-21A4.5 4.5 0 0 1 9 38.5v-21a4.5 4.5 0 0 1 4.5-4.5H17V8Zm4 8h6v-4h-6v4Z" />
+        <path fill="#fff" d="M21 21h6v5h5v6h-5v5h-6v-5h-5v-6h5v-5Z" />
       </svg>
     );
   }
   if (type === 'care') {
     return (
-      <svg width="50" height="50" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
-        <rect x="14" y="8" width="20" height="32" rx="5" />
-        <path d="M20 8V5h8v3M24 18v12M18 24h12" strokeLinecap="round" />
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="currentColor" d="M24 4C18 13 10 20 10 29a14 14 0 0 0 28 0c0-9-8-16-14-25Z" />
+        <path fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" d="M17.5 29.5c1.2 4.2 4.2 6.5 8.5 7" />
       </svg>
     );
   }
   return (
-    <svg width="50" height="50" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
-      <path d="M7 22V10h12l21 21-9 9L10 19V7" strokeLinejoin="round" />
-      <circle cx="14" cy="14" r="2.5" fill="currentColor" stroke="none" />
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="currentColor" d="M5 8a3 3 0 0 1 3-3h15.6c1.6 0 3.1.6 4.2 1.8l14.4 14.4a4 4 0 0 1 0 5.6L26.8 42.2a4 4 0 0 1-5.6 0L6.8 27.8A6 6 0 0 1 5 23.6V8Z" />
+      <circle cx="15" cy="15" r="3.2" fill="#fff" />
     </svg>
   );
 }
