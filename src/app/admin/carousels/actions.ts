@@ -4,12 +4,17 @@ import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/admin-auth';
 import {
   addAdminProductCarouselItem,
+  batchAddAdminProductCarouselItems,
+  batchRemoveAdminProductCarouselItems,
   createAdminProductCarousel,
   deleteAdminProductCarousel,
   deleteAdminProductCarouselItem,
-  listAdminMedicines,
+  listAdminProductCarouselItems,
   listAdminProductCarousels,
   reorderAdminProductCarouselItems,
+  reorderAdminProductCarouselPage,
+  reorderAdminProductCarousels,
+  searchAdminProductCarouselCandidates,
   updateAdminProductCarousel,
   updateAdminProductCarouselItem,
 } from '@/lib/api-v1/admin-server';
@@ -24,13 +29,65 @@ async function refreshed() {
   return (await listAdminProductCarousels()).data;
 }
 
-export async function searchCarouselCandidates(query: string) {
+export async function searchCarouselCandidates(carouselId: number, query: string, page = 1) {
   try {
     await requireAdminSession();
     const q = query.trim();
     if (q.length < 2) return { success: true as const, items: [] };
-    const response = await listAdminMedicines({ q, availability: 'all', page: 1, limit: 20 });
-    return { success: true as const, items: response.data };
+    const response = await searchAdminProductCarouselCandidates(carouselId, q, page, 25);
+    return { success: true as const, items: response.data, page: response.page };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function getCarouselProducts(carouselId: number, page = 1, q = '') {
+  try {
+    await requireAdminSession();
+    const response = await listAdminProductCarouselItems(carouselId, { page, limit: 20, q: q.trim() });
+    return { success: true as const, items: response.data, page: response.page };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function addSelectedCarouselProducts(carouselId: number, medicineIds: number[]) {
+  try {
+    await requireAdminSession();
+    const response = await batchAddAdminProductCarouselItems(carouselId, medicineIds);
+    return { success: true as const, result: response.data, carousels: await refreshed() };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function removeSelectedCarouselProducts(carouselId: number, medicineIds: number[]) {
+  try {
+    await requireAdminSession();
+    const response = await batchRemoveAdminProductCarouselItems(carouselId, medicineIds);
+    return { success: true as const, result: response.data, carousels: await refreshed() };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function reorderCarouselPage(carouselId: number, medicineIds: number[]) {
+  try {
+    await requireAdminSession();
+    await reorderAdminProductCarouselPage(carouselId, medicineIds);
+    revalidatePath('/');
+    revalidatePath('/admin/carousels');
+    return { success: true as const };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function reorderCarousels(carouselIds: number[]) {
+  try {
+    await requireAdminSession();
+    await reorderAdminProductCarousels(carouselIds);
+    return { success: true as const, carousels: await refreshed() };
   } catch (error) {
     return failure(error);
   }

@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:tracking": "node --test tests/tracking-phone.test.ts",
-    "test:frontend": "node --test tests/tracking-phone.test.ts tests/admin-sidebar.test.ts tests/carousel-scroll.test.ts tests/product-card-content.test.ts"
+    "test:frontend": "node --test tests/tracking-phone.test.ts tests/admin-sidebar.test.ts tests/admin-selection.test.ts tests/carousel-scroll.test.ts tests/product-card-content.test.ts"
   },
   "dependencies": {
     "next": "16.2.12",

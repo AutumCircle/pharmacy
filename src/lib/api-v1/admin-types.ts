@@ -88,7 +88,23 @@ export type AdminProductCarousel = {
   sort_order: number;
   created_at: string;
   updated_at: string;
-  products: AdminCarouselProduct[];
+  product_count: number;
+};
+
+export type AdminMedicineCandidate = AdminMedicine & {
+  already_present: boolean;
+};
+
+export type AdminBatchAddResult = {
+  selected: number;
+  added: number;
+  already_present: number;
+};
+
+export type AdminBatchRemoveResult = {
+  selected: number;
+  removed: number;
+  already_absent: number;
 };
 
 export type AdminDuplicateGroup = {

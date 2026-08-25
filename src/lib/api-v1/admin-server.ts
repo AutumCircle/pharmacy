@@ -12,7 +12,11 @@ import type {
   AdminDuplicateGroup,
   AdminDashboardSummary,
   AdminMedicine,
+  AdminMedicineCandidate,
   AdminMedicineExport,
+  AdminBatchAddResult,
+  AdminBatchRemoveResult,
+  AdminCarouselProduct,
   AdminFeaturedProduct,
   AdminHomepageBanner,
   AdminNumberedListResponse,
@@ -196,9 +200,43 @@ export function deleteAdminCategory(categoryId: number): Promise<ApiSuccessRespo
 
 export function listAdminCategoryMedicines(
   categoryId: number,
-  limit = 100,
-): Promise<AdminApiListResponse<AdminCategoryMedicine>> {
-  return request(`/v1/admin/categories/${categoryId}/medicines${queryString({ limit })}`);
+  values: { page?: number; limit?: number; q?: string; availability?: 'all' | 'in_stock' | 'out_of_stock' } = {},
+): Promise<AdminNumberedListResponse<AdminCategoryMedicine>> {
+  return request(`/v1/admin/categories/${categoryId}/medicines${queryString({
+    page: values.page ?? 1,
+    limit: values.limit ?? 25,
+    q: values.q,
+    availability: values.availability ?? 'all',
+  })}`);
+}
+
+export function searchAdminCategoryMedicineCandidates(
+  categoryId: number,
+  q: string,
+  page = 1,
+  limit = 25,
+): Promise<AdminNumberedListResponse<AdminMedicineCandidate>> {
+  return request(`/v1/admin/categories/${categoryId}/medicines/candidates${queryString({ q, page, limit })}`);
+}
+
+export function batchAddAdminCategoryMedicines(categoryId: number, medicineIds: number[]) {
+  return request<ApiSuccessResponse<AdminBatchAddResult & { category_id: number }>>(
+    `/v1/admin/categories/${categoryId}/medicines/batch`,
+    { method: 'POST', body: { medicine_ids: medicineIds } },
+  );
+}
+
+export function batchRemoveAdminCategoryMedicines(categoryId: number, medicineIds: number[]) {
+  return request<ApiSuccessResponse<AdminBatchRemoveResult & { category_id: number }>>(
+    `/v1/admin/categories/${categoryId}/medicines/batch`,
+    { method: 'DELETE', body: { medicine_ids: medicineIds } },
+  );
+}
+
+export function reorderAdminCategories(categoryIds: number[]) {
+  return request<ApiSuccessResponse<{ category_ids: number[] }>>('/v1/admin/categories/reorder', {
+    method: 'PATCH', body: { category_ids: categoryIds },
+  });
 }
 
 export function putAdminCategoryMedicine(categoryId: number, medicineId: number) {
@@ -335,6 +373,51 @@ export function deleteAdminFeaturedProduct(
 
 export function listAdminProductCarousels(): Promise<AdminApiListResponse<AdminProductCarousel>> {
   return request('/v1/admin/product-carousels');
+}
+
+export function listAdminProductCarouselItems(
+  carouselId: number,
+  values: { page?: number; limit?: number; q?: string } = {},
+): Promise<AdminNumberedListResponse<AdminCarouselProduct>> {
+  return request(`/v1/admin/product-carousels/${carouselId}/products${queryString({
+    page: values.page ?? 1, limit: values.limit ?? 20, q: values.q,
+  })}`);
+}
+
+export function searchAdminProductCarouselCandidates(
+  carouselId: number,
+  q: string,
+  page = 1,
+  limit = 25,
+): Promise<AdminNumberedListResponse<AdminMedicineCandidate>> {
+  return request(`/v1/admin/product-carousels/${carouselId}/candidates${queryString({ q, page, limit })}`);
+}
+
+export function batchAddAdminProductCarouselItems(carouselId: number, medicineIds: number[]) {
+  return request<ApiSuccessResponse<AdminBatchAddResult & { carousel_id: number }>>(
+    `/v1/admin/product-carousels/${carouselId}/products/batch`,
+    { method: 'POST', body: { medicine_ids: medicineIds } },
+  );
+}
+
+export function batchRemoveAdminProductCarouselItems(carouselId: number, medicineIds: number[]) {
+  return request<ApiSuccessResponse<AdminBatchRemoveResult & { carousel_id: number }>>(
+    `/v1/admin/product-carousels/${carouselId}/products/batch`,
+    { method: 'DELETE', body: { medicine_ids: medicineIds } },
+  );
+}
+
+export function reorderAdminProductCarousels(carouselIds: number[]) {
+  return request<ApiSuccessResponse<{ carousel_ids: number[] }>>('/v1/admin/product-carousels/reorder', {
+    method: 'PATCH', body: { carousel_ids: carouselIds },
+  });
+}
+
+export function reorderAdminProductCarouselPage(carouselId: number, medicineIds: number[]) {
+  return request<ApiSuccessResponse<{ carousel_id: number; medicine_ids: number[] }>>(
+    `/v1/admin/product-carousels/${carouselId}/products/reorder-page`,
+    { method: 'PATCH', body: { medicine_ids: medicineIds } },
+  );
 }
 
 export function createAdminProductCarousel(body: {

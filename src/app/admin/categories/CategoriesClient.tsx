@@ -1,447 +1,405 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  addCategoryMedicine,
+  addSelectedCategoryMedicines,
   bulkAddCategoryMedicines,
   createCategory,
   deleteCategory,
-  disableCategory,
   getCategoryMedicines,
   previewCategoryMedicineBulkAdd,
-  removeCategoryMedicine,
-  searchMedicinesForCategory,
+  removeSelectedCategoryMedicines,
+  reorderCategories,
+  searchCategoryMedicineCandidates,
   updateCategory,
 } from './actions';
 import type {
+  AdminBatchAddResult,
   AdminCategory,
   AdminCategoryMedicine,
-  AdminCategoryMedicineBulkAddResult,
   AdminCategoryMedicineBulkPreviewResponse,
+  AdminMedicineCandidate,
+  AdminNumberedPage,
 } from '@/lib/api-v1/admin-types';
+import { selectPage, toggleSelection } from '@/lib/admin-selection';
 
-type SearchResult = { medicine_id: number; medicine_name: string; country?: string | null; vendor?: string | null; in_stock?: boolean };
+const EMPTY_PAGE: AdminNumberedPage = { number: 1, size: 25, total_items: 0, total_pages: 1 };
 
-export default function CategoriesClient({ initialCategories }: { initialCategories: AdminCategory[] }) {
+function PageNav({ page, busy, onPage }: { page: AdminNumberedPage; busy: boolean; onPage: (page: number) => void }) {
+  if (page.total_pages <= 1) return null;
+  return (
+    <div className="admin-pagination">
+      <button type="button" disabled={busy || page.number <= 1} onClick={() => onPage(page.number - 1)}>Назад</button>
+      <span className="current">{page.number} / {page.total_pages}</span>
+      <button type="button" disabled={busy || page.number >= page.total_pages} onClick={() => onPage(page.number + 1)}>Далее</button>
+    </div>
+  );
+}
+
+export default function CategoriesClient({
+  initialCategories,
+  initialItems,
+  initialItemsPage,
+}: {
+  initialCategories: AdminCategory[];
+  initialItems: AdminCategoryMedicine[];
+  initialItemsPage: AdminNumberedPage;
+}) {
   const [categories, setCategories] = useState(initialCategories);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<AdminCategory | null>(null);
-  
-  const [formData, setFormData] = useState({ slug: '', name: '', icon: '', color: '', sort_order: '0' });
+  const [selectedId, setSelectedId] = useState<number | null>(initialCategories[0]?.id ?? null);
+  const [items, setItems] = useState<AdminCategoryMedicine[]>(initialItems);
+  const [itemsPage, setItemsPage] = useState(initialItemsPage);
+  const [itemsQuery, setItemsQuery] = useState('');
+  const [availability, setAvailability] = useState<'all' | 'in_stock' | 'out_of_stock'>('all');
+  const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 
-  const [managingCategory, setManagingCategory] = useState<AdminCategory | null>(null);
-  const [categoryItems, setCategoryItems] = useState<AdminCategoryMedicine[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [candidateQuery, setCandidateQuery] = useState('');
+  const [candidates, setCandidates] = useState<AdminMedicineCandidate[]>([]);
+  const [candidatePage, setCandidatePage] = useState(EMPTY_PAGE);
+  const [selectedCandidates, setSelectedCandidates] = useState<Set<number>>(new Set());
+
   const [bulkFragment, setBulkFragment] = useState('');
   const [bulkPreview, setBulkPreview] = useState<AdminCategoryMedicineBulkPreviewResponse | null>(null);
-  const [bulkResult, setBulkResult] = useState<AdminCategoryMedicineBulkAddResult | null>(null);
-  const [bulkLoading, setBulkLoading] = useState(false);
-  const [bulkError, setBulkError] = useState('');
+  const [selectedPreview, setSelectedPreview] = useState<Set<number>>(new Set());
 
-  const handleOpenModal = (cat?: AdminCategory) => {
-    if (cat) {
-      setEditingCategory(cat);
-      setFormData({ slug: cat.slug, name: cat.name, icon: cat.icon || '', color: cat.color || '', sort_order: String(cat.sort_order) });
+  const [newSlug, setNewSlug] = useState('');
+  const [newName, setNewName] = useState('');
+  const [draggedCategoryId, setDraggedCategoryId] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const selected = useMemo(
+    () => categories.find((category) => category.id === selectedId) ?? categories[0] ?? null,
+    [categories, selectedId],
+  );
+
+  const loadItems = async (categoryId: number, page = 1, q = itemsQuery, stock = availability) => {
+    setBusy(true);
+    const response = await getCategoryMedicines(categoryId, page, q, stock);
+    if (response.success) {
+      setItems(response.items);
+      setItemsPage(response.page);
+      setSelectedItems(new Set());
     } else {
-      setEditingCategory(null);
-      setFormData({ slug: '', name: '', icon: '', color: '', sort_order: '0' });
+      setMessage(`Ошибка: ${response.error}`);
     }
-    setIsModalOpen(true);
+    setBusy(false);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    let res;
-    if (editingCategory) {
-      res = await updateCategory({ id: editingCategory.id, name: formData.name, icon: formData.icon, color: formData.color, sort_order: Number(formData.sort_order) });
-    } else {
-      res = await createCategory({ ...formData, sort_order: Number(formData.sort_order) });
-    }
-    
-    if (res.success) {
-      setCategories((current) => {
-        const updated = editingCategory
-          ? current.map((category) => category.id === res.category.id ? res.category : category)
-          : [...current, res.category];
-        return updated.sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-      });
-      setIsModalOpen(false);
-      setLoading(false);
-    } else {
-      setError(res.error || 'Ошибка сохранения');
-      setLoading(false);
-    }
-  };
-
-  const handleToggleActive = async (category: AdminCategory) => {
-    const nextActive = !category.is_active;
-    if (!confirm(nextActive ? 'Включить эту категорию?' : 'Отключить эту категорию? Товары и связи сохранятся.')) return;
-    setLoading(true);
-    const res = nextActive
-      ? await updateCategory({ id: category.id, is_active: true })
-      : await disableCategory(category.id);
-    if (res.success) {
-      setCategories((current) => current.map((item) => item.id === res.category.id ? res.category : item));
-      setLoading(false);
-    } else {
-      alert(res.error || 'Ошибка изменения категории');
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async (category: AdminCategory) => {
-    if (!window.confirm(`Удалить категорию «${category.name}»?\n\nУдаление возможно только если в категории нет товаров и на неё не ссылаются баннеры.`)) return;
-    setLoading(true);
-    setError('');
-    const result = await deleteCategory(category.id);
-    if (result.success) {
-      setCategories((current) => current.filter((item) => item.id !== category.id));
-    } else {
-      setError(result.error || 'Не удалось удалить категорию');
-      window.alert(result.error || 'Не удалось удалить категорию');
-    }
-    setLoading(false);
-  };
-
-  const handleManageItems = async (cat: AdminCategory) => {
-    setManagingCategory(cat);
-    setBulkFragment('');
+  const selectCategory = (categoryId: number) => {
+    setSelectedId(categoryId);
+    setItemsQuery('');
+    setAvailability('all');
+    setCandidates([]);
+    setCandidatePage(EMPTY_PAGE);
+    setSelectedCandidates(new Set());
     setBulkPreview(null);
-    setBulkResult(null);
-    setBulkError('');
-    setLoading(true);
-    const res = await getCategoryMedicines(cat.id);
-    if (res.success) {
-      setCategoryItems(res.items ?? []);
-    }
-    setLoading(false);
+    setSelectedPreview(new Set());
+    void loadItems(categoryId, 1, '', 'all');
   };
 
-  const searchMedicines = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const q = searchQuery.trim();
-    if (q.length < 2) {
-      setSearchResults([]);
-      setError('Введите минимум 2 символа или точный medicine_id');
+  const refreshAfterMembershipChange = async (resultMessage: string, removed = 0) => {
+    if (!selected) return;
+    setMessage(resultMessage);
+    const remaining = Math.max(0, itemsPage.total_items - removed);
+    const lastPage = Math.max(1, Math.ceil(remaining / itemsPage.size));
+    await loadItems(selected.id, Math.min(itemsPage.number, lastPage));
+  };
+
+  const removeSelected = async () => {
+    if (!selected || selectedItems.size === 0) return;
+    const ids = [...selectedItems];
+    if (!confirm(`Удалить из категории «${selected.name}» выбранные связи: ${ids.length}?\n\nЛекарства и другие категории не изменятся.`)) return;
+    setBusy(true);
+    const response = await removeSelectedCategoryMedicines(selected.id, ids);
+    if (response.success) {
+      await refreshAfterMembershipChange(
+        `Удалено: ${response.result.removed}. Уже отсутствовало: ${response.result.already_absent}.`,
+        response.result.removed,
+      );
+    } else {
+      setMessage(`Ошибка: ${response.error}`);
+      setBusy(false);
+    }
+  };
+
+  const searchCandidates = async (page = 1) => {
+    if (!selected || candidateQuery.trim().length < 2) {
+      setMessage('Ошибка: введите минимум 2 символа для поиска');
       return;
     }
-    setLoading(true);
-    setError('');
-    const result = await searchMedicinesForCategory(q);
-    if (result.success) setSearchResults(result.items);
-    else setError(result.error || 'Ошибка поиска лекарств');
-    setLoading(false);
+    setBusy(true);
+    const response = await searchCategoryMedicineCandidates(selected.id, candidateQuery, page);
+    if (response.success) {
+      setCandidates(response.items);
+      setCandidatePage(response.page);
+      setSelectedCandidates(new Set());
+    } else setMessage(`Ошибка: ${response.error}`);
+    setBusy(false);
   };
 
-  const handleAddItem = async (medicineId: number) => {
-    if (!managingCategory) return;
-    setLoading(true);
-    const res = await addCategoryMedicine(managingCategory.id, medicineId);
-    if (res.success) {
-      const itemsRes = await getCategoryMedicines(managingCategory.id);
-      if (itemsRes.success) setCategoryItems(itemsRes.items ?? []);
-      setSearchQuery('');
-      setSearchResults([]);
+  const addIds = async (ids: number[], matched: number, label: string) => {
+    if (!selected || ids.length === 0) return;
+    setBusy(true);
+    const response = await addSelectedCategoryMedicines(selected.id, ids);
+    if (response.success) {
+      const result: AdminBatchAddResult = response.result;
+      setMessage(
+        `${label}. Matched: ${matched}; selected: ${result.selected}; added: ${result.added}; already_present: ${result.already_present}.`,
+      );
+      setSelectedCandidates(new Set());
+      setSelectedPreview(new Set());
+      await loadItems(selected.id, 1);
+      if (candidateQuery.trim().length >= 2) await searchCandidates(candidatePage.number);
     } else {
-      alert(res.error || 'Ошибка добавления товара');
+      setMessage(`Ошибка: ${response.error}`);
+      setBusy(false);
     }
-    setLoading(false);
   };
 
-  const handleRemoveItem = async (medicineId: number) => {
-    if (!managingCategory) return;
-    setLoading(true);
-    const res = await removeCategoryMedicine(managingCategory.id, medicineId);
-    if (res.success) {
-      const itemsRes = await getCategoryMedicines(managingCategory.id);
-      if (itemsRes.success) setCategoryItems(itemsRes.items ?? []);
-    } else {
-      alert(res.error || 'Ошибка удаления товара');
-    }
-    setLoading(false);
-  };
-
-  const loadBulkPreview = async (page = 1, fragment = bulkFragment.trim()) => {
-    if (!managingCategory) return;
-    if (fragment.length < 2) {
-      setBulkPreview(null);
-      setBulkError('Введите минимум 2 символа');
+  const loadBulkPreview = async (page = 1) => {
+    if (!selected || bulkFragment.trim().length < 2) {
+      setMessage('Ошибка: введите минимум 2 символа фрагмента');
       return;
     }
-    setBulkLoading(true);
-    setBulkError('');
-    setBulkResult(null);
-    const response = await previewCategoryMedicineBulkAdd(managingCategory.id, fragment, page);
+    setBusy(true);
+    const response = await previewCategoryMedicineBulkAdd(selected.id, bulkFragment, page);
     if (response.success) {
       setBulkPreview(response.preview);
       setBulkFragment(response.preview.fragment);
-    } else {
-      setBulkPreview(null);
-      setBulkError(response.error || 'Не удалось получить предпросмотр');
-    }
-    setBulkLoading(false);
+      setSelectedPreview(new Set());
+    } else setMessage(`Ошибка: ${response.error}`);
+    setBusy(false);
   };
 
-  const handleBulkPreview = async (event: React.FormEvent) => {
-    event.preventDefault();
-    await loadBulkPreview();
-  };
-
-  const handleBulkAdd = async () => {
-    if (!managingCategory || !bulkPreview || bulkPreview.total === 0) return;
-    const confirmed = window.confirm(
-      `Добавить в категорию «${managingCategory.name}» все найденные лекарства: ${bulkPreview.total}?\n\n` +
-      'Уже добавленные связи останутся без изменений.',
-    );
-    if (!confirmed) return;
-    setBulkLoading(true);
-    setBulkError('');
-    const response = await bulkAddCategoryMedicines(
-      managingCategory.id,
-      bulkPreview.fragment,
-      bulkPreview.total,
-    );
+  const addAllPreviewed = async () => {
+    if (!selected || !bulkPreview || bulkPreview.total === 0) return;
+    if (!confirm(`Добавить все найденные лекарства в «${selected.name}»: ${bulkPreview.total}?`)) return;
+    setBusy(true);
+    const response = await bulkAddCategoryMedicines(selected.id, bulkPreview.fragment, bulkPreview.total);
     if (response.success) {
-      setBulkResult(response.result);
-      const [itemsResponse, previewResponse] = await Promise.all([
-        getCategoryMedicines(managingCategory.id),
-        previewCategoryMedicineBulkAdd(
-          managingCategory.id,
-          bulkPreview.fragment,
-          bulkPreview.page.number,
-        ),
-      ]);
-      if (itemsResponse.success) setCategoryItems(itemsResponse.items ?? []);
-      if (previewResponse.success) setBulkPreview(previewResponse.preview);
+      setMessage(`Совпало: ${response.result.matched}; добавлено: ${response.result.added}; уже было: ${response.result.already_present}.`);
+      await loadItems(selected.id, 1);
+      await loadBulkPreview(bulkPreview.page.number);
     } else {
-      setBulkError(response.error || 'Не удалось добавить найденные лекарства');
+      setMessage(`Ошибка: ${response.error}`);
+      setBusy(false);
     }
-    setBulkLoading(false);
   };
 
-  if (managingCategory) {
-    return (
-      <div>
-        <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '30px' }}>
-          <button onClick={() => setManagingCategory(null)} style={{ background: '#eee', border: 'none', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>&larr; Назад</button>
-          <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>Товары в категории: {managingCategory.name}</h1>
-        </div>
+  const moveCategory = async (categoryId: number, direction: -1 | 1, targetId?: number) => {
+    const from = categories.findIndex((item) => item.id === categoryId);
+    const to = targetId === undefined ? from + direction : categories.findIndex((item) => item.id === targetId);
+    if (from < 0 || to < 0 || to >= categories.length || from === to || busy) return;
+    const previous = categories;
+    const reordered = [...categories];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    setCategories(reordered.map((item, index) => ({ ...item, sort_order: (index + 1) * 10 })));
+    setBusy(true);
+    const response = await reorderCategories(reordered.map((item) => item.id));
+    if (response.success) {
+      setCategories(response.categories);
+      setMessage('Порядок категорий сохранён');
+    } else {
+      setCategories(previous);
+      setMessage(`Ошибка: ${response.error}`);
+    }
+    setBusy(false);
+  };
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', alignItems: 'start' }}>
-          
-          <div style={{ background: 'white', padding: '24px', borderRadius: '12px', border: '1px solid #E8E8E8' }}>
-            <h3 style={{ margin: '0 0 15px 0' }}>Товары ({categoryItems.length})</h3>
-            {loading ? <p>Загрузка...</p> : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {categoryItems.map((item) => (
-                  <div key={item.medicine_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', border: '1px solid #eee', borderRadius: '8px' }}>
-                    <span style={{ fontSize: '14px', fontWeight: '500' }}>{item.medicine_name}<small style={{ display: 'block', color: '#777' }}>ID {item.medicine_id} · {item.in_stock ? 'в наличии' : 'архив'}</small></span>
-                    <button onClick={() => handleRemoveItem(item.medicine_id)} style={{ background: '#ffebee', color: '#c62828', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>Удалить</button>
-                  </div>
-                ))}
-                {categoryItems.length === 0 && <p style={{ color: '#888' }}>Нет товаров в категории</p>}
-              </div>
-            )}
-          </div>
+  const createNewCategory = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    const response = await createCategory({ slug: newSlug.trim(), name: newName.trim(), sort_order: (categories.length + 1) * 10 });
+    if (response.success) {
+      const next = [...categories, response.category].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+      setCategories(next);
+      setSelectedId(response.category.id);
+      setItems([]);
+      setItemsPage(EMPTY_PAGE);
+      setItemsQuery('');
+      setAvailability('all');
+      setSelectedItems(new Set());
+      setCandidates([]);
+      setCandidatePage(EMPTY_PAGE);
+      setCandidateQuery('');
+      setSelectedCandidates(new Set());
+      setBulkPreview(null);
+      setSelectedPreview(new Set());
+      setNewSlug('');
+      setNewName('');
+      setMessage('Категория создана');
+    } else setMessage(`Ошибка: ${response.error}`);
+    setBusy(false);
+  };
 
-          <div style={{ background: 'white', padding: '24px', borderRadius: '12px', border: '1px solid #E8E8E8' }}>
-            <h3 style={{ margin: '0 0 8px 0' }}>Массовое добавление</h3>
-            <p style={{ color: '#666', fontSize: '13px', lineHeight: 1.5, margin: '0 0 15px 0' }}>
-              Введите буквальный фрагмент названия. Регистр не важен; символы % и _ не являются шаблонами.
-            </p>
-            <form onSubmit={handleBulkPreview} style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-              <input
-                required
-                minLength={2}
-                maxLength={120}
-                type="text"
-                placeholder="Например: now"
-                value={bulkFragment}
-                onChange={(event) => {
-                  setBulkFragment(event.target.value);
-                  setBulkPreview(null);
-                  setBulkResult(null);
-                  setBulkError('');
-                }}
-                style={{ flex: 1, minWidth: 0, padding: '12px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none' }}
-              />
-              <button type="submit" disabled={bulkLoading}>
-                {bulkLoading ? 'Проверка...' : 'Предпросмотр'}
-              </button>
-            </form>
+  const toggleCategory = async () => {
+    if (!selected) return;
+    setBusy(true);
+    const response = await updateCategory({ id: selected.id, is_active: !selected.is_active });
+    if (response.success) {
+      setCategories((current) => current.map((item) => item.id === response.category.id ? response.category : item));
+      setMessage(response.category.is_active ? 'Категория включена' : 'Категория отключена');
+    } else setMessage(`Ошибка: ${response.error}`);
+    setBusy(false);
+  };
 
-            {bulkError && <div className="admin-inline-error" role="alert">{bulkError}</div>}
-            {bulkResult && (
-              <div style={{ padding: '12px', marginBottom: '15px', borderRadius: '8px', background: '#ecfdf3', color: '#166534', fontSize: '14px' }} role="status">
-                Совпало: {bulkResult.matched}. Добавлено: {bulkResult.added}. Уже было в категории: {bulkResult.already_present}.
-              </div>
-            )}
-
-            {bulkPreview && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-                  <strong>Найдено: {bulkPreview.total}</strong>
-                  <span style={{ color: '#777', fontSize: '12px' }}>
-                    Страница {bulkPreview.page.number} из {bulkPreview.page.total_pages}
-                  </span>
-                </div>
-                {bulkPreview.data.map((item) => (
-                  <div key={item.medicine_id} style={{ padding: '10px', background: '#F9F9F9', borderRadius: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600 }}>{item.medicine_name}</div>
-                    <div style={{ fontSize: '12px', color: '#777', marginTop: '3px' }}>
-                      ID {item.medicine_id} · {item.in_stock ? 'в наличии' : 'архив'} · {item.already_present ? 'уже в категории' : 'будет добавлено'}
-                    </div>
-                  </div>
-                ))}
-                {bulkPreview.total === 0 && <p style={{ color: '#777', margin: 0 }}>Совпадений нет.</p>}
-                {bulkPreview.page.total_pages > 1 && (
-                  <div className="admin-pagination">
-                    <button
-                      type="button"
-                      disabled={bulkLoading || bulkPreview.page.number <= 1}
-                      onClick={() => loadBulkPreview(bulkPreview.page.number - 1, bulkPreview.fragment)}
-                    >
-                      Назад
-                    </button>
-                    <span className="current">{bulkPreview.page.number}</span>
-                    <button
-                      type="button"
-                      disabled={bulkLoading || bulkPreview.page.number >= bulkPreview.page.total_pages}
-                      onClick={() => loadBulkPreview(bulkPreview.page.number + 1, bulkPreview.fragment)}
-                    >
-                      Далее
-                    </button>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={handleBulkAdd}
-                  disabled={bulkLoading || bulkPreview.total === 0}
-                  style={{ padding: '12px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
-                >
-                  Добавить все найденные ({bulkPreview.total})
-                </button>
-              </div>
-            )}
-
-            <hr style={{ border: 0, borderTop: '1px solid #E8E8E8', margin: '24px 0' }} />
-            <h3 style={{ margin: '0 0 15px 0' }}>Добавить товар</h3>
-            <form onSubmit={searchMedicines} style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-              <input 
-                type="text" 
-                placeholder="Название, medicine_id или SKU"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none' }}
-              />
-              <button type="submit" disabled={loading}>Найти</button>
-            </form>
-            {error && <p style={{ color: '#c62828' }}>{error}</p>}
-            
-            {searchResults.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {searchResults.map((res) => (
-                  <div key={res.medicine_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: '#F9F9F9', borderRadius: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: '500' }}>{res.medicine_name} <div style={{ fontSize: '12px', color: '#888', fontWeight: 'normal' }}>ID {res.medicine_id} · {res.country || '—'} · {res.vendor || '—'} · {res.in_stock ? 'в наличии' : 'архив'}</div></div>
-                    <button onClick={() => handleAddItem(res.medicine_id)} style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '5px 15px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Добавить</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-        </div>
-      </div>
-    );
-  }
+  const removeCategory = async () => {
+    if (!selected || !confirm(`Удалить категорию «${selected.name}»? Это возможно только без связанных товаров и баннеров.`)) return;
+    setBusy(true);
+    const response = await deleteCategory(selected.id);
+    if (response.success) {
+      const next = categories.filter((item) => item.id !== selected.id);
+      setCategories(next);
+      const nextId = next[0]?.id ?? null;
+      setSelectedId(nextId);
+      setItemsQuery('');
+      setAvailability('all');
+      setCandidates([]);
+      setCandidateQuery('');
+      setBulkPreview(null);
+      setSelectedItems(new Set());
+      setSelectedCandidates(new Set());
+      setSelectedPreview(new Set());
+      if (nextId === null) {
+        setItems([]);
+        setItemsPage(EMPTY_PAGE);
+      } else {
+        await loadItems(nextId, 1, '', 'all');
+      }
+      setMessage('Категория удалена');
+    } else setMessage(`Ошибка: ${response.error}`);
+    setBusy(false);
+  };
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>Управление Категориями</h1>
-        <button onClick={() => handleOpenModal()} style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-          + Создать Категорию
-        </button>
-      </div>
+      <h1 style={{ margin: '0 0 8px', fontSize: 28 }}>Категории</h1>
+      <p style={{ margin: '0 0 20px', color: '#666' }}>Слева выберите категорию, справа управляйте её товарами небольшими страницами.</p>
+      {message && <div className={message.startsWith('Ошибка') ? 'admin-inline-error' : 'admin-success-message'} role="status">{message}</div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-        {error && <div className="admin-inline-error" role="alert" style={{ gridColumn: '1 / -1' }}>{error}</div>}
-        {categories.map((cat) => (
-          <div key={cat.id} style={{ background: 'white', borderRadius: '12px', padding: '20px', border: '1px solid #E8E8E8', position: 'relative' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '15px' }}>
-              <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: cat.color || '#eee', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
-                {cat.icon || '💊'}
-              </div>
-              <div>
-                <h3 style={{ margin: '0 0 5px 0', fontSize: '18px' }}>{cat.name}</h3>
-                <div style={{ fontSize: '12px', color: '#888' }}>{cat.slug} · порядок {cat.sort_order}</div>
-                <div style={{ marginTop: 5, fontSize: 12, color: cat.is_active ? '#166534' : '#991b1b' }}>
-                  {cat.is_active ? 'Активна' : 'Отключена'}
-                </div>
-              </div>
-            </div>
-            
-            <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'wrap' }}>
-              <button onClick={() => handleManageItems(cat)} style={{ flex: 1, background: '#f5f5f5', border: 'none', padding: '8px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Товары</button>
-              <button onClick={() => handleOpenModal(cat)} style={{ background: '#e3f2fd', color: '#1976d2', border: 'none', padding: '8px 15px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>Изменить</button>
-              <button onClick={() => handleToggleActive(cat)} disabled={loading} style={{ background: cat.is_active ? '#ffebee' : '#e8f5e9', color: cat.is_active ? '#c62828' : '#2e7d32', border: 'none', padding: '8px 15px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' }}>
-                {cat.is_active ? 'Отключить' : 'Включить'}
-              </button>
-              <button className="admin-danger-button" onClick={() => handleDelete(cat)} disabled={loading} type="button">
-                Удалить
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {isModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
-          <div style={{ background: 'white', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px' }}>
-            <h2 style={{ margin: '0 0 20px 0', fontSize: '20px' }}>{editingCategory ? 'Редактировать категорию' : 'Новая категория'}</h2>
-            
-            {error && <div style={{ color: 'red', marginBottom: '15px', fontSize: '14px' }}>{error}</div>}
-            
-            <form onSubmit={handleSave}>
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '5px' }}>Название</label>
-                <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }} />
-              </div>
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '5px' }}>Slug (Англ. без пробелов)</label>
-                <input required disabled={!!editingCategory} type="text" value={formData.slug} onChange={e => setFormData({...formData, slug: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc', background: editingCategory ? '#eee' : 'white' }} />
-              </div>
-              <div style={{ marginBottom: '15px', display: 'flex', gap: '15px' }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '5px' }}>Emoji Иконка</label>
-                  <input type="text" value={formData.icon} onChange={e => setFormData({...formData, icon: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '5px' }}>Цвет (HEX)</label>
-                  <input type="text" value={formData.color} onChange={e => setFormData({...formData, color: e.target.value})} placeholder="#FFEBEE" style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }} />
-                </div>
-              </div>
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '5px' }}>Порядок отображения</label>
-                <input required min="0" max="100000" type="number" value={formData.sort_order} onChange={e => setFormData({...formData, sort_order: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }} />
-              </div>
-              
-              <div style={{ display: 'flex', gap: '10px', marginTop: '30px' }}>
-                <button type="button" onClick={() => setIsModalOpen(false)} style={{ flex: 1, padding: '12px', background: '#eee', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>Отмена</button>
-                <button type="submit" disabled={loading} style={{ flex: 1, padding: '12px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-                  {loading ? 'Сохранение...' : 'Сохранить'}
+      <div className="admin-master-detail">
+        <aside className="admin-entity-list-panel">
+          <div className="admin-sticky-toolbar"><strong>Категории ({categories.length})</strong></div>
+          <div className="admin-compact-list">
+            {categories.map((category, index) => (
+              <div
+                key={category.id}
+                draggable={!busy}
+                onDragStart={() => setDraggedCategoryId(category.id)}
+                onDragEnd={() => setDraggedCategoryId(null)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => {
+                  if (draggedCategoryId !== null) void moveCategory(draggedCategoryId, 1, category.id);
+                  setDraggedCategoryId(null);
+                }}
+                className={`admin-entity-list-row${selected?.id === category.id ? ' active' : ''}`}
+              >
+                <button type="button" disabled={busy} className="admin-entity-select" onClick={() => selectCategory(category.id)}>
+                  <span aria-hidden>↕ {category.icon || '💊'}</span>
+                  <span><strong>{category.name}</strong><small>{category.is_active ? 'активна' : 'отключена'}</small></span>
                 </button>
+                <div className="admin-order-buttons">
+                  <button aria-label="Выше" type="button" disabled={busy || index === 0} onClick={() => moveCategory(category.id, -1)}>↑</button>
+                  <button aria-label="Ниже" type="button" disabled={busy || index === categories.length - 1} onClick={() => moveCategory(category.id, 1)}>↓</button>
+                </div>
               </div>
-            </form>
+            ))}
           </div>
-        </div>
-      )}
+          <form onSubmit={createNewCategory} className="admin-sidebar-create-form">
+            <strong>Новая категория</strong>
+            <input required minLength={2} maxLength={80} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={newSlug} onChange={(event) => setNewSlug(event.target.value)} placeholder="slug" />
+            <input required maxLength={255} value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Название" />
+            <button disabled={busy} type="submit">Создать</button>
+          </form>
+        </aside>
+
+        <main className="admin-entity-detail-panel">
+          {!selected ? <div className="admin-empty-panel">Создайте или выберите категорию.</div> : (
+            <>
+              <section className="admin-entity-header">
+                <div><small>{selected.slug}</small><h2>{selected.name}</h2></div>
+                <div className="admin-toolbar-actions">
+                  <button type="button" disabled={busy} onClick={toggleCategory}>{selected.is_active ? 'Отключить' : 'Включить'}</button>
+                  <button type="button" disabled={busy} onClick={removeCategory} className="admin-danger-button">Удалить</button>
+                </div>
+              </section>
+
+              <section className="admin-card-panel">
+                <div className="admin-sticky-toolbar admin-selection-toolbar">
+                  <div><strong>Товары в категории: {itemsPage.total_items}</strong><small>Выбрано: {selectedItems.size}</small></div>
+                  <div className="admin-toolbar-actions">
+                    <button type="button" disabled={busy || items.length === 0} onClick={() => setSelectedItems(selectPage(items.map((item) => item.medicine_id)))}>Выбрать страницу</button>
+                    <button type="button" disabled={busy || selectedItems.size === 0} onClick={removeSelected} className="admin-danger-button">Удалить выбранные ({selectedItems.size})</button>
+                  </div>
+                </div>
+                <form className="admin-filter-row" onSubmit={(event) => { event.preventDefault(); void loadItems(selected.id, 1); }}>
+                  <input value={itemsQuery} onChange={(event) => setItemsQuery(event.target.value)} placeholder="Поиск внутри категории" />
+                  <select value={availability} onChange={(event) => setAvailability(event.target.value as typeof availability)}>
+                    <option value="all">Все</option><option value="in_stock">В наличии</option><option value="out_of_stock">Не в наличии</option>
+                  </select>
+                  <button disabled={busy} type="submit">Найти</button>
+                </form>
+                <div className="admin-compact-table-list">
+                  {items.map((item) => (
+                    <label key={item.medicine_id} className="admin-check-row">
+                      <input type="checkbox" checked={selectedItems.has(item.medicine_id)} onChange={() => setSelectedItems((current) => toggleSelection(current, item.medicine_id))} />
+                      <span><strong>{item.medicine_name}</strong><small>ID {item.medicine_id} · {item.in_stock ? 'в наличии' : 'архив'} · {item.country || '—'}</small></span>
+                    </label>
+                  ))}
+                  {!busy && items.length === 0 && <div className="admin-empty-row">Ничего не найдено.</div>}
+                </div>
+                <PageNav page={itemsPage} busy={busy} onPage={(page) => loadItems(selected.id, page)} />
+              </section>
+
+              <section className="admin-card-panel">
+                <div className="admin-sticky-toolbar admin-selection-toolbar">
+                  <div><strong>Добавить выбранные товары</strong><small>Найдено: {candidatePage.total_items} · выбрано: {selectedCandidates.size}</small></div>
+                  <button type="button" disabled={busy || selectedCandidates.size === 0} onClick={() => addIds([...selectedCandidates], candidatePage.total_items, 'Выбранные товары обработаны')}>Добавить выбранные ({selectedCandidates.size})</button>
+                </div>
+                <form className="admin-filter-row" onSubmit={(event) => { event.preventDefault(); void searchCandidates(1); }}>
+                  <input minLength={2} value={candidateQuery} onChange={(event) => setCandidateQuery(event.target.value)} placeholder="Название, medicine_id или SKU" />
+                  <button disabled={busy} type="submit">Найти</button>
+                </form>
+                <div className="admin-compact-table-list">
+                  {candidates.map((item) => (
+                    <label key={item.medicine_id} className={`admin-check-row${item.already_present ? ' muted' : ''}`}>
+                      <input type="checkbox" disabled={item.already_present} checked={selectedCandidates.has(item.medicine_id)} onChange={() => setSelectedCandidates((current) => toggleSelection(current, item.medicine_id))} />
+                      <span><strong>{item.medicine_name}</strong><small>ID {item.medicine_id} · {item.already_present ? 'уже в категории' : 'можно добавить'}</small></span>
+                    </label>
+                  ))}
+                </div>
+                <PageNav page={candidatePage} busy={busy} onPage={searchCandidates} />
+              </section>
+
+              <section className="admin-card-panel">
+                <div className="admin-sticky-toolbar admin-selection-toolbar">
+                  <div><strong>Добавление по буквальному фрагменту</strong><small>Matched: {bulkPreview?.total ?? 0} · selected: {selectedPreview.size}</small></div>
+                  <div className="admin-toolbar-actions">
+                    <button type="button" disabled={busy || selectedPreview.size === 0} onClick={() => addIds([...selectedPreview], bulkPreview?.total ?? 0, 'Выбранные из preview обработаны')}>Добавить выбранные ({selectedPreview.size})</button>
+                    <button type="button" disabled={busy || !bulkPreview || bulkPreview.total === 0} onClick={addAllPreviewed}>Добавить все найденные ({bulkPreview?.total ?? 0})</button>
+                  </div>
+                </div>
+                <p className="admin-help-text">Регистр не важен; символы % и _ считаются обычными символами.</p>
+                <form className="admin-filter-row" onSubmit={(event) => { event.preventDefault(); void loadBulkPreview(1); }}>
+                  <input minLength={2} maxLength={120} value={bulkFragment} onChange={(event) => { setBulkFragment(event.target.value); setBulkPreview(null); setSelectedPreview(new Set()); }} placeholder="Например: now" />
+                  <button disabled={busy} type="submit">Предпросмотр</button>
+                </form>
+                <div className="admin-compact-table-list">
+                  {(bulkPreview?.data ?? []).map((item) => (
+                    <label key={item.medicine_id} className={`admin-check-row${item.already_present ? ' muted' : ''}`}>
+                      <input type="checkbox" disabled={item.already_present} checked={selectedPreview.has(item.medicine_id)} onChange={() => setSelectedPreview((current) => toggleSelection(current, item.medicine_id))} />
+                      <span><strong>{item.medicine_name}</strong><small>ID {item.medicine_id} · {item.already_present ? 'уже в категории' : 'будет добавлено'}</small></span>
+                    </label>
+                  ))}
+                </div>
+                {bulkPreview && <PageNav page={bulkPreview.page} busy={busy} onPage={loadBulkPreview} />}
+              </section>
+            </>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

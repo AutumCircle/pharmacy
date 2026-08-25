@@ -10,8 +10,13 @@ Homepage content routes:
 - `GET /v1/admin/homepage-banners` — all four banner slots (admin authorization required).
 - `PATCH /v1/admin/homepage-banners/{slot}` — update title, subtitle, HTTPS image URL, link, or active state.
 - `GET /v1/public/product-carousels` — active carousel sections in configured order with their available products.
-- `GET|POST /v1/admin/product-carousels` — list or create carousel sections.
+- `GET|POST /v1/admin/product-carousels` — list compact carousel metadata (`product_count`) or create a section.
 - `PATCH|DELETE /v1/admin/product-carousels/{carousel_id}` — edit, activate/deactivate, reorder, or delete a section.
+- `PATCH /v1/admin/product-carousels/reorder` — save the complete section order in one transaction.
+- `GET /v1/admin/product-carousels/{carousel_id}/products` — numbered, searchable product page.
+- `GET /v1/admin/product-carousels/{carousel_id}/candidates` — numbered candidate search with `already_present`.
+- `POST|DELETE /v1/admin/product-carousels/{carousel_id}/products/batch` — set-based add/remove of 1–100 relationships.
+- `PATCH /v1/admin/product-carousels/{carousel_id}/products/reorder-page` — reorder one unfiltered page while preserving its sort slots.
 - `POST /v1/admin/product-carousels/{carousel_id}/products` — add a unique product by `medicine_id`.
 - `PATCH|DELETE /v1/admin/product-carousels/{carousel_id}/products/{medicine_id}` — update product order/image or remove it from the section.
 - `GET /v1/public/featured-products` and the matching admin routes remain temporary compatibility endpoints during rollout.
@@ -50,6 +55,7 @@ Browser
 - Неизвестные поля mutation request отклоняются с `400 VALIDATION_ERROR`.
 - Каждый ответ содержит `request_id`.
 - List endpoints имеют `limit` (default 20, max 100), opaque `cursor` и deterministic ordering.
+- Long admin category/carousel membership lists use numbered `page`/`limit` pagination and return `number`, `size`, `total_items`, `total_pages`.
 - Фильтрация, сортировка, pagination и aggregation выполняются в Lambda/RDS, не после загрузки всей таблицы в Next.js.
 - `POST /public/orders` требует UUID в `Idempotency-Key`.
 
@@ -91,7 +97,10 @@ Browser
 | `POST /v1/admin/categories` | Создать категорию | `create_category` |
 | `PATCH /v1/admin/categories/{category_id}` | Изменить/отключить | `update_category` |
 | `DELETE /v1/admin/categories/{category_id}` | Удалить только неиспользуемую категорию | Новая операция |
-| `GET /v1/admin/categories/{category_id}/medicines` | Все связи категории | Новая операция |
+| `PATCH /v1/admin/categories/reorder` | Сохранить полный порядок категорий одной транзакцией | Новая операция |
+| `GET /v1/admin/categories/{category_id}/medicines` | Пагинированные связи категории с поиском/availability | Новая операция |
+| `GET /v1/admin/categories/{category_id}/medicines/candidates` | Пагинированный поиск кандидатов с `already_present` | Новая операция |
+| `POST\|DELETE /v1/admin/categories/{category_id}/medicines/batch` | Добавить/удалить 1–100 выбранных связей set-based | Новая операция |
 | `PUT /v1/admin/categories/{category_id}/medicines/{medicine_id}` | Добавить связь | `add_category_medicine` |
 | `DELETE /v1/admin/categories/{category_id}/medicines/{medicine_id}` | Удалить связь | `remove_category_medicine` |
 | `GET /v1/admin/categories/{category_id}/medicines/bulk-preview` | Предпросмотр буквального поиска по фрагменту имени | Новая операция |

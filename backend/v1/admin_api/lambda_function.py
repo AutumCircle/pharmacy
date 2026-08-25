@@ -31,6 +31,7 @@ from backend.v1.shared.xlsx_export import build_out_of_stock_workbook
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+MAX_BATCH_ITEMS = 100
 MAX_EXPORT_ROWS = 25_000
 DELETABLE_ORDER_STATUSES = frozenset({"pending", "cancelled"})
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -178,6 +179,20 @@ def _positive_int(value: Any, field: str) -> int:
     if parsed <= 0:
         raise ContractError("VALIDATION_ERROR", f"{field} must be a positive integer")
     return parsed
+
+
+def _id_batch(payload: dict[str, Any], field: str) -> list[int]:
+    if set(payload) != {field} or not isinstance(payload.get(field), list):
+        raise ContractError("VALIDATION_ERROR", f"{field} must be an array")
+    values = payload[field]
+    if not 1 <= len(values) <= MAX_BATCH_ITEMS or any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in values
+    ) or len(set(values)) != len(values):
+        raise ContractError(
+            "VALIDATION_ERROR",
+            f"{field} must contain between 1 and {MAX_BATCH_ITEMS} unique positive integers",
+        )
+    return values
 
 
 def _sort_order(value: Any, field: str = "sort_order") -> int:
@@ -922,33 +937,111 @@ def put_category_medicine(category_id: int, medicine_id: int) -> dict[str, Any]:
 
 def list_category_medicines(category_id: int, query: dict[str, Any]) -> dict[str, Any]:
     limit = _limit(query)
-    cursor = _decode_cursor(query.get("cursor"))
-    after_id = 0
-    if cursor:
-        try:
-            after_id = int(cursor["medicine_id"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ContractError("VALIDATION_ERROR", "cursor is invalid") from exc
+    page = _page_number(query)
+    search = str(query.get("q") or "").strip()
+    if len(search) > 120:
+        raise ContractError("VALIDATION_ERROR", "q is too long")
+    availability = str(query.get("availability") or "all")
+    if availability not in {"all", "in_stock", "out_of_stock"}:
+        raise ContractError("VALIDATION_ERROR", "availability is invalid")
+    clauses = ["cm.category_id = %s"]
+    params: list[Any] = [category_id]
+    if search:
+        clauses.append("(m.name ILIKE %s ESCAPE '\\' OR COALESCE(m.source_sku, '') ILIKE %s ESCAPE '\\')")
+        pattern = _literal_ilike_pattern(search)
+        params.extend([pattern, pattern])
+    if availability == "in_stock":
+        clauses.append("m.in_stock IS TRUE")
+    elif availability == "out_of_stock":
+        clauses.append("m.in_stock IS NOT TRUE")
+    where = " AND ".join(clauses)
+    offset = (page - 1) * limit
     with transaction() as cur:
         cur.execute("SELECT 1 FROM categories WHERE id = %s", (category_id,))
         if not cur.fetchone():
             raise ContractError("CATEGORY_NOT_FOUND", "Category was not found", http_status=404)
         cur.execute(
-            """
+            f"""
+            SELECT COUNT(*) AS count
+            FROM category_medicines cm
+            JOIN medicines m ON m.id = cm.medicine_id
+            WHERE {where}
+            """,
+            tuple(params),
+        )
+        total = int(cur.fetchone()["count"])
+        cur.execute(
+            f"""
             SELECT m.id AS medicine_id, m.name AS medicine_name, m.country, m.vendor,
                    m.in_stock, m.updated_at
             FROM category_medicines cm
             JOIN medicines m ON m.id = cm.medicine_id
-            WHERE cm.category_id = %s AND m.id > %s
-            ORDER BY m.id ASC LIMIT %s
+            WHERE {where}
+            ORDER BY lower(m.name) ASC, m.id ASC
+            LIMIT %s OFFSET %s
             """,
-            (category_id, after_id, limit + 1),
+            tuple([*params, limit, offset]),
         )
         rows = [dict(row) for row in cur.fetchall()]
-    has_more = len(rows) > limit
-    rows = rows[:limit]
-    next_cursor = _encode_cursor({"medicine_id": rows[-1]["medicine_id"]}) if has_more and rows else None
-    return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
+    return {
+        "data": rows,
+        "page": {
+            "number": page,
+            "size": limit,
+            "total_items": total,
+            "total_pages": max(1, (total + limit - 1) // limit),
+        },
+    }
+
+
+def search_category_medicine_candidates(category_id: int, query: dict[str, Any]) -> dict[str, Any]:
+    limit = _limit(query)
+    page = _page_number(query)
+    search = str(query.get("q") or "").strip()
+    if not 2 <= len(search) <= 120:
+        raise ContractError("VALIDATION_ERROR", "q must contain between 2 and 120 characters")
+    pattern = _literal_ilike_pattern(search)
+    params: list[Any]
+    if search.isdigit():
+        search_clause = "(m.id = %s OR m.name ILIKE %s ESCAPE '\\' OR COALESCE(m.source_sku, '') ILIKE %s ESCAPE '\\')"
+        params = [int(search), pattern, pattern]
+    else:
+        search_clause = "(m.name ILIKE %s ESCAPE '\\' OR COALESCE(m.source_sku, '') ILIKE %s ESCAPE '\\')"
+        params = [pattern, pattern]
+    offset = (page - 1) * limit
+    with transaction() as cur:
+        cur.execute("SELECT 1 FROM categories WHERE id = %s", (category_id,))
+        if not cur.fetchone():
+            raise ContractError("CATEGORY_NOT_FOUND", "Category was not found", http_status=404)
+        cur.execute(f"SELECT COUNT(*) AS count FROM medicines m WHERE {search_clause}", tuple(params))
+        total = int(cur.fetchone()["count"])
+        cur.execute(
+            f"""
+            SELECT m.id AS medicine_id, m.name AS medicine_name,
+                   m.price AS base_unit_price,
+                   vatan_selling_unit_price(m.price) AS selling_unit_price,
+                   m.source_sku, m.country, m.vendor, m.in_stock, m.updated_at, m.image_url,
+                   EXISTS (
+                       SELECT 1 FROM category_medicines cm
+                       WHERE cm.category_id = %s AND cm.medicine_id = m.id
+                   ) AS already_present
+            FROM medicines m
+            WHERE {search_clause}
+            ORDER BY lower(m.name) ASC, m.id ASC
+            LIMIT %s OFFSET %s
+            """,
+            tuple([category_id, *params, limit, offset]),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    return {
+        "data": rows,
+        "page": {
+            "number": page,
+            "size": limit,
+            "total_items": total,
+            "total_pages": max(1, (total + limit - 1) // limit),
+        },
+    }
 
 
 def preview_category_medicine_bulk_add(category_id: int, query: dict[str, Any]) -> dict[str, Any]:
@@ -1068,6 +1161,134 @@ def bulk_add_category_medicines(
             },
         )
     return result
+
+
+def batch_add_category_medicines(
+    category_id: int, payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    medicine_ids = _id_batch(payload, "medicine_ids")
+    with transaction() as cur:
+        cur.execute("SELECT id FROM categories WHERE id = %s FOR UPDATE", (category_id,))
+        if not cur.fetchone():
+            raise ContractError("CATEGORY_NOT_FOUND", "Category was not found", http_status=404)
+        cur.execute(
+            """
+            WITH requested AS (
+                SELECT medicine_id, position
+                FROM unnest(%s::bigint[]) WITH ORDINALITY AS selected(medicine_id, position)
+            ),
+            found AS MATERIALIZED (
+                SELECT requested.medicine_id, requested.position, m.name
+                FROM requested JOIN medicines m ON m.id = requested.medicine_id
+            ),
+            counts AS (
+                SELECT (SELECT COUNT(*) FROM requested)::integer AS selected,
+                       (SELECT COUNT(*) FROM found)::integer AS found
+            ),
+            inserted AS (
+                INSERT INTO category_medicines (category_id, medicine_id, medicine_name)
+                SELECT %s, found.medicine_id, found.name
+                FROM found CROSS JOIN counts
+                WHERE counts.selected = counts.found
+                ORDER BY found.position
+                ON CONFLICT DO NOTHING
+                RETURNING medicine_id
+            )
+            SELECT counts.selected, counts.found, COUNT(inserted.medicine_id)::integer AS added
+            FROM counts LEFT JOIN inserted ON TRUE
+            GROUP BY counts.selected, counts.found
+            """,
+            (medicine_ids, category_id),
+        )
+        counts = cur.fetchone()
+        selected = int(counts["selected"])
+        found = int(counts["found"])
+        if selected != found:
+            raise ContractError(
+                "MEDICINE_SELECTION_CHANGED",
+                "One or more selected medicines no longer exist; refresh before adding",
+                http_status=409,
+            )
+        added = int(counts["added"])
+        result = {
+            "category_id": category_id,
+            "selected": selected,
+            "added": added,
+            "already_present": selected - added,
+        }
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="category.medicines.batch_add",
+            resource_type="category",
+            resource_id=str(category_id),
+            request=current_request_id,
+            details={**result, "medicine_ids": medicine_ids},
+        )
+    return result
+
+
+def batch_remove_category_medicines(
+    category_id: int, payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    medicine_ids = _id_batch(payload, "medicine_ids")
+    with transaction() as cur:
+        cur.execute("SELECT id FROM categories WHERE id = %s FOR UPDATE", (category_id,))
+        if not cur.fetchone():
+            raise ContractError("CATEGORY_NOT_FOUND", "Category was not found", http_status=404)
+        cur.execute(
+            """
+            DELETE FROM category_medicines
+            WHERE category_id = %s AND medicine_id = ANY(%s::bigint[])
+            RETURNING medicine_id
+            """,
+            (category_id, medicine_ids),
+        )
+        removed_ids = [int(row["medicine_id"]) for row in cur.fetchall()]
+        result = {
+            "category_id": category_id,
+            "selected": len(medicine_ids),
+            "removed": len(removed_ids),
+            "already_absent": len(medicine_ids) - len(removed_ids),
+        }
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="category.medicines.batch_remove",
+            resource_type="category",
+            resource_id=str(category_id),
+            request=current_request_id,
+            details={**result, "medicine_ids": medicine_ids},
+        )
+    return result
+
+
+def reorder_categories(payload: dict[str, Any], actor_id: str, current_request_id: str) -> dict[str, Any]:
+    category_ids = _id_batch(payload, "category_ids")
+    with transaction() as cur:
+        cur.execute("SELECT id FROM categories FOR UPDATE")
+        existing = {int(row["id"]) for row in cur.fetchall()}
+        if existing != set(category_ids):
+            raise ContractError("CATEGORIES_CHANGED", "Categories changed; refresh before reordering", http_status=409)
+        cur.execute(
+            """
+            UPDATE categories AS category
+            SET sort_order = ordered.position * 10
+            FROM unnest(%s::bigint[]) WITH ORDINALITY AS ordered(category_id, position)
+            WHERE category.id = ordered.category_id
+            """,
+            (category_ids,),
+        )
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="categories.reorder",
+            resource_type="categories",
+            resource_id="all",
+            request=current_request_id,
+            details={"category_ids": category_ids},
+        )
+    return {"category_ids": category_ids}
 
 
 def delete_category_medicine(category_id: int, medicine_id: int) -> dict[str, Any]:
@@ -1290,35 +1511,16 @@ def list_product_carousels() -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(
             """
-            SELECT id, slug, title, is_active, sort_order, created_at, updated_at
-            FROM product_carousels
-            ORDER BY sort_order ASC, id ASC
+            SELECT pc.id, pc.slug, pc.title, pc.is_active, pc.sort_order,
+                   pc.created_at, pc.updated_at, COUNT(pci.id)::integer AS product_count
+            FROM product_carousels pc
+            LEFT JOIN product_carousel_items pci ON pci.carousel_id = pc.id
+            GROUP BY pc.id
+            ORDER BY pc.sort_order ASC, pc.id ASC
             LIMIT 100
             """
         )
         carousel_rows = [dict(row) for row in cur.fetchall()]
-        if not carousel_rows:
-            return {"data": []}
-        carousel_ids = [row["id"] for row in carousel_rows]
-        cur.execute(
-            """
-            SELECT pci.carousel_id, m.id AS medicine_id, m.name AS medicine_name,
-                   m.price AS base_unit_price,
-                   vatan_selling_unit_price(m.price) AS selling_unit_price,
-                   m.country, m.vendor, m.in_stock,
-                   m.image_url, pci.sort_order AS item_sort_order,
-                   pci.updated_at AS item_updated_at
-            FROM product_carousel_items pci
-            JOIN medicines m ON m.id = pci.medicine_id
-            WHERE pci.carousel_id = ANY(%s)
-            ORDER BY pci.carousel_id ASC, pci.sort_order ASC, pci.id ASC
-            """,
-            (carousel_ids,),
-        )
-        items: dict[int, list[dict[str, Any]]] = {}
-        for row in cur.fetchall():
-            raw = dict(row)
-            items.setdefault(raw["carousel_id"], []).append(_carousel_product_response(raw))
     return {
         "data": [
             {
@@ -1329,10 +1531,113 @@ def list_product_carousels() -> dict[str, Any]:
                 "sort_order": int(row["sort_order"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
-                "products": items.get(row["id"], []),
+                "product_count": int(row["product_count"]),
             }
             for row in carousel_rows
         ]
+    }
+
+
+def list_product_carousel_items(carousel_id: int, query: dict[str, Any]) -> dict[str, Any]:
+    limit = _limit(query)
+    page = _page_number(query)
+    search = str(query.get("q") or "").strip()
+    if len(search) > 120:
+        raise ContractError("VALIDATION_ERROR", "q is too long")
+    params: list[Any] = [carousel_id]
+    search_clause = ""
+    if search:
+        pattern = _literal_ilike_pattern(search)
+        search_clause = "AND (m.name ILIKE %s ESCAPE '\\' OR COALESCE(m.source_sku, '') ILIKE %s ESCAPE '\\')"
+        params.extend([pattern, pattern])
+    offset = (page - 1) * limit
+    with transaction() as cur:
+        cur.execute("SELECT 1 FROM product_carousels WHERE id = %s", (carousel_id,))
+        if not cur.fetchone():
+            raise ContractError("CAROUSEL_NOT_FOUND", "Carousel was not found", http_status=404)
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS count
+            FROM product_carousel_items pci
+            JOIN medicines m ON m.id = pci.medicine_id
+            WHERE pci.carousel_id = %s {search_clause}
+            """,
+            tuple(params),
+        )
+        total = int(cur.fetchone()["count"])
+        cur.execute(
+            f"""
+            SELECT pci.carousel_id, m.id AS medicine_id, m.name AS medicine_name,
+                   m.price AS base_unit_price,
+                   vatan_selling_unit_price(m.price) AS selling_unit_price,
+                   m.country, m.vendor, m.in_stock,
+                   m.image_url, pci.sort_order AS item_sort_order,
+                   pci.updated_at AS item_updated_at
+            FROM product_carousel_items pci
+            JOIN medicines m ON m.id = pci.medicine_id
+            WHERE pci.carousel_id = %s {search_clause}
+            ORDER BY pci.sort_order ASC, pci.id ASC
+            LIMIT %s OFFSET %s
+            """,
+            tuple([*params, limit, offset]),
+        )
+        rows = [_carousel_product_response(dict(row)) for row in cur.fetchall()]
+    return {
+        "data": rows,
+        "page": {
+            "number": page,
+            "size": limit,
+            "total_items": total,
+            "total_pages": max(1, (total + limit - 1) // limit),
+        },
+    }
+
+
+def search_product_carousel_candidates(carousel_id: int, query: dict[str, Any]) -> dict[str, Any]:
+    limit = _limit(query)
+    page = _page_number(query)
+    search = str(query.get("q") or "").strip()
+    if not 2 <= len(search) <= 120:
+        raise ContractError("VALIDATION_ERROR", "q must contain between 2 and 120 characters")
+    pattern = _literal_ilike_pattern(search)
+    if search.isdigit():
+        clause = "(m.id = %s OR m.name ILIKE %s ESCAPE '\\' OR COALESCE(m.source_sku, '') ILIKE %s ESCAPE '\\')"
+        params: list[Any] = [int(search), pattern, pattern]
+    else:
+        clause = "(m.name ILIKE %s ESCAPE '\\' OR COALESCE(m.source_sku, '') ILIKE %s ESCAPE '\\')"
+        params = [pattern, pattern]
+    offset = (page - 1) * limit
+    with transaction() as cur:
+        cur.execute("SELECT 1 FROM product_carousels WHERE id = %s", (carousel_id,))
+        if not cur.fetchone():
+            raise ContractError("CAROUSEL_NOT_FOUND", "Carousel was not found", http_status=404)
+        cur.execute(f"SELECT COUNT(*) AS count FROM medicines m WHERE {clause}", tuple(params))
+        total = int(cur.fetchone()["count"])
+        cur.execute(
+            f"""
+            SELECT m.id AS medicine_id, m.name AS medicine_name, m.price AS base_unit_price,
+                   vatan_selling_unit_price(m.price) AS selling_unit_price,
+                   m.source_sku, m.country, m.vendor, m.in_stock, m.updated_at, m.image_url,
+                   EXISTS (
+                       SELECT 1 FROM product_carousel_items pci
+                       WHERE pci.carousel_id = %s AND pci.medicine_id = m.id
+                   ) AS already_present
+            FROM medicines m
+            WHERE {clause}
+            ORDER BY lower(m.name) ASC, m.id ASC
+            LIMIT %s OFFSET %s
+            """,
+            tuple([carousel_id, *params, limit, offset]),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    return {
+        "data": rows,
+        "page": {
+            "number": page,
+            "size": limit,
+            "total_items": total,
+            "total_pages": max(1, (total + limit - 1) // limit),
+        },
     }
 
 
@@ -1373,7 +1678,7 @@ def create_product_carousel(payload: dict[str, Any]) -> dict[str, Any]:
             (values["slug"], values["title"], values["is_active"], values["sort_order"]),
         )
         row = dict(cur.fetchone())
-    row["products"] = []
+    row["product_count"] = 0
     return row
 
 
@@ -1392,10 +1697,13 @@ def update_product_carousel(carousel_id: int, payload: dict[str, Any]) -> dict[s
             tuple(params),
         )
         row = cur.fetchone()
+        if row:
+            cur.execute("SELECT COUNT(*) AS count FROM product_carousel_items WHERE carousel_id = %s", (carousel_id,))
+            product_count = int(cur.fetchone()["count"])
     if not row:
         raise ContractError("CAROUSEL_NOT_FOUND", "Carousel was not found", http_status=404)
     result = dict(row)
-    result["products"] = []
+    result["product_count"] = product_count
     return result
 
 
@@ -1430,6 +1738,114 @@ def add_product_carousel_item(carousel_id: int, payload: dict[str, Any]) -> dict
         if cur.rowcount == 0:
             raise ContractError("DUPLICATE_PRODUCT", "Product is already in this carousel", http_status=409)
     return {"carousel_id": carousel_id, "medicine_id": medicine_id, "sort_order": sort_order}
+
+
+def batch_add_product_carousel_items(
+    carousel_id: int, payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    medicine_ids = _id_batch(payload, "medicine_ids")
+    with transaction() as cur:
+        cur.execute("SELECT id FROM product_carousels WHERE id = %s FOR UPDATE", (carousel_id,))
+        if not cur.fetchone():
+            raise ContractError("CAROUSEL_NOT_FOUND", "Carousel was not found", http_status=404)
+        cur.execute(
+            """
+            WITH requested AS (
+                SELECT medicine_id, position
+                FROM unnest(%s::bigint[]) WITH ORDINALITY AS selected(medicine_id, position)
+            ),
+            found AS MATERIALIZED (
+                SELECT requested.medicine_id, requested.position
+                FROM requested JOIN medicines m ON m.id = requested.medicine_id
+            ),
+            counts AS (
+                SELECT (SELECT COUNT(*) FROM requested)::integer AS selected,
+                       (SELECT COUNT(*) FROM found)::integer AS found
+            ),
+            current_order AS (
+                SELECT COALESCE(MAX(sort_order), 0)::integer AS maximum
+                FROM product_carousel_items WHERE carousel_id = %s
+            ),
+            inserted AS (
+                INSERT INTO product_carousel_items (carousel_id, medicine_id, sort_order)
+                SELECT %s, found.medicine_id, current_order.maximum + found.position
+                FROM found CROSS JOIN counts CROSS JOIN current_order
+                WHERE counts.selected = counts.found
+                  AND current_order.maximum + counts.selected <= 100000
+                ORDER BY found.position
+                ON CONFLICT (carousel_id, medicine_id) DO NOTHING
+                RETURNING medicine_id
+            )
+            SELECT counts.selected, counts.found, current_order.maximum,
+                   COUNT(inserted.medicine_id)::integer AS added
+            FROM counts CROSS JOIN current_order LEFT JOIN inserted ON TRUE
+            GROUP BY counts.selected, counts.found, current_order.maximum
+            """,
+            (medicine_ids, carousel_id, carousel_id),
+        )
+        counts = cur.fetchone()
+        selected = int(counts["selected"])
+        found = int(counts["found"])
+        if selected != found:
+            raise ContractError(
+                "MEDICINE_SELECTION_CHANGED",
+                "One or more selected medicines no longer exist; refresh before adding",
+                http_status=409,
+            )
+        if int(counts["maximum"]) + selected > 100000:
+            raise ContractError("CAROUSEL_ORDER_LIMIT", "Carousel order limit was reached", http_status=409)
+        added = int(counts["added"])
+        result = {
+            "carousel_id": carousel_id,
+            "selected": selected,
+            "added": added,
+            "already_present": selected - added,
+        }
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="carousel.products.batch_add",
+            resource_type="product_carousel",
+            resource_id=str(carousel_id),
+            request=current_request_id,
+            details={**result, "medicine_ids": medicine_ids},
+        )
+    return result
+
+
+def batch_remove_product_carousel_items(
+    carousel_id: int, payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    medicine_ids = _id_batch(payload, "medicine_ids")
+    with transaction() as cur:
+        cur.execute("SELECT id FROM product_carousels WHERE id = %s FOR UPDATE", (carousel_id,))
+        if not cur.fetchone():
+            raise ContractError("CAROUSEL_NOT_FOUND", "Carousel was not found", http_status=404)
+        cur.execute(
+            """
+            DELETE FROM product_carousel_items
+            WHERE carousel_id = %s AND medicine_id = ANY(%s::bigint[])
+            RETURNING medicine_id
+            """,
+            (carousel_id, medicine_ids),
+        )
+        removed_ids = [int(row["medicine_id"]) for row in cur.fetchall()]
+        result = {
+            "carousel_id": carousel_id,
+            "selected": len(medicine_ids),
+            "removed": len(removed_ids),
+            "already_absent": len(medicine_ids) - len(removed_ids),
+        }
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="carousel.products.batch_remove",
+            resource_type="product_carousel",
+            resource_id=str(carousel_id),
+            request=current_request_id,
+            details={**result, "medicine_ids": medicine_ids},
+        )
+    return result
 
 
 def update_product_carousel_item(carousel_id: int, medicine_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1509,6 +1925,78 @@ def reorder_product_carousel_items(carousel_id: int, payload: dict[str, Any]) ->
                 (medicine_ids, carousel_id),
             )
     return {"carousel_id": carousel_id, "medicine_ids": medicine_ids}
+
+
+def reorder_product_carousel_page(
+    carousel_id: int, payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    medicine_ids = _id_batch(payload, "medicine_ids")
+    with transaction() as cur:
+        cur.execute(
+            """
+            SELECT medicine_id, sort_order
+            FROM product_carousel_items
+            WHERE carousel_id = %s AND medicine_id = ANY(%s::bigint[])
+            ORDER BY sort_order ASC, id ASC
+            FOR UPDATE
+            """,
+            (carousel_id, medicine_ids),
+        )
+        existing_rows = cur.fetchall()
+        if len(existing_rows) != len(medicine_ids):
+            raise ContractError("CAROUSEL_CHANGED", "Carousel contents changed; refresh before reordering", http_status=409)
+        sort_orders = [int(row["sort_order"]) for row in existing_rows]
+        cur.execute(
+            """
+            UPDATE product_carousel_items AS item
+            SET sort_order = ordered.sort_order,
+                updated_at = CURRENT_TIMESTAMP
+            FROM unnest(%s::bigint[], %s::integer[]) AS ordered(medicine_id, sort_order)
+            WHERE item.carousel_id = %s AND item.medicine_id = ordered.medicine_id
+            """,
+            (medicine_ids, sort_orders, carousel_id),
+        )
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="carousel.products.reorder_page",
+            resource_type="product_carousel",
+            resource_id=str(carousel_id),
+            request=current_request_id,
+            details={"medicine_ids": medicine_ids},
+        )
+    return {"carousel_id": carousel_id, "medicine_ids": medicine_ids}
+
+
+def reorder_product_carousels(
+    payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    carousel_ids = _id_batch(payload, "carousel_ids")
+    with transaction() as cur:
+        cur.execute("SELECT id FROM product_carousels FOR UPDATE")
+        existing = {int(row["id"]) for row in cur.fetchall()}
+        if existing != set(carousel_ids):
+            raise ContractError("CAROUSELS_CHANGED", "Carousels changed; refresh before reordering", http_status=409)
+        cur.execute(
+            """
+            UPDATE product_carousels AS carousel
+            SET sort_order = ordered.position * 10,
+                updated_at = CURRENT_TIMESTAMP
+            FROM unnest(%s::bigint[]) WITH ORDINALITY AS ordered(carousel_id, position)
+            WHERE carousel.id = ordered.carousel_id
+            """,
+            (carousel_ids,),
+        )
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="product_carousels.reorder",
+            resource_type="product_carousels",
+            resource_id="all",
+            request=current_request_id,
+            details={"carousel_ids": carousel_ids},
+        )
+    return {"carousel_ids": carousel_ids}
 
 
 def list_syncs(query: dict[str, Any]) -> dict[str, Any]:
@@ -1595,6 +2083,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(list_categories(query), request=current_request_id)
         if method == "POST" and path.endswith("/admin/categories"):
             return success(create_category(_body(event)), status_code=201, request=current_request_id)
+        if method == "PATCH" and tail == ["categories", "reorder"]:
+            return success(reorder_categories(_body(event), actor_id, current_request_id), request=current_request_id)
         if method == "PATCH" and len(tail) == 2 and tail[0] == "categories":
             return success(update_category(_positive_int(tail[1], "category_id"), _body(event)), request=current_request_id)
         if method == "DELETE" and len(tail) == 2 and tail[0] == "categories":
@@ -1605,6 +2095,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if method == "GET" and len(tail) == 3 and tail[0] == "categories" and tail[2] == "medicines":
             category_id = _positive_int(tail[1], "category_id")
             return success_document(list_category_medicines(category_id, query), request=current_request_id)
+        if method == "GET" and len(tail) == 4 and tail[0] == "categories" and tail[2:] == ["medicines", "candidates"]:
+            category_id = _positive_int(tail[1], "category_id")
+            return success_document(search_category_medicine_candidates(category_id, query), request=current_request_id)
+        if method in {"POST", "DELETE"} and len(tail) == 4 and tail[0] == "categories" and tail[2:] == ["medicines", "batch"]:
+            category_id = _positive_int(tail[1], "category_id")
+            result = (
+                batch_add_category_medicines(category_id, _body(event), actor_id, current_request_id)
+                if method == "POST"
+                else batch_remove_category_medicines(category_id, _body(event), actor_id, current_request_id)
+            )
+            return success(result, request=current_request_id)
         if method == "GET" and len(tail) == 4 and tail[0] == "categories" and tail[2:] == ["medicines", "bulk-preview"]:
             category_id = _positive_int(tail[1], "category_id")
             return success_document(
@@ -1646,6 +2147,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(list_product_carousels(), request=current_request_id)
         if method == "POST" and tail == ["product-carousels"]:
             return success(create_product_carousel(_body(event)), status_code=201, request=current_request_id)
+        if method == "PATCH" and tail == ["product-carousels", "reorder"]:
+            return success(
+                reorder_product_carousels(_body(event), actor_id, current_request_id),
+                request=current_request_id,
+            )
         if len(tail) == 2 and tail[0] == "product-carousels" and method in {"PATCH", "DELETE"}:
             carousel_id = _positive_int(tail[1], "carousel_id")
             result = update_product_carousel(carousel_id, _body(event)) if method == "PATCH" else delete_product_carousel(carousel_id)
@@ -1653,6 +2159,26 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if len(tail) == 3 and tail[0] == "product-carousels" and tail[2] == "products" and method == "POST":
             carousel_id = _positive_int(tail[1], "carousel_id")
             return success(add_product_carousel_item(carousel_id, _body(event)), status_code=201, request=current_request_id)
+        if len(tail) == 3 and tail[0] == "product-carousels" and tail[2] == "products" and method == "GET":
+            carousel_id = _positive_int(tail[1], "carousel_id")
+            return success_document(list_product_carousel_items(carousel_id, query), request=current_request_id)
+        if len(tail) == 3 and tail[0] == "product-carousels" and tail[2] == "candidates" and method == "GET":
+            carousel_id = _positive_int(tail[1], "carousel_id")
+            return success_document(search_product_carousel_candidates(carousel_id, query), request=current_request_id)
+        if len(tail) == 4 and tail[0] == "product-carousels" and tail[2:] == ["products", "batch"] and method in {"POST", "DELETE"}:
+            carousel_id = _positive_int(tail[1], "carousel_id")
+            result = (
+                batch_add_product_carousel_items(carousel_id, _body(event), actor_id, current_request_id)
+                if method == "POST"
+                else batch_remove_product_carousel_items(carousel_id, _body(event), actor_id, current_request_id)
+            )
+            return success(result, request=current_request_id)
+        if len(tail) == 4 and tail[0] == "product-carousels" and tail[2:] == ["products", "reorder-page"] and method == "PATCH":
+            carousel_id = _positive_int(tail[1], "carousel_id")
+            return success(
+                reorder_product_carousel_page(carousel_id, _body(event), actor_id, current_request_id),
+                request=current_request_id,
+            )
         if len(tail) == 4 and tail[0] == "product-carousels" and tail[2:] == ["products", "reorder"] and method == "PATCH":
             carousel_id = _positive_int(tail[1], "carousel_id")
             return success(reorder_product_carousel_items(carousel_id, _body(event)), request=current_request_id)
