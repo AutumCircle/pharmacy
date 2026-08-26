@@ -25,6 +25,8 @@ PRESIGNED_URL_SECONDS = 900
 MAX_COMPRESSED_BYTES = 20 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 60 * 1024 * 1024
 SHA256_PATTERN = set("0123456789abcdef")
+DEFAULT_MIN_SNAPSHOT_RATIO = 0.50
+REFERENCE_HISTORY_LIMIT = 20
 _s3 = None
 
 
@@ -76,6 +78,79 @@ def _import_timeout_ms() -> int:
         return min(25_000, max(5_000, int(os.environ.get("SYNC_IMPORT_TIMEOUT_MS", "25000"))))
     except ValueError as exc:
         raise ContractError("SYNC_CONFIGURATION_ERROR", "Sync configuration is invalid", http_status=500) from exc
+
+
+def _minimum_snapshot_ratio() -> float:
+    try:
+        value = float(os.environ.get("SYNC_MIN_SNAPSHOT_RATIO", str(DEFAULT_MIN_SNAPSHOT_RATIO)))
+    except (TypeError, ValueError):
+        value = DEFAULT_MIN_SNAPSHOT_RATIO
+    return min(0.90, max(0.25, value))
+
+
+def evaluate_snapshot_drop(
+    incoming_count: int,
+    current_active_count: int,
+    recent_reference_count: int,
+    minimum_ratio: float,
+) -> tuple[bool, int, float]:
+    reference_count = max(int(current_active_count or 0), int(recent_reference_count or 0))
+    if reference_count <= 0:
+        return True, reference_count, 1.0
+    ratio = float(incoming_count) / float(reference_count)
+    return ratio >= minimum_ratio, reference_count, ratio
+
+
+def _enforce_snapshot_guard(cur: Any, source_id: str, incoming_count: int) -> None:
+    cur.execute(
+        "SELECT COUNT(*) FROM medicines WHERE source_system = %s AND in_stock = TRUE",
+        (source_id,),
+    )
+    current_active_count = int(cur.fetchone()[0])
+    cur.execute(
+        """
+        SELECT COALESCE(MAX(received_row_count), 0)
+        FROM (
+            SELECT received_row_count
+            FROM catalog_syncs
+            WHERE source_id = %s AND status = 'succeeded'
+              AND received_row_count IS NOT NULL AND received_row_count > 0
+            ORDER BY completed_at DESC
+            LIMIT %s
+        ) recent_syncs
+        """,
+        (source_id, REFERENCE_HISTORY_LIMIT),
+    )
+    recent_reference_count = int(cur.fetchone()[0])
+    minimum_ratio = _minimum_snapshot_ratio()
+    allowed, reference_count, ratio = evaluate_snapshot_drop(
+        incoming_count,
+        current_active_count,
+        recent_reference_count,
+        minimum_ratio,
+    )
+    print(json.dumps({
+        "event": "snapshot_guard",
+        "source_id": source_id,
+        "incoming_count": incoming_count,
+        "current_active_count": current_active_count,
+        "recent_reference_count": recent_reference_count,
+        "reference_count": reference_count,
+        "ratio": round(ratio, 6),
+        "minimum_ratio": minimum_ratio,
+        "allowed": allowed,
+    }, sort_keys=True))
+    if not allowed:
+        raise SnapshotValidationError(
+            "SUSPICIOUS_SNAPSHOT_DROP",
+            "Snapshot was rejected because its row count dropped catastrophically",
+            details={
+                "incoming_count": incoming_count,
+                "reference_count": reference_count,
+                "ratio": round(ratio, 6),
+                "minimum_ratio": minimum_ratio,
+            },
+        )
 
 
 def _sync_id(value: Any) -> str:
@@ -311,6 +386,10 @@ def _import_snapshot(
                 ) for resolution in duplicate_resolutions],
                 page_size=100,
             )
+
+        # Guard the full snapshot while holding the same advisory transaction
+        # lock, before any UPDATE/INSERT against medicines.
+        _enforce_snapshot_guard(cur, source_id, raw_row_count)
 
         # Existing catalogue is from this single pharmacy source. Mark ownership
         # before the first v1 snapshot so missing rows can safely become inactive.

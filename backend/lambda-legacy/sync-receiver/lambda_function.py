@@ -38,9 +38,79 @@ DB_CONFIG = {
 }
 MIN_SYNC_ROWS = 1
 MAX_SYNC_ROWS = int(os.environ.get("SYNC_MAX_EXPECTED_ROWS", "100000"))
+DEFAULT_MIN_SNAPSHOT_RATIO = 0.50
+REFERENCE_HISTORY_LIMIT = 20
 
 # Connection reuse across Lambda invocations (warm starts)
 _connection = None
+
+
+class SuspiciousSnapshotError(ValueError):
+    code = "SUSPICIOUS_SNAPSHOT_DROP"
+
+    def __init__(self, incoming_count, reference_count, ratio, minimum_ratio):
+        super().__init__("Snapshot was rejected because its row count dropped catastrophically")
+        self.details = {
+            "incoming_count": incoming_count,
+            "reference_count": reference_count,
+            "ratio": round(ratio, 6),
+            "minimum_ratio": minimum_ratio,
+        }
+
+
+def minimum_snapshot_ratio():
+    try:
+        value = float(os.environ.get("SYNC_MIN_SNAPSHOT_RATIO", str(DEFAULT_MIN_SNAPSHOT_RATIO)))
+    except (TypeError, ValueError):
+        value = DEFAULT_MIN_SNAPSHOT_RATIO
+    return min(0.90, max(0.25, value))
+
+
+def evaluate_snapshot_drop(incoming_count, current_active_count, recent_reference_count, minimum_ratio):
+    reference_count = max(int(current_active_count or 0), int(recent_reference_count or 0))
+    if reference_count <= 0:
+        return True, reference_count, 1.0
+    ratio = float(incoming_count) / float(reference_count)
+    return ratio >= minimum_ratio, reference_count, ratio
+
+
+def enforce_snapshot_guard(cur, incoming_count):
+    cur.execute("SELECT COUNT(*) FROM medicines WHERE in_stock = TRUE")
+    current_active_count = int(cur.fetchone()[0])
+    cur.execute(
+        """
+        SELECT COALESCE(MAX(upserted_count), 0)
+        FROM (
+            SELECT upserted_count
+            FROM sync_logs
+            WHERE upserted_count IS NOT NULL AND upserted_count > 0
+            ORDER BY sync_time DESC
+            LIMIT %s
+        ) recent_syncs
+        """,
+        (REFERENCE_HISTORY_LIMIT,),
+    )
+    recent_reference_count = int(cur.fetchone()[0])
+    minimum_ratio = minimum_snapshot_ratio()
+    allowed, reference_count, ratio = evaluate_snapshot_drop(
+        incoming_count,
+        current_active_count,
+        recent_reference_count,
+        minimum_ratio,
+    )
+    logger.info(
+        "Snapshot guard: incoming=%s current_active=%s recent_reference=%s "
+        "effective_reference=%s ratio=%.6f minimum_ratio=%.2f allowed=%s",
+        incoming_count,
+        current_active_count,
+        recent_reference_count,
+        reference_count,
+        ratio,
+        minimum_ratio,
+        allowed,
+    )
+    if not allowed:
+        raise SuspiciousSnapshotError(incoming_count, reference_count, ratio, minimum_ratio)
 
 
 def get_connection():
@@ -172,6 +242,10 @@ def upsert_medicines(conn, medicines, sync_id, snapshot_sha256):
     cur = conn.cursor()
 
     try:
+        # Serialize full-snapshot writers. The safety comparison and all catalogue
+        # mutations stay in the same transaction behind this lock.
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("pharmacy-full-catalog-sync",))
+
         # Create sync_logs table if not exists
         cur.execute("""
             CREATE TABLE IF NOT EXISTS sync_logs (
@@ -205,6 +279,10 @@ def upsert_medicines(conn, medicines, sync_id, snapshot_sha256):
             f"Deduplicated: {len(medicines)} raw → {len(unique_medicines)} unique "
             f"({len(medicines) - len(unique_medicines)} duplicates removed)"
         )
+
+        # Reject a catastrophic drop before any catalogue UPDATE/INSERT. There
+        # is deliberately no request-level override for this destructive path.
+        enforce_snapshot_guard(cur, len(unique_medicines))
 
         # Step 2: Mark everything as out of stock
         cur.execute("UPDATE medicines SET in_stock = FALSE")
@@ -286,7 +364,7 @@ def lambda_handler(event, context):
         # --- Decompress & Parse ---
         raw_body = decompress_body(event)
         sync_id, snapshot_sha256, medicines = parse_snapshot(raw_body)
-        logger.info(f"Received {len(medicines)} medicine records")
+        logger.info("Received sync_id=%s with %s medicine records", sync_id, len(medicines))
 
         # --- Validate ---
         validate_payload(medicines)
@@ -313,6 +391,21 @@ def lambda_handler(event, context):
         return {
             "statusCode": 400,
             "body": json.dumps({"status": "error", "message": f"Invalid JSON: {str(e)}"}),
+        }
+
+    except SuspiciousSnapshotError as e:
+        logger.error("%s: %s", e.code, e.details)
+        return {
+            "statusCode": 409,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "status": "error",
+                "error": {
+                    "code": e.code,
+                    "message": str(e),
+                    "details": e.details,
+                },
+            }),
         }
 
     except ValueError as e:

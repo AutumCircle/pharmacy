@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 import json
 import time
 import gzip
@@ -24,8 +25,7 @@ def load_config():
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-config = load_config()
-config["min_expected_rows"] = 1
+config = {}
 
 # 2. Настройка логгера (Ротация)
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -96,6 +96,9 @@ def init_db():
     # Таблица для состояния (last_sync, hash)
     c.execute('''CREATE TABLE IF NOT EXISTS state
                  (key TEXT PRIMARY KEY, value TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS quarantined_queue
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, original_id INTEGER,
+                  payload TEXT, reason TEXT, created_at TEXT)''')
     c.execute("SELECT value FROM state WHERE key='queue_protocol'")
     protocol = c.fetchone()
     if not protocol or protocol[0] != "snapshot-v2":
@@ -151,6 +154,18 @@ def delete_from_queue(item_id):
     conn.commit()
     conn.close()
 
+
+def quarantine_queue_item(item_id, payload_json, reason):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO quarantined_queue (original_id, payload, reason, created_at) VALUES (?, ?, ?, ?)",
+        (item_id, payload_json, reason, datetime.now().isoformat()),
+    )
+    c.execute("DELETE FROM pending_queue WHERE id=?", (item_id,))
+    conn.commit()
+    conn.close()
+
 # 4. Логика чтения базы DBF
 def clean_catalog_attribute(value):
     return "" if value is None else str(value)
@@ -165,17 +180,21 @@ def wait_for_stable_file(filepath):
     stable_seconds = int(config.get("file_stability_seconds", 30))
     check_seconds = int(config.get("file_stability_check_seconds", 3))
     max_wait_seconds = int(config.get("file_stability_max_wait_seconds", 300))
+    required_probes = max(3, int(config.get("file_stability_required_probes", 4)))
     started = time.monotonic()
     signature = file_signature(filepath)
     stable_since = time.monotonic()
+    stable_probes = 1
     while time.monotonic() - started < max_wait_seconds:
         time.sleep(check_seconds)
         current = file_signature(filepath)
         if current != signature:
             signature = current
             stable_since = time.monotonic()
+            stable_probes = 1
             continue
-        if time.monotonic() - stable_since >= stable_seconds:
+        stable_probes += 1
+        if stable_probes >= required_probes and time.monotonic() - stable_since >= stable_seconds:
             return signature
     raise RuntimeError("OSTATKI.DBF did not become stable before timeout")
 
@@ -189,8 +208,17 @@ def extract_data_from_dbf(filepath):
 
     for attempt in range(max_retries):
         try:
+            records = []
+            signature_before = file_signature(filepath)
             # Важно: Явное указание кодировки для обхода проблем с мусором в заголовках DBF
             table = DBF(filepath, encoding=config["dbf_encoding"], char_decode_errors='replace')
+            header_count_before = int(table.header.numrecords)
+            expected_active_count = len(table)
+            minimum_file_size = int(table.header.headerlen) + header_count_before * int(table.header.recordlen)
+            if signature_before[0] < minimum_file_size:
+                raise RuntimeError(
+                    "DBF file is shorter than its header record count; it is probably mid-write"
+                )
             for record in table:
                 # Извлечение по ИМЕНАМ колонок
                 item = {
@@ -200,6 +228,19 @@ def extract_data_from_dbf(filepath):
                     "vendor": clean_catalog_attribute(record.get("PROIZVOD", "") or record.get("VENDOR", ""))  # DBF uses PROIZVOD column
                 }
                 records.append(item)
+            signature_after = file_signature(filepath)
+            table_after = DBF(filepath, encoding=config["dbf_encoding"], char_decode_errors='replace')
+            header_count_after = int(table_after.header.numrecords)
+            active_count_after = len(table_after)
+            if (
+                signature_after != signature_before
+                or header_count_after != header_count_before
+                or active_count_after != expected_active_count
+                or len(records) != expected_active_count
+            ):
+                raise RuntimeError(
+                    "DBF header, file signature, or iteration count changed during snapshot read"
+                )
             break # Успешно прочитали
         except PermissionError:
             sleep_time = 2 ** attempt
@@ -221,8 +262,18 @@ def validate_data(records):
         logger.error("Sanity Check провален: Данные пусты.")
         return False
 
-    if len(records) < config["min_expected_rows"]:
-        logger.error(f"Sanity Check провален: получено {len(records)} строк, ожидается минимум {config['min_expected_rows']}.")
+    minimum_rows = max(1, int(config.get("min_expected_rows", 1000)))
+    reference_rows = int(get_state("last_successful_row_count", "0") or 0)
+    minimum_ratio = min(0.90, max(0.25, float(config.get("min_snapshot_ratio", 0.50))))
+    if len(records) < minimum_rows:
+        logger.error(f"Sanity Check провален: получено {len(records)} строк, ожидается минимум {minimum_rows}.")
+        return False
+    if reference_rows > 0 and float(len(records)) / float(reference_rows) < minimum_ratio:
+        logger.error(
+            "Sanity Check провален: получено %s строк против последнего успешного snapshot %s "
+            "(ratio %.6f, минимум %.2f).",
+            len(records), reference_rows, float(len(records)) / float(reference_rows), minimum_ratio,
+        )
         return False
 
     # Проверка типов (на примере первой записи)
@@ -256,7 +307,7 @@ def send_to_server(payload_json):
         logger.error(f"Сетевая ошибка при отправке: {e}")
         return False
 
-def process_sync_workflow():
+def process_sync_workflow(force_full_snapshot=False):
     # Неблокирующий Lock. Если уже выполняется (например, из-за Polling), пропускаем Watchdog.
     if not sync_lock.acquire(blocking=False):
         logger.debug("Синхронизация уже идет. Пропуск...")
@@ -271,7 +322,7 @@ def process_sync_workflow():
         dbf_mod_time = str(os.path.getmtime(dbf_path))
         last_processed_time = get_state("last_mod_time")
 
-        if dbf_mod_time == last_processed_time:
+        if dbf_mod_time == last_processed_time and not force_full_snapshot:
             logger.debug("Файл не изменился с прошлой проверки.")
         else:
             logger.info("Обнаружены изменения в файле. Начинаем чтение...")
@@ -290,7 +341,7 @@ def process_sync_workflow():
                 payload_hash = hashlib.sha256(records_json.encode("utf-8")).hexdigest()
                 last_hash = get_state("last_hash")
 
-                if payload_hash == last_hash:
+                if payload_hash == last_hash and not force_full_snapshot:
                     logger.info("Данные не изменились (дубликат по хэшу). Отправка отменена.")
                     set_state("last_mod_time", dbf_mod_time)
                 else:
@@ -324,12 +375,32 @@ def process_queue():
             break
 
         item_id, payload_json = item
+        try:
+            queued_snapshot = json.loads(payload_json)
+            queued_count = int(queued_snapshot.get("expected_row_count", 0))
+        except (ValueError, TypeError, AttributeError):
+            quarantine_queue_item(item_id, payload_json, "invalid_snapshot_metadata")
+            logger.error("Элемент очереди %s перемещён в карантин: некорректные metadata.", item_id)
+            continue
+        reference_rows = int(get_state("last_successful_row_count", "0") or 0)
+        minimum_rows = max(1, int(config.get("min_expected_rows", 1000)))
+        minimum_ratio = min(0.90, max(0.25, float(config.get("min_snapshot_ratio", 0.50))))
+        if queued_count < minimum_rows or (
+            reference_rows > 0 and float(queued_count) / float(reference_rows) < minimum_ratio
+        ):
+            quarantine_queue_item(item_id, payload_json, "implausible_snapshot_row_count")
+            logger.error(
+                "Элемент очереди %s перемещён в карантин: rows=%s reference=%s.",
+                item_id, queued_count, reference_rows,
+            )
+            continue
         logger.info(f"Попытка отправки элемента из очереди (ID: {item_id})...")
         success = send_to_server(payload_json)
 
         if success:
             logger.info(f"✅ Данные успешно доставлены на сервер! (ID: {item_id})")
             delete_from_queue(item_id)
+            set_state("last_successful_row_count", queued_count)
             set_state("last_successful_sync_at", datetime.now().isoformat())
             set_state("last_error", "")
         else:
@@ -388,6 +459,19 @@ def start_watchdog():
     return observer
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Synchronize the complete OSTATKI.DBF snapshot")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run one catch-up cycle, process the queue, and exit",
+    )
+    parser.add_argument(
+        "--force-full-snapshot",
+        action="store_true",
+        help="Queue one complete stable snapshot even if its hash is unchanged",
+    )
+    args = parser.parse_args()
+    config.update(load_config())
     if not acquire_single_instance_lock():
         logger.warning("Другой экземпляр agent_sync.exe уже работает. Новый экземпляр завершён.")
         raise SystemExit(0)
@@ -398,7 +482,9 @@ if __name__ == "__main__":
 
     # Catch-up при старте
     logger.info("Выполнение стартовой (catch-up) проверки...")
-    process_sync_workflow()
+    process_sync_workflow(force_full_snapshot=args.force_full_snapshot)
+    if args.once:
+        raise SystemExit(0)
 
     # Запуск фоновых потоков
     hb_thread = threading.Thread(target=heartbeat_loop, daemon=True)

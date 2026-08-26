@@ -68,5 +68,19 @@ class InternalSyncInitiationTests(unittest.TestCase):
         self.assertNotIn("private-sync-bucket", result["upload"]["url"])
 
 
+class InternalSyncSnapshotGuardTests(unittest.TestCase):
+    def test_rejects_catastrophic_partial_snapshot(self):
+        allowed, reference, ratio = internal_sync.evaluate_snapshot_drop(6, 10684, 10683, 0.50)
+        self.assertFalse(allowed)
+        self.assertEqual(reference, 10684)
+        self.assertLess(ratio, 0.001)
+
+    def test_allows_future_smaller_but_plausible_catalog(self):
+        allowed, reference, ratio = internal_sync.evaluate_snapshot_drop(5000, 8000, 7900, 0.50)
+        self.assertTrue(allowed)
+        self.assertEqual(reference, 8000)
+        self.assertEqual(ratio, 0.625)
+
+
 if __name__ == "__main__":
     unittest.main()
