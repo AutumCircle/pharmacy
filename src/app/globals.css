@@ -218,8 +218,10 @@ a {
 }
 .footer-compact-grid {
   display: grid;
-  grid-template-columns: 1.15fr 0.85fr 1.05fr 0.9fr;
-  gap: clamp(28px, 4vw, 72px);
+  grid-template-columns: minmax(230px, 1.35fr) minmax(120px, 0.75fr) minmax(210px, 1.05fr) minmax(140px, 0.75fr) minmax(130px, 0.7fr);
+  width: calc(100% - 32px);
+  max-width: none;
+  gap: clamp(24px, 3.2vw, 64px);
   padding: 18px clamp(24px, 3vw, 42px);
   border: 1px solid #f1dede;
   border-radius: 14px 14px 0 0;
@@ -244,11 +246,15 @@ a {
 }
 .footer-compact-section p { margin: 0; font-size: 14px; line-height: 1.35; }
 .footer-brand-logo {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   width: fit-content;
   line-height: 0;
 }
-.footer-brand-logo img { width: 88px; height: auto; object-fit: contain; }
+.footer-brand-logo img { height: auto; object-fit: contain; }
+.footer-brand-logo .footer-brand-mark { width: 30px; }
+.footer-brand-logo .footer-brand-name { width: 88px; }
 .footer-brand-section { gap: 6px; }
 .footer-contact-link {
   display: inline-flex;
@@ -807,11 +813,11 @@ a {
   to { transform: rotate(360deg); }
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1100px) {
   .header-inner { gap: 16px; }
   .brand-name { display: none; }
   .header-actions { gap: 18px; }
-  .footer-compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 34px; }
+  .footer-compact-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 34px; }
   .hero-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -856,7 +862,7 @@ a {
   .filter-bar { gap: 8px; padding-inline: 0; }
   .category-scroll-button { display: none; }
   .chip { padding: 7px 12px; font-size: 12px; }
-  .footer-compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 18px; padding: 18px; }
+  .footer-compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 18px; width: calc(100% - 20px); padding: 18px; }
   .site-footer { margin-top: 28px; }
   .hero-grid {
     grid-template-columns: 1fr;
@@ -983,6 +989,10 @@ a {
   }
   .order-success-card { margin: 24px auto !important; padding: 28px 20px !important; }
   .order-success-actions { flex-direction: column; }
+}
+
+@media (max-width: 520px) {
+  .footer-compact-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 480px) {
