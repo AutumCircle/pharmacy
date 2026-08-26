@@ -32,6 +32,29 @@ async function optimizeBannerImage(file: File): Promise<File> {
   return new File([blob], 'banner.webp', { type: 'image/webp' });
 }
 
+function BannerPreview({ banner, mobile = false }: { banner: AdminHomepageBanner; mobile?: boolean }) {
+  const title = banner.title.trim();
+  const subtitle = banner.subtitle?.trim() || '';
+  const hasText = Boolean(title || subtitle);
+  return (
+    <div className={`admin-banner-preview admin-banner-preview--${banner.slot}${mobile ? ' admin-banner-preview--mobile' : ''}`}>
+      {banner.image_url ? (
+        // The URL is saved only after HTTPS validation in Lambda.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={banner.image_url} alt="Предпросмотр баннера" referrerPolicy="no-referrer" loading="lazy" decoding="async" />
+      ) : (
+        <div className="admin-banner-preview-empty">Изображение не задано</div>
+      )}
+      {hasText && banner.image_url && <div className="admin-banner-preview-overlay" />}
+      {hasText && <div className="admin-banner-preview-copy">
+        {title && <strong>{title}</strong>}
+        {subtitle && <span>{subtitle}</span>}
+      </div>}
+      {!hasText && banner.image_url && <span className="admin-banner-image-only-badge">Только изображение</span>}
+    </div>
+  );
+}
+
 function BannerEditor({ initialBanner }: { initialBanner: AdminHomepageBanner }) {
   const [banner, setBanner] = useState(initialBanner);
   const [saving, setSaving] = useState(false);
@@ -94,7 +117,7 @@ function BannerEditor({ initialBanner }: { initialBanner: AdminHomepageBanner })
   };
 
   return (
-    <form onSubmit={submit} style={{ background: 'white', border: '1px solid #e6e6e6', borderRadius: 14, padding: 22 }}>
+    <form onSubmit={submit} className="admin-banner-editor">
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 18 }}>
         <h2 style={{ margin: 0, fontSize: 19 }}>{slotNames[banner.slot]}</h2>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
@@ -103,22 +126,23 @@ function BannerEditor({ initialBanner }: { initialBanner: AdminHomepageBanner })
         </label>
       </div>
 
-      <div style={{ height: 180, borderRadius: 10, overflow: 'hidden', border: '1px solid #eee', background: '#f5f5f5', marginBottom: 18, position: 'relative' }}>
-        {banner.image_url ? (
-          // The URL is saved only after HTTPS validation in Lambda.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={banner.image_url} alt="Предпросмотр баннера" referrerPolicy="no-referrer" loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        ) : (
-          <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#888' }}>Изображение не задано</div>
-        )}
+      <div className="admin-banner-preview-grid">
+        <div>
+          <span className="admin-banner-preview-label">Desktop</span>
+          <BannerPreview banner={banner} />
+        </div>
+        <div>
+          <span className="admin-banner-preview-label">Mobile</span>
+          <BannerPreview banner={banner} mobile />
+        </div>
       </div>
 
       <label style={{ display: 'block', marginBottom: 14 }}>
-        <span style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600 }}>Заголовок</span>
-        <input required maxLength={120} value={banner.title} onChange={(event) => setField('title', event.target.value)} style={inputStyle} />
+        <span style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600 }}>Заголовок <small style={{ color: '#777', fontWeight: 400 }}>(необязательно)</small></span>
+        <input maxLength={120} value={banner.title || ''} onChange={(event) => setField('title', event.target.value)} style={inputStyle} />
       </label>
       <label style={{ display: 'block', marginBottom: 14 }}>
-        <span style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600 }}>Подзаголовок</span>
+        <span style={{ display: 'block', marginBottom: 6, fontSize: 14, fontWeight: 600 }}>Подзаголовок <small style={{ color: '#777', fontWeight: 400 }}>(необязательно)</small></span>
         <textarea maxLength={240} rows={2} value={banner.subtitle || ''} onChange={(event) => setField('subtitle', event.target.value)} style={{ ...inputStyle, resize: 'vertical' }} />
       </label>
       <label style={{ display: 'block', marginBottom: 14 }}>
@@ -161,7 +185,7 @@ export default function BannersClient({ banners }: { banners: AdminHomepageBanne
       <p style={{ margin: '0 0 24px', color: '#666', maxWidth: 760 }}>
         Загрузите изображение с компьютера — оно будет сохранено в AWS и сразу привязано к баннеру. HTTPS-ссылку также можно указать вручную.
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 20 }}>
+      <div className="admin-banner-editor-grid">
         {banners.map((banner) => <BannerEditor key={banner.slot} initialBanner={banner} />)}
       </div>
     </div>

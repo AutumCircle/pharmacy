@@ -9,10 +9,14 @@ const defaults: Record<HomepageBannerSlot, HomepageBanner> = {
 };
 
 function Banner({ banner, className }: { banner: HomepageBanner; className: string }) {
+  const title = banner.title.trim();
+  const subtitle = banner.subtitle?.trim() || '';
+  const hasText = Boolean(title || subtitle);
+  const imageOnly = Boolean(banner.image_url && !hasText);
   const style = {
     position: 'relative' as const,
     overflow: 'hidden',
-    padding: 24,
+    padding: imageOnly ? 0 : 24,
     minHeight: className.startsWith('right') ? 150 : 330,
     color: 'inherit',
     textDecoration: 'none',
@@ -24,11 +28,11 @@ function Banner({ banner, className }: { banner: HomepageBanner; className: stri
         // eslint-disable-next-line @next/next/no-img-element
         <img src={banner.image_url} alt="" referrerPolicy="no-referrer" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
       )}
-      <div style={{ position: 'absolute', inset: 0, background: banner.image_url ? 'linear-gradient(90deg, rgba(255,255,255,.94), rgba(255,255,255,.18))' : 'transparent' }} />
-      <div style={{ position: 'relative', zIndex: 1, maxWidth: '75%' }}>
-        <h2 style={{ margin: 0, fontSize: className.startsWith('right') ? 20 : 26, color: '#333' }}>{banner.title}</h2>
-        {banner.subtitle && <p style={{ marginTop: 14, color: '#555', lineHeight: 1.5 }}>{banner.subtitle}</p>}
-      </div>
+      {hasText && banner.image_url && <div className="banner-image-overlay" />}
+      {hasText && <div style={{ position: 'relative', zIndex: 1, maxWidth: '75%' }}>
+        {title && <h2 style={{ margin: 0, fontSize: className.startsWith('right') ? 20 : 26, color: '#333' }}>{title}</h2>}
+        {subtitle && <p style={{ marginTop: title ? 14 : 0, color: '#555', lineHeight: 1.5 }}>{subtitle}</p>}
+      </div>}
     </>
   );
   return banner.link_url
@@ -39,7 +43,10 @@ function Banner({ banner, className }: { banner: HomepageBanner; className: stri
 export default function HeroBanners({ banners }: { banners?: HomepageBanner[] }) {
   const usingFallback = banners === undefined;
   const bySlot = new Map((banners || []).map((banner) => [banner.slot, banner]));
-  const banner = (slot: HomepageBannerSlot) => bySlot.get(slot) || (usingFallback ? defaults[slot] : null);
+  const banner = (slot: HomepageBannerSlot) => {
+    const value = bySlot.get(slot) || (usingFallback ? defaults[slot] : null);
+    return value && (value.image_url || value.title.trim() || value.subtitle?.trim()) ? value : null;
+  };
   const left = banner('left');
   const center = banner('center');
   const rightTop = banner('right_top');

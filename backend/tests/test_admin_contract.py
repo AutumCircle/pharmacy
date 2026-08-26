@@ -1,7 +1,14 @@
 import json
 import unittest
+from contextlib import contextmanager
+from unittest.mock import patch
 
-from backend.v1.admin_api.lambda_function import create_category, lambda_handler, update_category
+from backend.v1.admin_api.lambda_function import (
+    create_category,
+    lambda_handler,
+    update_category,
+    update_homepage_banner,
+)
 from backend.v1.shared.contract import ContractError
 
 
@@ -25,6 +32,34 @@ class AdminCategoryValidationTests(unittest.TestCase):
     def test_rejects_unknown_update_field(self):
         with self.assertRaises(ContractError):
             update_category(1, {"slug": "changed"})
+
+    def test_banner_title_can_be_empty_for_image_only_banner(self):
+        class Cursor:
+            def execute(self, query, values):
+                self.values = values
+
+            def fetchone(self):
+                return {
+                    "slot": "left",
+                    "title": self.values[0],
+                    "subtitle": None,
+                    "image_url": "https://cdn.example/banner.png",
+                    "link_url": None,
+                    "is_active": True,
+                    "updated_at": "2026-08-26T00:00:00Z",
+                }
+
+        cursor = Cursor()
+
+        @contextmanager
+        def fake_transaction():
+            yield cursor
+
+        with patch("backend.v1.admin_api.lambda_function.transaction", fake_transaction):
+            result = update_homepage_banner("left", {"title": "   "})
+
+        self.assertEqual(result["title"], "")
+        self.assertEqual(cursor.values, ("", "left"))
 
 
 class AdminRouteAuthorizationTests(unittest.TestCase):

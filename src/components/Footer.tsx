@@ -8,8 +8,8 @@ export default function Footer() {
       <div className="container footer-compact-grid">
         <section className="footer-compact-section footer-brand-section">
           <Link href="/" className="footer-brand-logo" aria-label="Аптека Ватан — главная">
-            <Image className="footer-brand-mark" src="/brand/vatan-apteka-logo.png" alt="" width={34} height={34} />
-            <Image className="footer-brand-name" src="/brand/vatan-apteka-name.png" alt="Аптека Ватан" width={104} height={36} />
+            <Image className="footer-brand-mark" src="/assets/apteka-vatan-logo.png" alt="" width={34} height={34} />
+            <Image className="footer-brand-name" src="/assets/apteka-vatan-name.png" alt="Аптека Ватан" width={104} height={36} />
           </Link>
           <p>{SITE_FOOTER.description}</p>
         </section>

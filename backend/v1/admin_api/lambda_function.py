@@ -1324,7 +1324,7 @@ def update_homepage_banner(slot: str, payload: dict[str, Any]) -> dict[str, Any]
     if not payload or set(payload) - allowed:
         raise ContractError("VALIDATION_ERROR", "Invalid banner update")
     if "title" in payload and (
-        not isinstance(payload["title"], str) or not 1 <= len(payload["title"].strip()) <= 120
+        not isinstance(payload["title"], str) or len(payload["title"].strip()) > 120
     ):
         raise ContractError("VALIDATION_ERROR", "Banner title is invalid")
     if "subtitle" in payload and payload["subtitle"] is not None and (

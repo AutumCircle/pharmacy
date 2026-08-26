@@ -38,12 +38,15 @@ export default function CategoryNav() {
   useEffect(() => {
     const row = rowRef.current;
     if (!row || categories.length === 0) return;
-    updateBoundaries();
+    const frame = requestAnimationFrame(updateBoundaries);
     row.addEventListener('scroll', updateBoundaries, { passive: true });
+    window.addEventListener('resize', updateBoundaries, { passive: true });
     const observer = new ResizeObserver(updateBoundaries);
     observer.observe(row);
     return () => {
+      cancelAnimationFrame(frame);
       row.removeEventListener('scroll', updateBoundaries);
+      window.removeEventListener('resize', updateBoundaries);
       observer.disconnect();
     };
   }, [categories.length, updateBoundaries]);
