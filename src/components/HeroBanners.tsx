@@ -31,6 +31,14 @@ const defaults: Record<HomepageBannerSlot, HomepageBanner> = {
   right_bottom: { ...basePresentation, slot: 'right_bottom', title: 'Бонус к чеку', subtitle: null, title_size: 20 },
 };
 
+function withPresentationDefaults(banner: HomepageBanner): HomepageBanner {
+  return {
+    ...basePresentation,
+    ...banner,
+    title_size: banner.title_size ?? (banner.slot.startsWith('right_') ? 20 : 26),
+  };
+}
+
 function hexToRgba(hex: string, opacity: number): string {
   const clean = hex.replace('#', '');
   const red = Number.parseInt(clean.slice(0, 2), 16);
@@ -102,7 +110,7 @@ function Banner({ banner, className }: { banner: HomepageBanner; className: stri
 
 export default function HeroBanners({ banners }: { banners?: HomepageBanner[] }) {
   const usingFallback = banners === undefined;
-  const bySlot = new Map((banners || []).map((banner) => [banner.slot, banner]));
+  const bySlot = new Map((banners || []).map((banner) => [banner.slot, withPresentationDefaults(banner)]));
   const banner = (slot: HomepageBannerSlot) => {
     const value = bySlot.get(slot) || (usingFallback ? defaults[slot] : null);
     return value && (value.image_url || value.title?.trim() || value.subtitle?.trim()) ? value : null;
