@@ -41,8 +41,10 @@ a {
 }
 
 /* Shared public/admin banner renderer. Keep editor-only chrome outside it. */
-.banner-renderer { position: relative; min-width: 0; min-height: 330px; overflow: hidden; border-radius: 12px; background: var(--banner-bg, #f5f5f5); color: #333; }
-.banner-renderer--right_top, .banner-renderer--right_bottom { min-height: 150px; }
+.banner-renderer { position: relative; width: 100%; min-width: 0; overflow: hidden; border-radius: 12px; background: var(--banner-bg, #f5f5f5); color: #333; }
+.banner-renderer--left { aspect-ratio: 1.2 / 1; }
+.banner-renderer--center { aspect-ratio: 1.8 / 1; }
+.banner-renderer--right_top, .banner-renderer--right_bottom { aspect-ratio: 2.53 / 1; }
 .banner-public-link { display: block; min-width: 0; color: inherit; text-decoration: none; }
 .banner-renderer-image { position: absolute; z-index: 0; inset: 0; overflow: hidden; background: var(--banner-bg, #f5f5f5); }
 .banner-renderer-photo, .banner-renderer-blur { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -75,13 +77,17 @@ a {
 .banner-renderer--mobile { --image-x: var(--mobile-image-x); --image-y: var(--mobile-image-y); --image-scale: var(--mobile-image-scale); --title-x: var(--mobile-title-x); --title-y: var(--mobile-title-y); --title-width: var(--mobile-title-width); --title-scale: var(--mobile-title-scale); --subtitle-x: var(--mobile-subtitle-x); --subtitle-y: var(--mobile-subtitle-y); --subtitle-width: var(--mobile-subtitle-width); --subtitle-scale: var(--mobile-subtitle-scale); --cta-x: var(--mobile-cta-x); --cta-y: var(--mobile-cta-y); --cta-width: var(--mobile-cta-width); --cta-scale: var(--mobile-cta-scale); }
 .admin-banner-onboarding { margin: 0 0 12px; padding: 10px 12px; border-radius: 9px; background: #eff6ff; color: #1d4ed8; font-size: 13px; }
 .admin-banner-direct-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.admin-banner-direct-toolbar button { min-height: 40px; border: 1px solid #d0d5dd; border-radius: 9px; padding: 8px 12px; background: #fff; color: #344054; cursor: pointer; font-weight: 650; }
+.admin-banner-direct-toolbar button { display: inline-flex; min-height: 44px; flex-direction: column; align-items: flex-start; justify-content: center; border: 1px solid #d0d5dd; border-radius: 9px; padding: 8px 12px; background: #fff; color: #344054; cursor: pointer; font-weight: 650; }
+.admin-banner-direct-toolbar button small { color: #667085; font-size: 11px; font-weight: 500; }
 .admin-banner-direct-toolbar button.is-active { border-color: var(--primary); background: #fff1f2; color: var(--primary); }
-.admin-banner-preview-stage.is-desktop .banner-renderer { width: min(100%, 1100px); }
-.admin-banner-preview-stage.is-desktop .banner-renderer--left { aspect-ratio: 1.25 / 1; }
-.admin-banner-preview-stage.is-desktop .banner-renderer--center { aspect-ratio: 1.85 / 1; }
-.admin-banner-preview-stage.is-desktop .banner-renderer--right_top, .admin-banner-preview-stage.is-desktop .banner-renderer--right_bottom { aspect-ratio: 2.2 / 1; }
-.admin-banner-preview-stage.is-mobile .banner-renderer { width: min(390px, 100%); min-height: 210px; aspect-ratio: 390 / 210; }
+.admin-banner-preview-stage .banner-renderer { flex: 0 0 auto; outline: 1px solid rgba(16,24,40,.14); box-shadow: 0 8px 24px rgba(16,24,40,.12); }
+.admin-banner-preview-stage.is-desktop .banner-renderer { width: 100%; max-width: none; }
+.admin-banner-preview-stage.is-mobile { width: min(424px, 100%); margin-inline: auto; }
+.admin-banner-preview-stage.is-mobile .banner-renderer { width: 100%; }
+.admin-banner-preview-stage.is-mobile .banner-renderer--left,
+.admin-banner-preview-stage.is-mobile .banner-renderer--center { aspect-ratio: 390 / 210; }
+.admin-banner-preview-stage.is-mobile .banner-renderer--right_top,
+.admin-banner-preview-stage.is-mobile .banner-renderer--right_bottom { aspect-ratio: 2.6 / 1; }
 .admin-banner-summary-preview .banner-renderer { min-height: 150px; aspect-ratio: 16 / 8; }
 .admin-banner-summary-preview .banner-renderer h2 { font-size: 15px !important; }
 .admin-banner-summary-preview .banner-renderer p { font-size: 11px !important; }
@@ -93,8 +99,10 @@ a {
 .admin-banner-advanced[open] summary { margin-bottom: 16px; }
 @media (max-width: 640px) {
   .banner-renderer--auto { --image-x: var(--mobile-image-x); --image-y: var(--mobile-image-y); --image-scale: var(--mobile-image-scale); --title-x: var(--mobile-title-x); --title-y: var(--mobile-title-y); --title-width: var(--mobile-title-width); --title-scale: var(--mobile-title-scale); --subtitle-x: var(--mobile-subtitle-x); --subtitle-y: var(--mobile-subtitle-y); --subtitle-width: var(--mobile-subtitle-width); --subtitle-scale: var(--mobile-subtitle-scale); --cta-x: var(--mobile-cta-x); --cta-y: var(--mobile-cta-y); --cta-width: var(--mobile-cta-width); --cta-scale: var(--mobile-cta-scale); }
-  .banner-renderer { min-height: 210px; }
-  .banner-renderer--right_top, .banner-renderer--right_bottom { min-height: 150px; }
+  .banner-renderer--auto.banner-renderer--left,
+  .banner-renderer--auto.banner-renderer--center { aspect-ratio: 390 / 210; }
+  .banner-renderer--auto.banner-renderer--right_top,
+  .banner-renderer--auto.banner-renderer--right_bottom { aspect-ratio: 2.6 / 1; }
 }
 
 /* TOP BAR */
@@ -499,7 +507,7 @@ a {
 .admin-banner-mode-switch { display: inline-flex; padding: 3px; border-radius: 9px; background: #f2f4f7; }
 .admin-banner-mode-switch button { border: 0; border-radius: 7px; padding: 7px 12px; background: transparent; cursor: pointer; }
 .admin-banner-mode-switch button.is-active { background: #fff; color: var(--primary); box-shadow: 0 1px 4px rgba(16,24,40,.12); font-weight: 700; }
-.admin-banner-preview-stage { display: flex; min-height: 260px; align-items: center; justify-content: center; padding: 18px; overflow: auto; border-radius: 12px; background: #eef1f4; }
+.admin-banner-preview-stage { display: grid; width: 100%; min-height: 0; place-items: center; padding: clamp(8px, 1.4vw, 16px); overflow: hidden; border: 1px dashed #d0d5dd; border-radius: 12px; background: #f8fafc; }
 .admin-banner-preview-stage.is-desktop .admin-banner-live-preview { width: min(100%, 1100px); }
 .admin-banner-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
 .admin-banner-settings-card { min-width: 0; padding: 20px; border: 1px solid #e4e7ec; border-radius: 14px; background: #fff; }
@@ -534,7 +542,7 @@ a {
   .admin-banner-editor-heading { align-items: flex-start; flex-direction: column; }
   .admin-banner-editor-preview-panel { padding: 10px; }
   .admin-banner-preview-toolbar { align-items: flex-start; flex-direction: column; }
-  .admin-banner-preview-stage { min-height: 220px; padding: 8px; }
+  .admin-banner-preview-stage { min-height: 0; padding: 8px; }
   .admin-banner-live-preview--mobile { min-height: 440px; }
   .admin-banner-settings-card { padding: 16px; }
   .admin-banner-editor-footer { align-items: flex-start; flex-direction: column; }

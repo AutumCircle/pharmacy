@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { clamp, compositionField, elementLayout, imageLayout } from '../src/lib/banner-layout.ts';
+import { clamp, compositionField, elementLayout, imageFitPatch, imageLayout } from '../src/lib/banner-layout.ts';
 
 const banner = {
   object_position_x: 30, object_position_y: 40, image_scale: 120,
@@ -20,4 +20,13 @@ test('composition helpers clamp values and map fields without pixels', () => {
   assert.equal(clamp(-12, 0, 100), 0);
   assert.equal(compositionField('title', 'x', 'mobile', true), 'mobile_title_x');
   assert.equal(compositionField('image', 'scale', 'desktop', false), 'image_scale');
+});
+
+test('Fit always restores contain at 100 percent and centers the active viewport', () => {
+  assert.deepEqual(imageFitPatch('desktop', false, 'contain'), {
+    fit_mode: 'contain', object_position_x: 50, object_position_y: 50, image_scale: 100,
+  });
+  assert.deepEqual(imageFitPatch('mobile', true, 'contain'), {
+    fit_mode: 'contain', mobile_image_x: 50, mobile_image_y: 50, mobile_image_scale: 100,
+  });
 });

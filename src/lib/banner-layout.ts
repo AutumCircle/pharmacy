@@ -50,3 +50,12 @@ export function compositionField(element: BannerEditableElement, property: 'x' |
   }
   return `${viewport === 'mobile' && mobileOverride ? 'mobile_' : ''}${element}_${property}` as keyof HomepageBanner;
 }
+
+export function imageFitPatch(viewport: BannerViewport, mobileOverride: boolean, fitMode: 'contain' | 'cover'): Partial<HomepageBanner> {
+  return {
+    fit_mode: fitMode,
+    [compositionField('image', 'x', viewport, mobileOverride)]: 50,
+    [compositionField('image', 'y', viewport, mobileOverride)]: 50,
+    [compositionField('image', 'scale', viewport, mobileOverride)]: 100,
+  };
+}

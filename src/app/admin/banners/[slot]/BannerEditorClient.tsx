@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { AdminHomepageBanner } from '@/lib/api-v1/admin-types';
-import { bannerCompositionDefaults, clamp, compositionField, elementLayout, imageLayout, type BannerEditableElement, type BannerViewport } from '@/lib/banner-layout';
+import { bannerCompositionDefaults, clamp, compositionField, elementLayout, imageFitPatch, imageLayout, type BannerEditableElement, type BannerViewport } from '@/lib/banner-layout';
 import { saveHomepageBanner } from '../actions';
 import BannerAdminPreview from '../BannerAdminPreview';
 import { bannerRecommendedDimensions, bannerSlotNames } from '../banner-config';
@@ -72,11 +72,7 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
 
   const fitImage = (fit: 'contain' | 'cover') => {
     const mobile = previewMode === 'mobile' && draft.mobile_override;
-    setDraft((current) => ({ ...current, fit_mode: fit,
-      [compositionField('image', 'x', previewMode, mobile)]: 50,
-      [compositionField('image', 'y', previewMode, mobile)]: 50,
-      [compositionField('image', 'scale', previewMode, mobile)]: 100,
-    })); setSelected('image'); setMessage('');
+    setDraft((current) => ({ ...current, ...imageFitPatch(previewMode, mobile, fit) })); setSelected('image'); setMessage('');
   };
 
   const resetPosition = () => {
@@ -112,8 +108,12 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
       const prepared = await prepareBannerImage(file); const form = new FormData(); form.set('file', prepared.file); form.set('scope', 'banners');
       const response = await fetch('/api/admin/media/images', { method: 'POST', body: form }); const payload = await response.json() as { url?: string; error?: string };
       if (!response.ok || !payload.url) throw new Error(payload.error || 'Не удалось загрузить изображение');
-      setDraft((current) => ({ ...current, image_url: payload.url || null, image_width: prepared.width, image_height: prepared.height })); setSelected('image');
-      setMessage('Изображение загружено. Нажмите «Сохранить изменения».');
+      setDraft((current) => {
+        const mobile = previewMode === 'mobile' && current.mobile_override;
+        return { ...current, image_url: payload.url || null, image_width: prepared.width, image_height: prepared.height,
+          ...imageFitPatch(previewMode, mobile, 'contain') };
+      }); setSelected('image');
+      setMessage('Изображение загружено и полностью вмещено. Нажмите «Сохранить изменения».');
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Не удалось загрузить изображение'); } finally { setUploading(false); }
   };
 
@@ -129,6 +129,7 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
 
   const currentImage = imageLayout(draft, previewMode);
   const currentElement = selected === 'image' ? null : elementLayout(draft, selected, previewMode);
+  const imageIsCenteredAtNaturalScale = currentImage.x === 50 && currentImage.y === 50 && currentImage.scale === 100;
   return (
     <form className="admin-banner-editor-page" onSubmit={submit}>
       <div className="admin-banner-editor-toolbar"><Link href="/admin/banners" onClick={(event) => { if (dirty && !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')) event.preventDefault(); }}>← Все баннеры</Link>
@@ -143,7 +144,7 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
         <div className="admin-banner-preview-toolbar"><div className="admin-banner-mode-switch" role="group" aria-label="Режим предпросмотра"><button type="button" className={previewMode === 'desktop' ? 'is-active' : ''} onClick={() => setPreviewMode('desktop')}>Desktop · 1440</button><button type="button" className={previewMode === 'mobile' ? 'is-active' : ''} onClick={() => setPreviewMode('mobile')}>Mobile · 390</button></div>
           {previewMode === 'mobile' && <label className="admin-checkbox-field is-inline"><input type="checkbox" checked={draft.mobile_override} onChange={(event) => toggleMobileOverride(event.target.checked)} />Отдельно настроить для телефона</label>}</div>
         <p className="admin-banner-onboarding">Нажмите на изображение или текст, затем перетащите или измените размер за углы.</p>
-        <div className="admin-banner-direct-toolbar"><button type="button" className={draft.fit_mode === 'contain' ? 'is-active' : ''} onClick={() => fitImage('contain')}>Вместить изображение полностью</button><button type="button" className={draft.fit_mode === 'cover' ? 'is-active' : ''} onClick={() => fitImage('cover')}>Заполнить баннер</button><button type="button" onClick={resetPosition}>По центру / Сбросить положение</button></div>
+        <div className="admin-banner-direct-toolbar"><button type="button" className={draft.fit_mode === 'contain' && imageIsCenteredAtNaturalScale ? 'is-active' : ''} onClick={() => fitImage('contain')}><strong>Вместить изображение полностью</strong><small>Все края видны</small></button><button type="button" className={draft.fit_mode === 'cover' && imageIsCenteredAtNaturalScale ? 'is-active' : ''} onClick={() => fitImage('cover')}><strong>Заполнить баннер</strong><small>Без полос, края могут обрезаться</small></button><button type="button" onClick={resetPosition}>По центру / Сбросить положение</button></div>
         <div ref={stageRef} className={`admin-banner-preview-stage is-${previewMode}`}><BannerAdminPreview banner={draft} mode={previewMode} showSafeRegion selected={selected} onSelect={setSelected} onEditPointerDown={startEdit} /></div>
       </section>
 
