@@ -120,6 +120,21 @@ def build() -> Path:
         "sha256": hashlib.sha256(identity_migration_payload).hexdigest(),
         "size_bytes": len(identity_migration_payload),
     })
+    banner_migration_destination = OUTPUT / "migration-0009-banner-presentation-once.zip"
+    banner_migration_source = (
+        ROOT / "backend" / "operations" / "banner_presentation_migration_once" / "lambda_function.py"
+    )
+    _write_deterministic_zip(
+        banner_migration_destination,
+        [("lambda_function.py", banner_migration_source)],
+    )
+    banner_migration_payload = banner_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": banner_migration_destination.name,
+        "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(banner_migration_payload).hexdigest(),
+        "size_bytes": len(banner_migration_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

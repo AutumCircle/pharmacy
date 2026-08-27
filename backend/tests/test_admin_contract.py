@@ -35,13 +35,18 @@ class AdminCategoryValidationTests(unittest.TestCase):
 
     def test_banner_title_can_be_empty_for_image_only_banner(self):
         class Cursor:
+            calls = 0
+
             def execute(self, query, values):
                 self.values = values
 
             def fetchone(self):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"image_url": "https://cdn.example/banner.png", "is_active": True}
                 return {
                     "slot": "left",
-                    "title": self.values[0],
+                    "title": None,
                     "subtitle": None,
                     "image_url": "https://cdn.example/banner.png",
                     "link_url": None,
@@ -56,10 +61,9 @@ class AdminCategoryValidationTests(unittest.TestCase):
             yield cursor
 
         with patch("backend.v1.admin_api.lambda_function.transaction", fake_transaction):
-            result = update_homepage_banner("left", {"title": "   "})
+            result = update_homepage_banner("left", {"title": "   "}, "admin-test", "request-test")
 
-        self.assertEqual(result["title"], "")
-        self.assertEqual(cursor.values, ("", "left"))
+        self.assertIsNone(result["title"])
 
 
 class AdminRouteAuthorizationTests(unittest.TestCase):

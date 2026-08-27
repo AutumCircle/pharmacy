@@ -44,6 +44,13 @@ MEDIA_IMAGE_TYPES = {
     "image/png": ("png", lambda value: value.startswith(b"\x89PNG\r\n\x1a\n")),
     "image/webp": ("webp", lambda value: len(value) >= 12 and value[:4] == b"RIFF" and value[8:12] == b"WEBP"),
 }
+BANNER_SELECT_COLUMNS = """
+slot, title, subtitle, image_url, link_url, is_active, updated_at,
+cta_text, alt_text, fit_mode, object_position_x, object_position_y,
+image_width, image_height, overlay_enabled, overlay_color, overlay_opacity,
+overlay_type, overlay_direction, text_color, text_align, content_vertical,
+title_size, subtitle_size, content_max_width
+""".strip()
 _s3 = None
 
 
@@ -1305,8 +1312,8 @@ def delete_category_medicine(category_id: int, medicine_id: int) -> dict[str, An
 def list_homepage_banners() -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(
-            """
-            SELECT slot, title, subtitle, image_url, link_url, is_active, updated_at
+            f"""
+            SELECT {BANNER_SELECT_COLUMNS}
             FROM homepage_banners
             ORDER BY CASE slot
                 WHEN 'left' THEN 1 WHEN 'center' THEN 2
@@ -1316,21 +1323,43 @@ def list_homepage_banners() -> dict[str, Any]:
         return {"data": [dict(row) for row in cur.fetchall()]}
 
 
-def update_homepage_banner(slot: str, payload: dict[str, Any]) -> dict[str, Any]:
+def update_homepage_banner(
+    slot: str,
+    payload: dict[str, Any],
+    actor_id: str,
+    current_request_id: str,
+) -> dict[str, Any]:
     allowed_slots = {"left", "center", "right_top", "right_bottom"}
-    allowed = {"title", "subtitle", "image_url", "link_url", "is_active"}
+    optional_text = {"title": 120, "subtitle": 240, "cta_text": 80, "alt_text": 200}
+    enum_fields = {
+        "fit_mode": {"cover", "contain"},
+        "overlay_type": {"solid", "gradient"},
+        "overlay_direction": {"to_right", "to_left", "to_top", "to_bottom"},
+        "text_align": {"left", "center", "right"},
+        "content_vertical": {"top", "center", "bottom"},
+    }
+    integer_fields = {
+        "object_position_x": (0, 100),
+        "object_position_y": (0, 100),
+        "image_width": (1, 20_000),
+        "image_height": (1, 20_000),
+        "overlay_opacity": (0, 100),
+        "title_size": (14, 64),
+        "subtitle_size": (10, 40),
+        "content_max_width": (30, 100),
+    }
+    allowed = set(optional_text) | set(enum_fields) | set(integer_fields) | {
+        "image_url", "link_url", "is_active", "overlay_enabled", "overlay_color", "text_color",
+    }
     if slot not in allowed_slots:
         raise ContractError("BANNER_NOT_FOUND", "Banner was not found", http_status=404)
     if not payload or set(payload) - allowed:
         raise ContractError("VALIDATION_ERROR", "Invalid banner update")
-    if "title" in payload and (
-        not isinstance(payload["title"], str) or len(payload["title"].strip()) > 120
-    ):
-        raise ContractError("VALIDATION_ERROR", "Banner title is invalid")
-    if "subtitle" in payload and payload["subtitle"] is not None and (
-        not isinstance(payload["subtitle"], str) or len(payload["subtitle"].strip()) > 240
-    ):
-        raise ContractError("VALIDATION_ERROR", "Banner subtitle is invalid")
+    for field, maximum in optional_text.items():
+        if field in payload and payload[field] is not None and (
+            not isinstance(payload[field], str) or len(payload[field].strip()) > maximum
+        ):
+            raise ContractError("VALIDATION_ERROR", f"Banner {field} is invalid")
     image_url = payload.get("image_url")
     if "image_url" in payload and image_url is not None and image_url != "" and (
         not isinstance(image_url, str) or len(image_url) > 2000 or not image_url.startswith("https://")
@@ -1344,31 +1373,80 @@ def update_homepage_banner(slot: str, payload: dict[str, Any]) -> dict[str, Any]
         raise ContractError("VALIDATION_ERROR", "Banner link URL is invalid")
     if "is_active" in payload and not isinstance(payload["is_active"], bool):
         raise ContractError("VALIDATION_ERROR", "Banner is_active is invalid")
+    if "overlay_enabled" in payload and not isinstance(payload["overlay_enabled"], bool):
+        raise ContractError("VALIDATION_ERROR", "Banner overlay_enabled is invalid")
+    for field in ("overlay_color", "text_color"):
+        if field in payload and (not isinstance(payload[field], str) or not COLOR_PATTERN.fullmatch(payload[field])):
+            raise ContractError("VALIDATION_ERROR", f"Banner {field} is invalid")
+    for field, choices in enum_fields.items():
+        if field in payload and payload[field] not in choices:
+            raise ContractError("VALIDATION_ERROR", f"Banner {field} is invalid")
+    for field, (minimum, maximum) in integer_fields.items():
+        value = payload.get(field)
+        if field in payload and value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum
+        ):
+            raise ContractError("VALIDATION_ERROR", f"Banner {field} is invalid")
+        if field in {"image_width", "image_height"}:
+            continue
+        if field in payload and value is None:
+            raise ContractError("VALIDATION_ERROR", f"Banner {field} is invalid")
+
+    normalized: dict[str, Any] = {}
+    nullable_string_fields = set(optional_text) | {"image_url", "link_url"}
+    for field, raw_value in payload.items():
+        value = raw_value.strip() if isinstance(raw_value, str) else raw_value
+        if field in nullable_string_fields and value == "":
+            value = None
+        normalized[field] = value
+
     assignments = []
     values = []
-    for field in ("title", "subtitle", "image_url", "link_url", "is_active"):
-        if field in payload:
-            value = payload[field]
-            if isinstance(value, str):
-                value = value.strip()
-            if field in {"subtitle", "image_url", "link_url"} and value == "":
-                value = None
+    for field in (
+        "title", "subtitle", "image_url", "link_url", "is_active", "cta_text", "alt_text",
+        "fit_mode", "object_position_x", "object_position_y", "image_width", "image_height",
+        "overlay_enabled", "overlay_color", "overlay_opacity", "overlay_type", "overlay_direction",
+        "text_color", "text_align", "content_vertical", "title_size", "subtitle_size", "content_max_width",
+    ):
+        if field in normalized:
             assignments.append(f"{field} = %s")
-            values.append(value)
-    values.append(slot)
+            values.append(normalized[field])
     with transaction() as cur:
+        cur.execute(
+            "SELECT image_url, is_active FROM homepage_banners WHERE slot = %s FOR UPDATE",
+            (slot,),
+        )
+        existing = cur.fetchone()
+        if not existing:
+            raise ContractError("BANNER_NOT_FOUND", "Banner was not found", http_status=404)
+        effective_image_url = normalized.get("image_url", existing["image_url"])
+        effective_is_active = normalized.get("is_active", bool(existing["is_active"]))
+        if effective_is_active and not effective_image_url:
+            raise ContractError(
+                "BANNER_IMAGE_REQUIRED",
+                "An active banner must have an image",
+                http_status=409,
+            )
+        values.append(slot)
         cur.execute(
             f"""
             UPDATE homepage_banners
             SET {', '.join(assignments)}, updated_at = CURRENT_TIMESTAMP
             WHERE slot = %s
-            RETURNING slot, title, subtitle, image_url, link_url, is_active, updated_at
+            RETURNING {BANNER_SELECT_COLUMNS}
             """,
             tuple(values),
         )
         row = cur.fetchone()
-        if not row:
-            raise ContractError("BANNER_NOT_FOUND", "Banner was not found", http_status=404)
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="homepage_banner.updated",
+            resource_type="homepage_banner",
+            resource_id=slot,
+            request=current_request_id,
+            details={"changed_fields": sorted(normalized), "is_active": bool(row["is_active"])},
+        )
         return dict(row)
 
 
@@ -2134,7 +2212,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 request=current_request_id,
             )
         if method == "PATCH" and len(tail) == 2 and tail[0] == "homepage-banners":
-            return success(update_homepage_banner(tail[1], _body(event)), request=current_request_id)
+            return success(
+                update_homepage_banner(tail[1], _body(event), actor_id, current_request_id),
+                request=current_request_id,
+            )
         if method == "GET" and tail == ["featured-products"]:
             return success_document(list_featured_products(), request=current_request_id)
         if method == "POST" and tail == ["featured-products"]:

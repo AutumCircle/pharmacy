@@ -242,7 +242,12 @@ def list_homepage_banners() -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(
             """
-            SELECT slot, title, subtitle, image_url, link_url
+            SELECT slot, title, subtitle, image_url, link_url,
+                   cta_text, alt_text, fit_mode, object_position_x, object_position_y,
+                   image_width, image_height, overlay_enabled, overlay_color,
+                   overlay_opacity, overlay_type, overlay_direction, text_color,
+                   text_align, content_vertical, title_size, subtitle_size,
+                   content_max_width
             FROM homepage_banners
             WHERE is_active IS TRUE
             ORDER BY CASE slot

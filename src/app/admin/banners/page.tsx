@@ -19,7 +19,7 @@ export default async function AdminBannersPage() {
     <div style={{ background: 'white', border: '1px solid #f2c7c7', borderRadius: 12, padding: 24 }}>
       <h1 style={{ marginTop: 0 }}>Баннеры пока недоступны</h1>
       <p style={{ marginBottom: 0, color: '#666' }}>
-        Сначала примените миграцию 0003 и разверните новую версию Admin Lambda.
+        Проверьте доступность Admin Lambda и миграцию настроек баннеров.
       </p>
     </div>
   );

@@ -333,7 +333,7 @@ export function listAdminHomepageBanners(): Promise<AdminApiListResponse<AdminHo
 
 export function updateAdminHomepageBanner(
   slot: AdminHomepageBanner['slot'],
-  body: Partial<Pick<AdminHomepageBanner, 'title' | 'subtitle' | 'image_url' | 'link_url' | 'is_active'>>,
+  body: Partial<Omit<AdminHomepageBanner, 'slot' | 'updated_at'>>,
 ): Promise<ApiSuccessResponse<AdminHomepageBanner>> {
   return request(`/v1/admin/homepage-banners/${slot}`, { method: 'PATCH', body });
 }

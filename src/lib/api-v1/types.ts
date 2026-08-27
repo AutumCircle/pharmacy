@@ -79,13 +79,36 @@ export interface ResolvedMedicines {
 }
 
 export type HomepageBannerSlot = 'left' | 'center' | 'right_top' | 'right_bottom';
+export type BannerFitMode = 'cover' | 'contain';
+export type BannerOverlayType = 'solid' | 'gradient';
+export type BannerOverlayDirection = 'to_right' | 'to_left' | 'to_top' | 'to_bottom';
+export type BannerTextAlign = 'left' | 'center' | 'right';
+export type BannerContentVertical = 'top' | 'center' | 'bottom';
 
 export interface HomepageBanner {
   slot: HomepageBannerSlot;
-  title: string;
+  title: string | null;
   subtitle: string | null;
   image_url: string | null;
   link_url: string | null;
+  cta_text: string | null;
+  alt_text: string | null;
+  fit_mode: BannerFitMode;
+  object_position_x: number;
+  object_position_y: number;
+  image_width: number | null;
+  image_height: number | null;
+  overlay_enabled: boolean;
+  overlay_color: string;
+  overlay_opacity: number;
+  overlay_type: BannerOverlayType;
+  overlay_direction: BannerOverlayDirection;
+  text_color: string;
+  text_align: BannerTextAlign;
+  content_vertical: BannerContentVertical;
+  title_size: number;
+  subtitle_size: number;
+  content_max_width: number;
 }
 
 export interface PublicCategory {
