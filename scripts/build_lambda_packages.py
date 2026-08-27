@@ -135,6 +135,16 @@ def build() -> Path:
         "sha256": hashlib.sha256(banner_migration_payload).hexdigest(),
         "size_bytes": len(banner_migration_payload),
     })
+    wysiwyg_migration_destination = OUTPUT / "migration-0010-banner-wysiwyg-once.zip"
+    wysiwyg_migration_source = ROOT / "backend" / "operations" / "banner_wysiwyg_migration_once" / "lambda_function.py"
+    _write_deterministic_zip(wysiwyg_migration_destination, [("lambda_function.py", wysiwyg_migration_source)])
+    wysiwyg_migration_payload = wysiwyg_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": wysiwyg_migration_destination.name,
+        "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(wysiwyg_migration_payload).hexdigest(),
+        "size_bytes": len(wysiwyg_migration_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

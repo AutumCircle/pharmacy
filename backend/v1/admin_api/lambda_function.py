@@ -49,7 +49,15 @@ slot, title, subtitle, image_url, link_url, is_active, updated_at,
 cta_text, alt_text, fit_mode, object_position_x, object_position_y,
 image_width, image_height, overlay_enabled, overlay_color, overlay_opacity,
 overlay_type, overlay_direction, text_color, text_align, content_vertical,
-title_size, subtitle_size, content_max_width
+title_size, subtitle_size, content_max_width,
+image_scale, contain_background, contain_background_color,
+title_x, title_y, title_width, title_scale,
+subtitle_x, subtitle_y, subtitle_width, subtitle_scale,
+cta_x, cta_y, cta_width, cta_scale,
+mobile_override, mobile_image_x, mobile_image_y, mobile_image_scale,
+mobile_title_x, mobile_title_y, mobile_title_width, mobile_title_scale,
+mobile_subtitle_x, mobile_subtitle_y, mobile_subtitle_width, mobile_subtitle_scale,
+mobile_cta_x, mobile_cta_y, mobile_cta_width, mobile_cta_scale
 """.strip()
 _s3 = None
 
@@ -1337,6 +1345,7 @@ def update_homepage_banner(
         "overlay_direction": {"to_right", "to_left", "to_top", "to_bottom"},
         "text_align": {"left", "center", "right"},
         "content_vertical": {"top", "center", "bottom"},
+        "contain_background": {"color", "blur"},
     }
     integer_fields = {
         "object_position_x": (0, 100),
@@ -1347,9 +1356,18 @@ def update_homepage_banner(
         "title_size": (14, 64),
         "subtitle_size": (10, 40),
         "content_max_width": (30, 100),
+        "image_scale": (50, 300),
+        "title_x": (0, 100), "title_y": (0, 92), "title_width": (15, 100), "title_scale": (50, 200),
+        "subtitle_x": (0, 100), "subtitle_y": (0, 92), "subtitle_width": (15, 100), "subtitle_scale": (50, 200),
+        "cta_x": (0, 100), "cta_y": (0, 92), "cta_width": (15, 100), "cta_scale": (50, 200),
+        "mobile_image_x": (0, 100), "mobile_image_y": (0, 100), "mobile_image_scale": (50, 300),
+        "mobile_title_x": (0, 100), "mobile_title_y": (0, 92), "mobile_title_width": (15, 100), "mobile_title_scale": (50, 200),
+        "mobile_subtitle_x": (0, 100), "mobile_subtitle_y": (0, 92), "mobile_subtitle_width": (15, 100), "mobile_subtitle_scale": (50, 200),
+        "mobile_cta_x": (0, 100), "mobile_cta_y": (0, 92), "mobile_cta_width": (15, 100), "mobile_cta_scale": (50, 200),
     }
     allowed = set(optional_text) | set(enum_fields) | set(integer_fields) | {
         "image_url", "link_url", "is_active", "overlay_enabled", "overlay_color", "text_color",
+        "contain_background_color", "mobile_override",
     }
     if slot not in allowed_slots:
         raise ContractError("BANNER_NOT_FOUND", "Banner was not found", http_status=404)
@@ -1375,7 +1393,9 @@ def update_homepage_banner(
         raise ContractError("VALIDATION_ERROR", "Banner is_active is invalid")
     if "overlay_enabled" in payload and not isinstance(payload["overlay_enabled"], bool):
         raise ContractError("VALIDATION_ERROR", "Banner overlay_enabled is invalid")
-    for field in ("overlay_color", "text_color"):
+    if "mobile_override" in payload and not isinstance(payload["mobile_override"], bool):
+        raise ContractError("VALIDATION_ERROR", "Banner mobile_override is invalid")
+    for field in ("overlay_color", "text_color", "contain_background_color"):
         if field in payload and (not isinstance(payload[field], str) or not COLOR_PATTERN.fullmatch(payload[field])):
             raise ContractError("VALIDATION_ERROR", f"Banner {field} is invalid")
     for field, choices in enum_fields.items():
@@ -1407,15 +1427,20 @@ def update_homepage_banner(
         "fit_mode", "object_position_x", "object_position_y", "image_width", "image_height",
         "overlay_enabled", "overlay_color", "overlay_opacity", "overlay_type", "overlay_direction",
         "text_color", "text_align", "content_vertical", "title_size", "subtitle_size", "content_max_width",
+        "image_scale", "contain_background", "contain_background_color",
+        "title_x", "title_y", "title_width", "title_scale",
+        "subtitle_x", "subtitle_y", "subtitle_width", "subtitle_scale",
+        "cta_x", "cta_y", "cta_width", "cta_scale",
+        "mobile_override", "mobile_image_x", "mobile_image_y", "mobile_image_scale",
+        "mobile_title_x", "mobile_title_y", "mobile_title_width", "mobile_title_scale",
+        "mobile_subtitle_x", "mobile_subtitle_y", "mobile_subtitle_width", "mobile_subtitle_scale",
+        "mobile_cta_x", "mobile_cta_y", "mobile_cta_width", "mobile_cta_scale",
     ):
         if field in normalized:
             assignments.append(f"{field} = %s")
             values.append(normalized[field])
     with transaction() as cur:
-        cur.execute(
-            "SELECT image_url, is_active FROM homepage_banners WHERE slot = %s FOR UPDATE",
-            (slot,),
-        )
+        cur.execute(f"SELECT {BANNER_SELECT_COLUMNS} FROM homepage_banners WHERE slot = %s FOR UPDATE", (slot,))
         existing = cur.fetchone()
         if not existing:
             raise ContractError("BANNER_NOT_FOUND", "Banner was not found", http_status=404)
@@ -1427,6 +1452,11 @@ def update_homepage_banner(
                 "An active banner must have an image",
                 http_status=409,
             )
+        for prefix in ("title", "subtitle", "cta", "mobile_title", "mobile_subtitle", "mobile_cta"):
+            effective_x = normalized.get(f"{prefix}_x", existing[f"{prefix}_x"])
+            effective_width = normalized.get(f"{prefix}_width", existing[f"{prefix}_width"])
+            if effective_x + effective_width > 100:
+                raise ContractError("VALIDATION_ERROR", f"Banner {prefix} exceeds canvas width")
         values.append(slot)
         cur.execute(
             f"""

@@ -84,6 +84,7 @@ export type BannerOverlayType = 'solid' | 'gradient';
 export type BannerOverlayDirection = 'to_right' | 'to_left' | 'to_top' | 'to_bottom';
 export type BannerTextAlign = 'left' | 'center' | 'right';
 export type BannerContentVertical = 'top' | 'center' | 'bottom';
+export type BannerContainBackground = 'color' | 'blur';
 
 export interface HomepageBanner {
   slot: HomepageBannerSlot;
@@ -109,6 +110,37 @@ export interface HomepageBanner {
   title_size: number;
   subtitle_size: number;
   content_max_width: number;
+  image_scale: number;
+  contain_background: BannerContainBackground;
+  contain_background_color: string;
+  title_x: number;
+  title_y: number;
+  title_width: number;
+  title_scale: number;
+  subtitle_x: number;
+  subtitle_y: number;
+  subtitle_width: number;
+  subtitle_scale: number;
+  cta_x: number;
+  cta_y: number;
+  cta_width: number;
+  cta_scale: number;
+  mobile_override: boolean;
+  mobile_image_x: number;
+  mobile_image_y: number;
+  mobile_image_scale: number;
+  mobile_title_x: number;
+  mobile_title_y: number;
+  mobile_title_width: number;
+  mobile_title_scale: number;
+  mobile_subtitle_x: number;
+  mobile_subtitle_y: number;
+  mobile_subtitle_width: number;
+  mobile_subtitle_scale: number;
+  mobile_cta_x: number;
+  mobile_cta_y: number;
+  mobile_cta_width: number;
+  mobile_cta_scale: number;
 }
 
 export interface PublicCategory {
