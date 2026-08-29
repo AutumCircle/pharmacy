@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  --site-content-max: 1440px;
   --primary: #E31E24;
   --primary-dark: #B71C1C;
   --primary-light: #FFEBEE;
@@ -35,7 +36,7 @@ a {
 }
 
 .container {
-  width: min(100% - 32px, 1600px);
+  width: min(calc(100% - 32px), var(--site-content-max));
   margin: 0 auto;
   padding: 0;
 }
@@ -1212,15 +1213,14 @@ a {
 }
 
 @media (max-width: 480px) {
-  .container { width: min(100% - 20px, 1600px); }
+  .container { width: min(calc(100% - 20px), var(--site-content-max)); }
   .bottom-nav .nav-item { padding: 8px 1px; font-size: 9px; }
   .bottom-nav .nav-item span { white-space: nowrap; }
   .search-input { font-size: 14px; padding: 0 13px; }
 }
 
 @media (min-width: 1600px) {
-  .container { width: min(100% - 64px, 1800px); }
-  .featured-product-slide { flex-basis: clamp(250px, 15vw, 300px); }
+  .container { width: min(calc(100% - 64px), var(--site-content-max)); }
 }
 
 /* PRODUCT DETAILS */
