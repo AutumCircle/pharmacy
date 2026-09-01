@@ -285,6 +285,11 @@ def validate_data(records):
     return True
 
 # 5. Отправка данных на сервер
+SEND_SUCCESS = "success"
+SEND_RETRY = "retry"
+SEND_QUARANTINE = "quarantine"
+
+
 def send_to_server(payload_json):
     url = f"{config['server_url'].rstrip('/')}/api/sync"
     headers = {
@@ -299,13 +304,21 @@ def send_to_server(payload_json):
         # verify=True для проверки SSL в продакшене.
         response = requests.post(url, data=compressed_data, headers=headers, verify=True, timeout=30)
         if response.status_code == 200:
-            return True
-        else:
-            logger.error(f"Сервер вернул ошибку {response.status_code}: {response.text}")
-            return False
+            return SEND_SUCCESS
+
+        logger.error(f"Сервер вернул ошибку {response.status_code}: {response.text}")
+        if response.status_code == 409:
+            try:
+                response_body = response.json()
+                error_code = (response_body.get("error") or {}).get("code")
+            except (ValueError, TypeError, AttributeError):
+                error_code = None
+            if error_code == "SUSPICIOUS_SNAPSHOT_DROP":
+                return SEND_QUARANTINE
+        return SEND_RETRY
     except Exception as e:
         logger.error(f"Сетевая ошибка при отправке: {e}")
-        return False
+        return SEND_RETRY
 
 def process_sync_workflow(force_full_snapshot=False):
     # Неблокирующий Lock. Если уже выполняется (например, из-за Polling), пропускаем Watchdog.
@@ -395,14 +408,23 @@ def process_queue():
             )
             continue
         logger.info(f"Попытка отправки элемента из очереди (ID: {item_id})...")
-        success = send_to_server(payload_json)
+        outcome = send_to_server(payload_json)
 
-        if success:
+        if outcome == SEND_SUCCESS:
             logger.info(f"✅ Данные успешно доставлены на сервер! (ID: {item_id})")
             delete_from_queue(item_id)
             set_state("last_successful_row_count", queued_count)
             set_state("last_successful_sync_at", datetime.now().isoformat())
             set_state("last_error", "")
+        elif outcome == SEND_QUARANTINE:
+            quarantine_queue_item(item_id, payload_json, "server_rejected_suspicious_snapshot_drop")
+            logger.error(
+                "Элемент %s перемещён в карантин после защитного ответа сервера; "
+                "следующие элементы очереди продолжат обработку.",
+                item_id,
+            )
+            set_state("last_error", "SUSPICIOUS_SNAPSHOT_DROP quarantined")
+            continue
         else:
             logger.warning(f"Не удалось отправить данные. Элемент {item_id} остается в очереди.")
             set_state("last_error", "Ошибка сети или сервера 500")
