@@ -3,12 +3,21 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { AdminHomepageBanner } from '@/lib/api-v1/admin-types';
-import { bannerCompositionDefaults, clamp, compositionField, elementLayout, imageFitPatch, imageLayout, type BannerEditableElement, type BannerViewport } from '@/lib/banner-layout';
+import { bannerCompositionDefaults, clamp, compositionField, elementLayout, type BannerEditableElement, type BannerViewport } from '@/lib/banner-layout';
 import { saveHomepageBanner } from '../actions';
 import BannerAdminPreview from '../BannerAdminPreview';
 import { bannerRecommendedDimensions, bannerSlotNames } from '../banner-config';
 
 function nullable(value: string | null): string | null { const clean = value?.trim() || ''; return clean || null; }
+
+function simpleImageBanner(banner: AdminHomepageBanner): AdminHomepageBanner {
+  return {
+    ...banner,
+    fit_mode: 'contain', object_position_x: 50, object_position_y: 50, image_scale: 100,
+    mobile_override: false, mobile_image_x: 50, mobile_image_y: 50, mobile_image_scale: 100,
+    contain_background: 'color', contain_background_color: '#FFFFFF',
+  };
+}
 
 async function prepareBannerImage(file: File): Promise<{ file: File; width: number; height: number }> {
   const bitmap = await createImageBitmap(file); const width = bitmap.width; const height = bitmap.height;
@@ -24,7 +33,7 @@ async function prepareBannerImage(file: File): Promise<{ file: File; width: numb
 }
 
 export default function BannerEditorClient({ initialBanner }: { initialBanner: AdminHomepageBanner }) {
-  const normalizedInitial = useMemo(() => ({ ...bannerCompositionDefaults, ...initialBanner }), [initialBanner]);
+  const normalizedInitial = useMemo(() => simpleImageBanner({ ...bannerCompositionDefaults, ...initialBanner }), [initialBanner]);
   const [saved, setSaved] = useState(normalizedInitial);
   const [draft, setDraft] = useState(normalizedInitial);
   const [previewMode, setPreviewMode] = useState<BannerViewport>('desktop');
@@ -43,23 +52,23 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
   };
 
   const startEdit = (element: BannerEditableElement, action: 'move' | 'resize', event: ReactPointerEvent<HTMLElement>) => {
+    if (element === 'image') { setSelected('image'); return; }
     const canvas = stageRef.current?.querySelector<HTMLElement>('.banner-renderer');
     if (!canvas) return;
     const bounds = canvas.getBoundingClientRect(); const startX = event.clientX; const startY = event.clientY;
-    const initial = element === 'image' ? { ...imageLayout(draft, previewMode), width: 100 } : elementLayout(draft, element, previewMode);
+    const initial = elementLayout(draft, element, previewMode);
     const move = (pointer: PointerEvent) => {
       const dx = ((pointer.clientX - startX) / bounds.width) * 100; const dy = ((pointer.clientY - startY) / bounds.height) * 100;
       setDraft((current) => {
         const mobile = previewMode === 'mobile' && current.mobile_override;
         if (action === 'move') {
-          const width = element === 'image' ? 0 : elementLayout(current, element, previewMode).width;
+          const width = elementLayout(current, element, previewMode).width;
           return { ...current,
-            [compositionField(element, 'x', previewMode, mobile)]: clamp(initial.x + dx, 0, element === 'image' ? 100 : 100 - width),
-            [compositionField(element, 'y', previewMode, mobile)]: clamp(initial.y + dy, 0, element === 'image' ? 100 : 92),
+            [compositionField(element, 'x', previewMode, mobile)]: clamp(initial.x + dx, 0, 100 - width),
+            [compositionField(element, 'y', previewMode, mobile)]: clamp(initial.y + dy, 0, 92),
           };
         }
         const delta = (dx + dy) / 2;
-        if (element === 'image') return { ...current, [compositionField('image', 'scale', previewMode, mobile)]: clamp(initial.scale + delta * 2, 50, 300) };
         return { ...current,
           [compositionField(element, 'width', previewMode, mobile)]: clamp(initial.width + dx, 15, 100 - initial.x),
           [compositionField(element, 'scale', previewMode, mobile)]: clamp(initial.scale + delta * 1.5, 50, 200),
@@ -70,16 +79,9 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
   };
 
-  const fitImage = (fit: 'contain' | 'cover') => {
-    const mobile = previewMode === 'mobile' && draft.mobile_override;
-    setDraft((current) => ({ ...current, ...imageFitPatch(previewMode, mobile, fit) })); setSelected('image'); setMessage('');
-  };
-
   const resetPosition = () => {
-    const mobile = previewMode === 'mobile' && draft.mobile_override;
-    if (selected === 'image') {
-      setDraft((current) => ({ ...current, [compositionField('image', 'x', previewMode, mobile)]: 50, [compositionField('image', 'y', previewMode, mobile)]: 50 }));
-    } else {
+    const mobile = false;
+    if (selected !== 'image') {
       const prefix = `${mobile ? 'mobile_' : ''}${selected}` as 'title' | 'subtitle' | 'cta';
       const defaultX = Number(bannerCompositionDefaults[`${prefix}_x` as keyof typeof bannerCompositionDefaults] ?? 8);
       const defaultY = Number(bannerCompositionDefaults[`${prefix}_y` as keyof typeof bannerCompositionDefaults] ?? 12);
@@ -91,17 +93,6 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
     setMessage('');
   };
 
-  const toggleMobileOverride = (enabled: boolean) => {
-    setDraft((current) => ({ ...current, mobile_override: enabled,
-      ...(enabled ? {
-        mobile_image_x: current.object_position_x, mobile_image_y: current.object_position_y, mobile_image_scale: current.image_scale,
-        mobile_title_x: current.title_x, mobile_title_y: current.title_y, mobile_title_width: current.title_width, mobile_title_scale: current.title_scale,
-        mobile_subtitle_x: current.subtitle_x, mobile_subtitle_y: current.subtitle_y, mobile_subtitle_width: current.subtitle_width, mobile_subtitle_scale: current.subtitle_scale,
-        mobile_cta_x: current.cta_x, mobile_cta_y: current.cta_y, mobile_cta_width: current.cta_width, mobile_cta_scale: current.cta_scale,
-      } : {}),
-    }));
-  };
-
   const uploadImage = async (file: File | undefined) => {
     if (!file) return; setUploading(true); setMessage('');
     try {
@@ -109,9 +100,10 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
       const response = await fetch('/api/admin/media/images', { method: 'POST', body: form }); const payload = await response.json() as { url?: string; error?: string };
       if (!response.ok || !payload.url) throw new Error(payload.error || 'Не удалось загрузить изображение');
       setDraft((current) => {
-        const mobile = previewMode === 'mobile' && current.mobile_override;
         return { ...current, image_url: payload.url || null, image_width: prepared.width, image_height: prepared.height,
-          ...imageFitPatch(previewMode, mobile, 'contain') };
+          fit_mode: 'contain', object_position_x: 50, object_position_y: 50, image_scale: 100,
+          mobile_override: false, mobile_image_x: 50, mobile_image_y: 50, mobile_image_scale: 100,
+          contain_background: 'color', contain_background_color: '#FFFFFF' };
       }); setSelected('image');
       setMessage('Изображение загружено и полностью вмещено. Нажмите «Сохранить изменения».');
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Не удалось загрузить изображение'); } finally { setUploading(false); }
@@ -121,15 +113,17 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
     event.preventDefault();
     if (draft.is_active && !draft.image_url) { setMessage('Для активного баннера необходимо изображение.'); return; }
     setSaving(true); setMessage(''); const { updated_at: ignored, ...editable } = draft; void ignored;
-    const result = await saveHomepageBanner({ ...editable, title: nullable(draft.title), subtitle: nullable(draft.subtitle), cta_text: nullable(draft.cta_text), alt_text: nullable(draft.alt_text), image_url: nullable(draft.image_url), link_url: nullable(draft.link_url) });
-    if (result.success) { const value = { ...bannerCompositionDefaults, ...result.banner }; setSaved(value); setDraft(value); setMessage('Изменения сохранены'); }
+    const result = await saveHomepageBanner({ ...editable,
+      fit_mode: 'contain', object_position_x: 50, object_position_y: 50, image_scale: 100,
+      mobile_override: false, mobile_image_x: 50, mobile_image_y: 50, mobile_image_scale: 100,
+      contain_background: 'color', contain_background_color: '#FFFFFF',
+      title: nullable(draft.title), subtitle: nullable(draft.subtitle), cta_text: nullable(draft.cta_text), alt_text: nullable(draft.alt_text), image_url: nullable(draft.image_url), link_url: nullable(draft.link_url) });
+    if (result.success) { const value = simpleImageBanner({ ...bannerCompositionDefaults, ...result.banner }); setSaved(value); setDraft(value); setMessage('Изменения сохранены'); }
     else setMessage(result.error || 'Не удалось сохранить баннер');
     setSaving(false);
   };
 
-  const currentImage = imageLayout(draft, previewMode);
   const currentElement = selected === 'image' ? null : elementLayout(draft, selected, previewMode);
-  const imageIsCenteredAtNaturalScale = currentImage.x === 50 && currentImage.y === 50 && currentImage.scale === 100;
   return (
     <form className="admin-banner-editor-page" onSubmit={submit}>
       <div className="admin-banner-editor-toolbar"><Link href="/admin/banners" onClick={(event) => { if (dirty && !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')) event.preventDefault(); }}>← Все баннеры</Link>
@@ -142,9 +136,9 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
 
       <section className="admin-banner-editor-preview-panel">
         <div className="admin-banner-preview-toolbar"><div className="admin-banner-mode-switch" role="group" aria-label="Режим предпросмотра"><button type="button" className={previewMode === 'desktop' ? 'is-active' : ''} onClick={() => setPreviewMode('desktop')}>Desktop · 1440</button><button type="button" className={previewMode === 'mobile' ? 'is-active' : ''} onClick={() => setPreviewMode('mobile')}>Mobile · 390</button></div>
-          {previewMode === 'mobile' && <label className="admin-checkbox-field is-inline"><input type="checkbox" checked={draft.mobile_override} onChange={(event) => toggleMobileOverride(event.target.checked)} />Отдельно настроить для телефона</label>}</div>
-        <p className="admin-banner-onboarding">Нажмите на изображение или текст, затем перетащите или измените размер за углы.</p>
-        <div className="admin-banner-direct-toolbar"><button type="button" className={draft.fit_mode === 'contain' && imageIsCenteredAtNaturalScale ? 'is-active' : ''} onClick={() => fitImage('contain')}><strong>Вместить изображение полностью</strong><small>Все края видны</small></button><button type="button" className={draft.fit_mode === 'cover' && imageIsCenteredAtNaturalScale ? 'is-active' : ''} onClick={() => fitImage('cover')}><strong>Заполнить баннер</strong><small>Без полос, края могут обрезаться</small></button><button type="button" onClick={resetPosition}>По центру / Сбросить положение</button></div>
+          </div>
+        <p className="admin-banner-onboarding">Изображение всегда показывается полностью и одинаково на компьютере и телефоне. Текст можно выбрать, перетащить и изменить за углы.</p>
+        {selected !== 'image' && <div className="admin-banner-direct-toolbar"><button type="button" onClick={resetPosition}>Вернуть выбранный текст на место</button></div>}
         <div ref={stageRef} className={`admin-banner-preview-stage is-${previewMode}`}><BannerAdminPreview banner={draft} mode={previewMode} showSafeRegion selected={selected} onSelect={setSelected} onEditPointerDown={startEdit} /></div>
       </section>
 
@@ -153,7 +147,6 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
           <label className="admin-field"><span>Загрузить или заменить</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploading} onChange={(event) => void uploadImage(event.target.files?.[0])} /></label>
           <div className="admin-inline-actions"><button type="button" className="admin-secondary-button" onClick={() => setDraft((current) => ({ ...current, image_url: null, image_width: null, image_height: null, is_active: false }))} disabled={!draft.image_url || uploading}>Убрать изображение</button>{uploading && <span>Загрузка…</span>}</div>
           <label className="admin-field"><span>Alt text</span><input maxLength={200} value={draft.alt_text || ''} onChange={(event) => setField('alt_text', event.target.value)} placeholder="Кратко опишите изображение" /></label>
-          {draft.fit_mode === 'contain' && <div className="admin-contain-background"><span>Фон свободных полос</span><div className="admin-banner-mode-switch"><button type="button" className={draft.contain_background === 'color' ? 'is-active' : ''} onClick={() => setField('contain_background', 'color')}>Цвет</button><button type="button" className={draft.contain_background === 'blur' ? 'is-active' : ''} onClick={() => setField('contain_background', 'blur')}>Мягкое размытие</button></div>{draft.contain_background === 'color' && <input aria-label="Цвет фона" type="color" value={draft.contain_background_color} onChange={(event) => setField('contain_background_color', event.target.value.toUpperCase())} />}</div>}
         </section>
 
         <section className="admin-banner-settings-card"><h2>Текст и кнопка</h2>
@@ -174,7 +167,6 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
         <label className="admin-field"><span>Выравнивание текста</span><select value={draft.text_align} onChange={(event) => setField('text_align', event.target.value as AdminHomepageBanner['text_align'])}><option value="left">Слева</option><option value="center">По центру</option><option value="right">Справа</option></select></label>
         <label className="admin-field"><span>Размер заголовка: {draft.title_size}px</span><input type="range" min="14" max="64" value={draft.title_size} onChange={(event) => setField('title_size', Number(event.target.value))} /></label>
         <label className="admin-field"><span>Размер подзаголовка: {draft.subtitle_size}px</span><input type="range" min="10" max="40" value={draft.subtitle_size} onChange={(event) => setField('subtitle_size', Number(event.target.value))} /></label>
-        <label className="admin-field"><span>Изображение X/Y: {currentImage.x}% / {currentImage.y}%</span><input type="range" min="0" max="100" value={currentImage.x} onChange={(event) => setField(compositionField('image', 'x', previewMode, previewMode === 'mobile' && draft.mobile_override) as keyof AdminHomepageBanner, Number(event.target.value) as never)} /></label>
         {currentElement && <div className="admin-control-note">Выбран элемент «{selected}»: X {currentElement.x}%, Y {currentElement.y}%, ширина {currentElement.width}%, масштаб {currentElement.scale}%.</div>}
       </div></details>
 

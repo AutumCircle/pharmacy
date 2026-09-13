@@ -21,11 +21,10 @@ function overlayBackground(banner: HomepageBanner): string {
 
 function variables(banner: HomepageBanner): CSSProperties {
   const desktopImage = imageLayout(banner, 'desktop');
-  const mobileImage = imageLayout(banner, 'mobile');
   const style: Record<string, string | number> = {
-    '--banner-bg': banner.contain_background_color,
+    '--banner-bg': '#FFFFFF',
     '--image-x': `${desktopImage.x}%`, '--image-y': `${desktopImage.y}%`, '--image-scale': desktopImage.scale / 100,
-    '--mobile-image-x': `${mobileImage.x}%`, '--mobile-image-y': `${mobileImage.y}%`, '--mobile-image-scale': mobileImage.scale / 100,
+    '--mobile-image-x': `${desktopImage.x}%`, '--mobile-image-y': `${desktopImage.y}%`, '--mobile-image-scale': desktopImage.scale / 100,
   };
   for (const element of ['title', 'subtitle', 'cta'] as const) {
     const desktop = elementLayout(banner, element, 'desktop');
@@ -59,21 +58,17 @@ export default function BannerRenderer({ banner, viewport = 'auto', className = 
       event.preventDefault(); event.stopPropagation(); onSelect?.(element); onEditPointerDown?.(element, 'move', event);
     },
   } : {};
-  const handles = (element: BannerEditableElement) => editable && selected === element ? ['nw', 'ne', 'sw', 'se'].map((corner) => (
+  const handles = (element: BannerEditableElement) => editable && element !== 'image' && selected === element ? ['nw', 'ne', 'sw', 'se'].map((corner) => (
     <button key={corner} type="button" aria-label={`Изменить размер: ${corner}`} className={`banner-edit-handle is-${corner}`}
       onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); onEditPointerDown?.(element, 'resize', event); }} />
   )) : null;
-  const selectedClass = (element: BannerEditableElement) => `${selected === element ? ' is-selected' : ''}${editable ? ' is-editable' : ''}`;
+  const selectedClass = (element: BannerEditableElement) => `${selected === element ? ' is-selected' : ''}${editable && element !== 'image' ? ' is-editable' : ''}`;
   return (
     <div className={`banner-renderer banner-renderer--${banner.slot} banner-renderer--${viewport} ${className}`.trim()} style={variables(banner)}>
       <div className={`banner-renderer-image${selectedClass('image')}`} {...editProps('image')}>
-        {banner.image_url && banner.fit_mode === 'contain' && banner.contain_background === 'blur' && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img className="banner-renderer-blur" src={banner.image_url} alt="" aria-hidden="true" referrerPolicy="no-referrer" />
-        )}
         {banner.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img className={`banner-renderer-photo is-${banner.fit_mode}`} src={banner.image_url} alt={banner.alt_text || ''} referrerPolicy="no-referrer" />
+          <img className="banner-renderer-photo is-contain" src={banner.image_url} alt={banner.alt_text || ''} referrerPolicy="no-referrer" />
         ) : <div className="banner-renderer-empty">Изображение не задано</div>}
         {handles('image')}
       </div>

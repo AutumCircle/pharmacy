@@ -8,10 +8,10 @@ export const bannerSlotNames: Record<HomepageBannerSlot, string> = {
 };
 
 export const bannerRecommendedDimensions: Record<HomepageBannerSlot, string> = {
-  left: '1200 × 900 px',
-  center: '1600 × 900 px',
-  right_top: '1200 × 500 px',
-  right_bottom: '1200 × 500 px',
+  left: '1000 × 1400 px',
+  center: '1500 × 1000 px',
+  right_top: '1600 × 900 px',
+  right_bottom: '1600 × 900 px',
 };
 
 export const bannerSlots = Object.keys(bannerSlotNames) as HomepageBannerSlot[];

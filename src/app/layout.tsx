@@ -7,6 +7,11 @@ import LayoutWrapper from '../components/LayoutWrapper';
 export const metadata: Metadata = {
   title: 'Аптека ВАТАН - Доставка лекарств в Душанбе',
   description: 'Широкий ассортимент лекарств и доставка в Душанбе',
+  icons: {
+    icon: [{ url: '/assets/apteka-vatan-logo.png', type: 'image/png', sizes: '66x66' }],
+    shortcut: '/assets/apteka-vatan-logo.png',
+    apple: '/assets/apteka-vatan-logo.png',
+  },
 };
 
 export default function RootLayout({

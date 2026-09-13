@@ -37,9 +37,8 @@ export function elementLayout(banner: HomepageBanner, element: Exclude<BannerEdi
 }
 
 export function imageLayout(banner: HomepageBanner, viewport: BannerViewport) {
-  return usesMobileComposition(banner, viewport)
-    ? { x: banner.mobile_image_x, y: banner.mobile_image_y, scale: banner.mobile_image_scale }
-    : { x: banner.object_position_x, y: banner.object_position_y, scale: banner.image_scale };
+  void banner; void viewport;
+  return { x: 50, y: 50, scale: 100 };
 }
 
 export function compositionField(element: BannerEditableElement, property: 'x' | 'y' | 'width' | 'scale', viewport: BannerViewport, mobileOverride: boolean): keyof HomepageBanner {
@@ -49,13 +48,4 @@ export function compositionField(element: BannerEditableElement, property: 'x' |
     return property === 'x' ? 'object_position_x' : property === 'y' ? 'object_position_y' : 'image_scale';
   }
   return `${viewport === 'mobile' && mobileOverride ? 'mobile_' : ''}${element}_${property}` as keyof HomepageBanner;
-}
-
-export function imageFitPatch(viewport: BannerViewport, mobileOverride: boolean, fitMode: 'contain' | 'cover'): Partial<HomepageBanner> {
-  return {
-    fit_mode: fitMode,
-    [compositionField('image', 'x', viewport, mobileOverride)]: 50,
-    [compositionField('image', 'y', viewport, mobileOverride)]: 50,
-    [compositionField('image', 'scale', viewport, mobileOverride)]: 100,
-  };
 }
