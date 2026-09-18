@@ -35,7 +35,11 @@ class TelegramMessageTests(unittest.TestCase):
         self.assertIn("NOW D3 × 2", owner)
         self.assertIn("Сумма заказа: 210.00 с.", owner)
         self.assertIn("Валовая прибыль: 10.50 с.", owner)
-        self.assertIn("Итого без наценки: 180.00 с.", pharmacy)
+        self.assertIn("<b>Товары:</b>", pharmacy)
+        self.assertIn("NOW D3 × 2 — 180.00 с.", pharmacy)
+        self.assertIn("Итого: 180.00 с.", pharmacy)
+        self.assertNotIn("нацен", pharmacy.lower())
+        self.assertNotIn("прибыл", pharmacy.lower())
         self.assertIn("Получатель: &lt;Фируз&gt;", delivery)
         self.assertIn("Позвонить: +992917123456", delivery)
 

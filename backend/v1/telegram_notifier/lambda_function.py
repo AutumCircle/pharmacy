@@ -84,12 +84,12 @@ def format_pharmacy_message(event: dict[str, Any]) -> str:
     lines = [
         f"💊 <b>Заказ {reference} — собрать</b>",
         "",
-        "<b>Товары по цене без наценки:</b>",
+        "<b>Товары:</b>",
     ]
     lines.extend(_item_lines(event, "base_line_total"))
     lines.extend([
         "",
-        f"🧾 <b>Итого без наценки: {_money(event.get('base_total'))}</b>",
+        f"🧾 <b>Итого: {_money(event.get('base_total'))}</b>",
     ])
     return "\n".join(lines)
 
