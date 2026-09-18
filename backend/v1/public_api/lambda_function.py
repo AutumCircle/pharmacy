@@ -9,8 +9,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import logging
-import os
 import re
 from decimal import Decimal
 from typing import Any
@@ -32,8 +30,6 @@ from backend.v1.shared.responses import error_response, request_id, success, suc
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
 MINIMUM_ORDER_SUBTOTAL = 50
-DEFAULT_ORDER_NOTIFIER_FUNCTION_NAME = "pharmacy-telegram-order-notifier"
-logger = logging.getLogger(__name__)
 
 
 def _body(event: dict[str, Any]) -> dict[str, Any]:
@@ -558,25 +554,6 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
         return response, 201, notification
 
 
-def notify_new_order(notification: dict[str, Any] | None) -> None:
-    function_name = os.environ.get(
-        "ORDER_NOTIFIER_FUNCTION_NAME",
-        DEFAULT_ORDER_NOTIFIER_FUNCTION_NAME,
-    ).strip()
-    if not notification or not function_name:
-        return
-    try:
-        import boto3
-        boto3.client("lambda").invoke(
-            FunctionName=function_name,
-            InvocationType="Event",
-            Payload=json.dumps(notification, ensure_ascii=False).encode("utf-8"),
-        )
-    except Exception:
-        # The customer order is already committed and must remain successful.
-        logger.exception("Unable to enqueue Telegram notification")
-
-
 def list_categories(query: dict[str, Any]) -> dict[str, Any]:
     limit = _page_size(query)
     cursor = _decode_cursor(query.get("cursor"))
@@ -736,8 +713,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if method == "POST" and path.endswith("/public/orders"):
             headers = _headers(event)
             response, status_code, notification = create_order(_body(event), headers.get("idempotency-key", ""))
-            notify_new_order(notification)
-            return success(response, status_code=status_code, request=current_request_id)
+            payload = {**response, "_notification": notification} if notification else response
+            return success(payload, status_code=status_code, request=current_request_id)
         raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
     except ContractError as exc:
         return error_response(exc, request=current_request_id)

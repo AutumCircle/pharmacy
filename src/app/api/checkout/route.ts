@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createPublicOrder } from '@/lib/api-v1/server';
+import { createPublicOrder, sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 import type { CreateOrderRequest } from '@/lib/api-v1/types';
 
@@ -37,6 +37,16 @@ export async function POST(request: Request) {
       );
     }
     const response = await createPublicOrder(body, idempotencyKey);
+    const order = response.data as typeof response.data & { _notification?: Record<string, unknown> };
+    const notification = order._notification;
+    if (notification) {
+      delete order._notification;
+      try {
+        await sendOrderNotification(notification);
+      } catch (notificationError) {
+        console.error('Order was created, but Telegram notification failed', notificationError);
+      }
+    }
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
     return apiRouteError(error);

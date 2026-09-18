@@ -1,15 +1,14 @@
-import os
-import sys
 import unittest
+import json
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from backend.v1.telegram_notifier.lambda_function import (
     format_delivery_message,
     format_owner_message,
     format_pharmacy_message,
+    lambda_handler,
 )
-from backend.v1.public_api.lambda_function import notify_new_order
 
 
 class TelegramMessageTests(unittest.TestCase):
@@ -51,21 +50,16 @@ class TelegramMessageTests(unittest.TestCase):
 
 
 class TelegramDispatchTests(unittest.TestCase):
-    def test_async_dispatch_and_default_configuration(self):
-        client = MagicMock()
-        boto3 = MagicMock()
-        boto3.client.return_value = client
-        with patch.dict(sys.modules, {"boto3": boto3}):
-            with patch.dict(os.environ, {"ORDER_NOTIFIER_FUNCTION_NAME": "notifier"}):
-                notify_new_order({"order_reference": "1234-001"})
-            self.assertEqual(client.invoke.call_args.kwargs["InvocationType"], "Event")
-            client.reset_mock()
-            with patch.dict(os.environ, {}, clear=True):
-                notify_new_order({"order_reference": "1234-001"})
-        self.assertEqual(
-            client.invoke.call_args.kwargs["FunctionName"],
-            "pharmacy-telegram-order-notifier",
-        )
+    @patch("backend.v1.telegram_notifier.lambda_function._send_message")
+    def test_api_gateway_payload_sends_three_messages(self, send_message):
+        event = {
+            "requestContext": {"requestId": "test"},
+            "body": json.dumps({"order_reference": "1234-001", "items": []}),
+        }
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_OWNER_CHAT_ID": "123"}):
+            response = lambda_handler(event, None)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(send_message.call_count, 3)
 
 
 if __name__ == "__main__":

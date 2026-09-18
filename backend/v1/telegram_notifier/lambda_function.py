@@ -125,7 +125,24 @@ def _send_message(token: str, chat_id: str, text: str, event: dict[str, Any]) ->
         raise RuntimeError("Telegram rejected the notification")
 
 
+def _notification_event(event: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    is_api_gateway = isinstance(event.get("requestContext"), dict)
+    if not is_api_gateway:
+        return event, False
+    raw_body = event.get("body")
+    if not isinstance(raw_body, str):
+        raise RuntimeError("Notification payload is missing")
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Notification payload is invalid") from exc
+    if not isinstance(body, dict):
+        raise RuntimeError("Notification payload is invalid")
+    return body, True
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    notification, is_api_gateway = _notification_event(event)
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     legacy_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     owner_chat_id = os.environ.get("TELEGRAM_OWNER_CHAT_ID", "").strip() or legacy_chat_id
@@ -134,10 +151,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not token or not owner_chat_id:
         raise RuntimeError("Telegram notification configuration is incomplete")
     deliveries = (
-        (owner_chat_id, format_owner_message(event)),
-        (pharmacy_chat_id, format_pharmacy_message(event)),
-        (delivery_chat_id, format_delivery_message(event)),
+        (owner_chat_id, format_owner_message(notification)),
+        (pharmacy_chat_id, format_pharmacy_message(notification)),
+        (delivery_chat_id, format_delivery_message(notification)),
     )
     for chat_id, text in deliveries:
-        _send_message(token, chat_id, text, event)
-    return {"ok": True, "order_reference": event.get("order_reference"), "messages_sent": 3}
+        _send_message(token, chat_id, text, notification)
+    result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": 3}
+    if is_api_gateway:
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+            "body": json.dumps({"data": result, "request_id": "telegram-notifier"}),
+        }
+    return result

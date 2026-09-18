@@ -200,6 +200,14 @@ export function createPublicOrder(
   });
 }
 
+export function sendOrderNotification(body: Record<string, unknown>): Promise<ApiSuccessResponse<{ ok: boolean }>> {
+  return request('/v1/internal/order-notifications', {
+    method: 'POST',
+    body,
+    timeoutMs: 8_000,
+  });
+}
+
 export function trackPublicOrders(phone: string): Promise<TrackOrdersResponse> {
   return request('/v1/public/orders/track', { method: 'POST', body: { phone }, readOnly: true });
 }
