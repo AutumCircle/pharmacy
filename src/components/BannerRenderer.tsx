@@ -60,7 +60,7 @@ export default function BannerRenderer({ banner, viewport = 'auto', className = 
       event.preventDefault(); event.stopPropagation(); onSelect?.(element); onEditPointerDown?.(element, 'move', event);
     },
   } : {};
-  const handles = (element: BannerEditableElement) => editable && element !== 'image' && selected === element ? ['nw', 'ne', 'sw', 'se'].map((corner) => (
+  const handles = (element: BannerEditableElement) => editable && selected === element ? ['nw', 'ne', 'sw', 'se'].map((corner) => (
     <button key={corner} type="button" aria-label={`Изменить размер: ${corner}`} className={`banner-edit-handle is-${corner}`}
       onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); onEditPointerDown?.(element, 'resize', event); }} />
   )) : null;

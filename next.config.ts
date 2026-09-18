@@ -10,6 +10,7 @@ const localDevOrigins = Object.values(os.networkInterfaces())
   .map((address) => address.address);
 
 const nextConfig: NextConfig = {
+  experimental: { serverActions: { bodySizeLimit: '5mb' } },
   // Allow phones on the same LAN to load Next.js development assets/HMR.
   // The address is discovered on every dev-server start because Wi-Fi IPs change.
   allowedDevOrigins: [...new Set(localDevOrigins)],

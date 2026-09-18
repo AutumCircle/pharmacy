@@ -14,7 +14,7 @@ function nullable(value: string | null): string | null { const clean = value?.tr
 function simpleImageBanner(banner: AdminHomepageBanner): AdminHomepageBanner {
   return {
     ...banner,
-    fit_mode: 'contain', object_position_x: 50, object_position_y: 50, image_scale: 100,
+    fit_mode: 'contain',
     mobile_override: false, mobile_image_x: 50, mobile_image_y: 50, mobile_image_scale: 100,
     contain_background: 'color', contain_background_color: '#FFFFFF',
   };
@@ -58,14 +58,23 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
   };
 
   const startEdit = (element: BannerEditableElement, action: 'move' | 'resize', event: ReactPointerEvent<HTMLElement>) => {
-    if (element === 'image') { setSelected('image'); return; }
     const canvas = stageRef.current?.querySelector<HTMLElement>('.banner-renderer');
     if (!canvas) return;
     const bounds = canvas.getBoundingClientRect(); const startX = event.clientX; const startY = event.clientY;
-    const initial = elementLayout(draft, element, previewMode);
+    const initial = element === 'image'
+      ? { x: draft.object_position_x, y: draft.object_position_y, scale: draft.image_scale, width: 100 }
+      : elementLayout(draft, element, previewMode);
+    const corner = event.currentTarget.getAttribute('aria-label') || '';
     const move = (pointer: PointerEvent) => {
       const dx = ((pointer.clientX - startX) / bounds.width) * 100; const dy = ((pointer.clientY - startY) / bounds.height) * 100;
       setDraft((current) => {
+        if (element === 'image') {
+          if (action === 'resize') {
+            const delta = ((corner.includes('nw') || corner.includes('sw') ? -dx : dx) + (corner.includes('nw') || corner.includes('ne') ? -dy : dy)) / 2;
+            return { ...current, image_scale: clamp(initial.scale + delta * 2, 50, 200) };
+          }
+          return { ...current, object_position_x: clamp(initial.x + dx, 0, 100), object_position_y: clamp(initial.y + dy, 0, 100) };
+        }
         const mobile = previewMode === 'mobile' && current.mobile_override;
         if (action === 'move') {
           const width = elementLayout(current, element, previewMode).width;
@@ -120,7 +129,7 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
     if (draft.is_active && !draft.image_url) { setMessage('Для активного баннера необходимо изображение.'); return; }
     setSaving(true); setMessage(''); const { updated_at: ignored, ...editable } = draft; void ignored;
     const result = await saveHomepageBanner({ ...editable,
-      fit_mode: 'contain', object_position_x: 50, object_position_y: 50, image_scale: 100,
+      fit_mode: 'contain',
       mobile_override: false, mobile_image_x: 50, mobile_image_y: 50, mobile_image_scale: 100,
       contain_background: 'color', contain_background_color: '#FFFFFF',
       title: nullable(draft.title), subtitle: nullable(draft.subtitle), cta_text: nullable(draft.cta_text), alt_text: nullable(draft.alt_text), image_url: nullable(draft.image_url), link_url: nullable(draft.link_url) });
@@ -141,7 +150,13 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
         <label className="admin-banner-active-toggle"><input type="checkbox" checked={draft.is_active} onChange={(event) => setField('is_active', event.target.checked)} />{draft.is_active ? 'Активен' : 'Черновик'}</label></div>
 
       <section className="admin-banner-editor-preview-panel">
-        <p className="admin-banner-onboarding">{draft.slot === 'mobile' ? 'Этот баннер виден только на смартфонах.' : 'Этот баннер виден только на компьютерах и больших планшетах.'} Ниже — весь баннер в пропорциях сайта. Текст можно выбрать, перетащить и изменить за углы.</p>
+        <p className="admin-banner-onboarding">{draft.slot === 'mobile' ? 'Этот баннер виден только на смартфонах.' : 'Этот баннер виден только на компьютерах и больших планшетах.'} Перетаскивайте изображение или текст. Потяните за угол, чтобы изменить размер. При увеличении края могут выйти за рамку баннера.</p>
+        <div className="admin-banner-direct-toolbar">
+          <button type="button" onClick={() => setDraft(current => ({ ...current, image_scale: clamp(current.image_scale - 10, 50, 200) }))}>− Уменьшить</button>
+          <span>Масштаб: {draft.image_scale}%</span>
+          <button type="button" onClick={() => setDraft(current => ({ ...current, image_scale: clamp(current.image_scale + 10, 50, 200) }))}>+ Увеличить</button>
+          <button type="button" onClick={() => setDraft(current => ({ ...current, image_scale: 100, object_position_x: 50, object_position_y: 50 }))}>Вместить целиком</button>
+        </div>
         {selected !== 'image' && <div className="admin-banner-direct-toolbar"><button type="button" onClick={resetPosition}>Вернуть выбранный текст на место</button></div>}
         <div ref={stageRef} className={`admin-banner-preview-stage is-${previewMode}`}><BannerAdminPreview banner={draft} mode={previewMode} selected={selected} onSelect={setSelected} onEditPointerDown={startEdit} /></div>
       </section>

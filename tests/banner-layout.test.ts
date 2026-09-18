@@ -11,9 +11,9 @@ const banner = {
   mobile_title_x: 5, mobile_title_y: 18, mobile_title_width: 88, mobile_title_scale: 110,
 } as never;
 
-test('legacy image crop settings do not affect full-image rendering on either device', () => {
-  assert.deepEqual(imageLayout(banner, 'desktop'), { x: 50, y: 50, scale: 100 });
-  assert.deepEqual(imageLayout(banner, 'mobile'), { x: 50, y: 50, scale: 100 });
+test('saved image position and scale are shared by editor and public rendering', () => {
+  assert.deepEqual(imageLayout(banner, 'desktop'), { x: 30, y: 40, scale: 120 });
+  assert.deepEqual(imageLayout(banner, 'mobile'), { x: 30, y: 40, scale: 120 });
   assert.deepEqual(elementLayout(banner, 'title', 'mobile'), { x: 5, y: 18, width: 88, scale: 110 });
 });
 

@@ -37,8 +37,8 @@ export function elementLayout(banner: HomepageBanner, element: Exclude<BannerEdi
 }
 
 export function imageLayout(banner: HomepageBanner, viewport: BannerViewport) {
-  void banner; void viewport;
-  return { x: 50, y: 50, scale: 100 };
+  void viewport;
+  return { x: banner.object_position_x ?? 50, y: banner.object_position_y ?? 50, scale: banner.image_scale ?? 100 };
 }
 
 export function compositionField(element: BannerEditableElement, property: 'x' | 'y' | 'width' | 'scale', viewport: BannerViewport, mobileOverride: boolean): keyof HomepageBanner {

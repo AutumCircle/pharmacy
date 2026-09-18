@@ -1,5 +1,5 @@
 import 'server-only';
-import { withLocalBanners } from '@/lib/local-banners';
+import { listLocalAdminBanners, withLocalBanners } from '@/lib/local-banners';
 
 import type { ApiErrorResponse, ApiSuccessResponse, OrderStatus } from './types';
 import type {
@@ -329,6 +329,14 @@ export function getAdminDuplicateGroup(groupKey: string): Promise<AdminDuplicate
 }
 
 export async function listAdminHomepageBanners(): Promise<AdminApiListResponse<AdminHomepageBanner>> {
+  if (process.env.NODE_ENV === 'development') {
+    const data = await listLocalAdminBanners();
+    return {
+      data,
+      page: { next_cursor: null, previous_cursor: null, has_more: false },
+      request_id: 'local-banners',
+    };
+  }
   const response = await request<AdminApiListResponse<AdminHomepageBanner>>('/v1/admin/homepage-banners');
   return { ...response, data: await withLocalBanners(response.data) };
 }
