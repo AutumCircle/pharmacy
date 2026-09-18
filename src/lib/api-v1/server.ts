@@ -83,6 +83,7 @@ interface RequestOptions {
   retryable?: boolean;
   readOnly?: boolean;
   timeoutMs?: number;
+  bearerToken?: string;
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -106,6 +107,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
           Accept: 'application/json',
           'Content-Type': 'application/json',
           'x-api-key': apiKey,
+          ...(options.bearerToken ? { Authorization: `Bearer ${options.bearerToken}` } : {}),
           ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
         },
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -201,10 +203,15 @@ export function createPublicOrder(
 }
 
 export function sendOrderNotification(body: Record<string, unknown>): Promise<ApiSuccessResponse<{ ok: boolean }>> {
+  const bearerToken = process.env.ADMIN_API_BEARER_TOKEN;
+  if (!bearerToken) {
+    throw new ApiV1Error(500, 'API_CONFIGURATION_ERROR', 'Notification authorization is not configured');
+  }
   return request('/v1/internal/order-notifications', {
     method: 'POST',
     body,
     timeoutMs: 8_000,
+    bearerToken,
   });
 }
 

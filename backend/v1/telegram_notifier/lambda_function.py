@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 import html
+import hmac
 import json
 import os
 import urllib.error
 import urllib.request
 from decimal import Decimal, InvalidOperation
 from typing import Any
+
+
+def _authorizer_response(event: dict[str, Any]) -> dict[str, Any] | None:
+    if event.get("type") != "TOKEN":
+        return None
+    supplied = str(event.get("authorizationToken") or "")
+    expected = os.environ.get("NOTIFIER_BEARER_TOKEN", "").strip()
+    allowed = bool(expected) and hmac.compare_digest(supplied, f"Bearer {expected}")
+    return {
+        "principalId": "pharmacy-web" if allowed else "unauthorized",
+        "policyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Action": "execute-api:Invoke",
+                "Effect": "Allow" if allowed else "Deny",
+                "Resource": event.get("methodArn", "*"),
+            }],
+        },
+    }
 
 
 def _money(value: Any) -> str:
@@ -142,6 +162,9 @@ def _notification_event(event: dict[str, Any]) -> tuple[dict[str, Any], bool]:
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    authorization = _authorizer_response(event)
+    if authorization is not None:
+        return authorization
     notification, is_api_gateway = _notification_event(event)
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     legacy_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()

@@ -50,6 +50,18 @@ class TelegramMessageTests(unittest.TestCase):
 
 
 class TelegramDispatchTests(unittest.TestCase):
+    def test_authorizer_requires_matching_bearer_token(self):
+        event = {
+            "type": "TOKEN",
+            "authorizationToken": "Bearer secret",
+            "methodArn": "arn:aws:execute-api:eu-central-1:123:api/prod/POST/path",
+        }
+        with patch.dict("os.environ", {"NOTIFIER_BEARER_TOKEN": "secret"}):
+            allowed = lambda_handler(event, None)
+            denied = lambda_handler({**event, "authorizationToken": "Bearer wrong"}, None)
+        self.assertEqual(allowed["policyDocument"]["Statement"][0]["Effect"], "Allow")
+        self.assertEqual(denied["policyDocument"]["Statement"][0]["Effect"], "Deny")
+
     @patch("backend.v1.telegram_notifier.lambda_function._send_message")
     def test_api_gateway_payload_sends_three_messages(self, send_message):
         event = {
