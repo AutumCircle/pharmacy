@@ -451,6 +451,7 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
 
         order_items: list[dict[str, Any]] = []
         subtotal = 0
+        base_total = Decimal("0")
         profit = Decimal("0")
         for item in request["items"]:
             medicine = medicines[item["medicine_id"]]
@@ -458,12 +459,15 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             line_total = selling_price * item["quantity"]
             subtotal += line_total
             base_price = Decimal(str(medicine["price"]))
+            base_line_total = base_price * item["quantity"]
+            base_total += base_line_total
             profit += (Decimal(selling_price) - base_price) * item["quantity"]
             order_items.append({
                 "medicine_id": medicine["id"],
                 "medicine_name": medicine["name"],
                 "quantity": item["quantity"],
                 "base_unit_price": base_price,
+                "base_line_total": base_line_total,
                 "selling_unit_price": selling_price,
                 "line_total": line_total,
             })
@@ -534,7 +538,19 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             "phone": request["phone"],
             "address": request["address"],
             "comment": request["comment"],
-            "items": response_items,
+            "items": [
+                {
+                    "medicine_id": item["medicine_id"],
+                    "medicine_name": item["medicine_name"],
+                    "quantity": item["quantity"],
+                    "base_unit_price": str(item["base_unit_price"]),
+                    "base_line_total": str(item["base_line_total"]),
+                    "selling_unit_price": item["selling_unit_price"],
+                    "line_total": item["line_total"],
+                }
+                for item in order_items
+            ],
+            "base_total": str(base_total.quantize(Decimal("0.01"))),
             "order_total": str(subtotal),
             "profit": str(profit.quantize(Decimal("0.01"))),
             "currency": "TJS",
