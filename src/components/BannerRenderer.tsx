@@ -2,6 +2,7 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import type { HomepageBanner } from '@/lib/api-v1/types';
+import { bannerDimensions } from '@/lib/banner-image';
 import { elementLayout, imageLayout, type BannerEditableElement, type BannerViewport } from '@/lib/banner-layout';
 
 type EditAction = 'move' | 'resize';
@@ -22,13 +23,14 @@ function overlayBackground(banner: HomepageBanner): string {
 function variables(banner: HomepageBanner): CSSProperties {
   const desktopImage = imageLayout(banner, 'desktop');
   const style: Record<string, string | number> = {
+    aspectRatio: `${bannerDimensions[banner.slot].width} / ${bannerDimensions[banner.slot].height}`,
     '--banner-bg': '#FFFFFF',
     '--image-x': `${desktopImage.x}%`, '--image-y': `${desktopImage.y}%`, '--image-scale': desktopImage.scale / 100,
     '--mobile-image-x': `${desktopImage.x}%`, '--mobile-image-y': `${desktopImage.y}%`, '--mobile-image-scale': desktopImage.scale / 100,
   };
   for (const element of ['title', 'subtitle', 'cta'] as const) {
     const desktop = elementLayout(banner, element, 'desktop');
-    const mobile = elementLayout(banner, element, 'mobile');
+    const mobile = desktop;
     style[`--${element}-x`] = `${desktop.x}%`; style[`--${element}-y`] = `${desktop.y}%`;
     style[`--${element}-width`] = `${desktop.width}%`; style[`--${element}-scale`] = desktop.scale / 100;
     style[`--mobile-${element}-x`] = `${mobile.x}%`; style[`--mobile-${element}-y`] = `${mobile.y}%`;
@@ -37,16 +39,16 @@ function variables(banner: HomepageBanner): CSSProperties {
   return style as CSSProperties;
 }
 
-export default function BannerRenderer({ banner, viewport = 'auto', className = '', selected = null, onEditPointerDown, onSelect, showSafeRegion = false }: {
+export default function BannerRenderer({ banner, viewport = 'auto', className = '', selected = null, onEditPointerDown, onSelect }: {
   banner: HomepageBanner;
   viewport?: BannerViewport | 'auto';
   className?: string;
   selected?: BannerEditableElement | null;
   onEditPointerDown?: (element: BannerEditableElement, action: EditAction, event: ReactPointerEvent<HTMLElement>) => void;
   onSelect?: (element: BannerEditableElement) => void;
-  showSafeRegion?: boolean;
 }) {
   const editable = Boolean(onEditPointerDown && onSelect);
+  const scaledFont = (size: number) => `${size * 100 / bannerDimensions[banner.slot].referenceWidth}cqw`;
   const title = banner.title?.trim() || '';
   const subtitle = banner.subtitle?.trim() || '';
   const cta = banner.cta_text?.trim() || '';
@@ -73,10 +75,9 @@ export default function BannerRenderer({ banner, viewport = 'auto', className = 
         {handles('image')}
       </div>
       {hasCopy && banner.image_url && banner.overlay_enabled && <div className="banner-renderer-overlay" style={{ background: overlayBackground(banner) }} />}
-      {title && <div className={`banner-renderer-element banner-renderer-title${selectedClass('title')}`} {...editProps('title')}><h2 style={{ color: banner.text_color, textAlign: banner.text_align, fontSize: `${banner.title_size}px` }}>{title}</h2>{handles('title')}</div>}
-      {subtitle && <div className={`banner-renderer-element banner-renderer-subtitle${selectedClass('subtitle')}`} {...editProps('subtitle')}><p style={{ color: banner.text_color, textAlign: banner.text_align, fontSize: `${banner.subtitle_size}px` }}>{subtitle}</p>{handles('subtitle')}</div>}
-      {hasCta && <div className={`banner-renderer-element banner-renderer-cta-wrap${selectedClass('cta')}`} {...editProps('cta')}>{editable ? <span className="banner-renderer-cta">{cta}</span> : <a className="banner-renderer-cta" href={banner.link_url || '#'}>{cta}</a>}{handles('cta')}</div>}
-      {showSafeRegion && <div className="banner-renderer-safe-region"><span>Безопасная зона</span></div>}
+      {title && <div className={`banner-renderer-element banner-renderer-title${selectedClass('title')}`} {...editProps('title')}><h2 style={{ color: banner.text_color, textAlign: banner.text_align, fontSize: scaledFont(banner.title_size) }}>{title}</h2>{handles('title')}</div>}
+      {subtitle && <div className={`banner-renderer-element banner-renderer-subtitle${selectedClass('subtitle')}`} {...editProps('subtitle')}><p style={{ color: banner.text_color, textAlign: banner.text_align, fontSize: scaledFont(banner.subtitle_size) }}>{subtitle}</p>{handles('subtitle')}</div>}
+      {hasCta && <div className={`banner-renderer-element banner-renderer-cta-wrap${selectedClass('cta')}`} style={{ fontSize: scaledFont(14) }} {...editProps('cta')}>{editable ? <span className="banner-renderer-cta">{cta}</span> : <a className="banner-renderer-cta" href={banner.link_url || '#'}>{cta}</a>}{handles('cta')}</div>}
     </div>
   );
 }

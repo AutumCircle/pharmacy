@@ -22,6 +22,8 @@ import type {
   AdminNumberedPage,
 } from '@/lib/api-v1/admin-types';
 import { selectPage, toggleSelection } from '@/lib/admin-selection';
+import CategoryIcon from '@/components/CategoryIcon';
+import CategoryIconEditor from './CategoryIconEditor';
 
 const EMPTY_PAGE: AdminNumberedPage = { number: 1, size: 25, total_items: 0, total_pages: 1 };
 
@@ -297,7 +299,7 @@ export default function CategoriesClient({
                 className={`admin-entity-list-row${selected?.id === category.id ? ' active' : ''}`}
               >
                 <button type="button" disabled={busy} className="admin-entity-select" onClick={() => selectCategory(category.id)}>
-                  <span aria-hidden>↕ {category.icon || '💊'}</span>
+                  <span aria-hidden>↕ <CategoryIcon id={category.id} icon={category.icon} /></span>
                   <span><strong>{category.name}</strong><small>{category.is_active ? 'активна' : 'отключена'}</small></span>
                 </button>
                 <div className="admin-order-buttons">
@@ -326,6 +328,7 @@ export default function CategoriesClient({
                 </div>
               </section>
 
+              <CategoryIconEditor key={selected.id} id={selected.id} icon={selected.icon} onSaved={icon => setCategories(current => current.map(category => category.id === selected.id ? { ...category, icon } : category))} />
               <section className="admin-card-panel">
                 <div className="admin-sticky-toolbar admin-selection-toolbar">
                   <div><strong>Товары в категории: {itemsPage.total_items}</strong><small>Выбрано: {selectedItems.size}</small></div>

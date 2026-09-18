@@ -79,7 +79,7 @@ def upload_media_image(payload: dict[str, Any], actor_id: str, current_request_i
     content_type = payload.get("content_type")
     scope = payload.get("scope")
     encoded = payload.get("data_base64")
-    if content_type not in MEDIA_IMAGE_TYPES or scope not in {"banners", "products"} or not isinstance(encoded, str):
+    if content_type not in MEDIA_IMAGE_TYPES or scope not in {"banners", "products", "categories"} or not isinstance(encoded, str):
         raise ContractError("VALIDATION_ERROR", "Only JPEG, PNG or WebP banner/product images are supported")
     try:
         content = base64.b64decode(encoded, validate=True)
@@ -815,7 +815,7 @@ def create_category(payload: dict[str, Any]) -> dict[str, Any]:
         raise ContractError("VALIDATION_ERROR", "Category slug or name is invalid")
     icon = payload.get("icon")
     color = payload.get("color")
-    if icon is not None and (not isinstance(icon, str) or len(icon) > 50):
+    if icon is not None and (not isinstance(icon, str) or len(icon) > (2048 if icon.startswith("https://") else 50)):
         raise ContractError("VALIDATION_ERROR", "Category icon is invalid")
     if color is not None and color != "" and (not isinstance(color, str) or not COLOR_PATTERN.fullmatch(color)):
         raise ContractError("VALIDATION_ERROR", "Category color is invalid")
@@ -844,7 +844,7 @@ def update_category(category_id: int, payload: dict[str, Any]) -> dict[str, Any]
     if "name" in payload and (not isinstance(payload["name"], str) or not 1 <= len(payload["name"].strip()) <= 255):
         raise ContractError("VALIDATION_ERROR", "Category name is invalid")
     if "icon" in payload and payload["icon"] is not None and (
-        not isinstance(payload["icon"], str) or len(payload["icon"]) > 50
+        not isinstance(payload["icon"], str) or len(payload["icon"]) > (2048 if payload["icon"].startswith("https://") else 50)
     ):
         raise ContractError("VALIDATION_ERROR", "Category icon is invalid")
     if "color" in payload and payload["color"] is not None and payload["color"] != "" and (
@@ -1325,7 +1325,7 @@ def list_homepage_banners() -> dict[str, Any]:
             FROM homepage_banners
             ORDER BY CASE slot
                 WHEN 'left' THEN 1 WHEN 'center' THEN 2
-                WHEN 'right_top' THEN 3 ELSE 4 END
+                WHEN 'right_top' THEN 3 WHEN 'right_bottom' THEN 4 ELSE 5 END
             """
         )
         return {"data": [dict(row) for row in cur.fetchall()]}
@@ -1337,7 +1337,7 @@ def update_homepage_banner(
     actor_id: str,
     current_request_id: str,
 ) -> dict[str, Any]:
-    allowed_slots = {"left", "center", "right_top", "right_bottom"}
+    allowed_slots = {"left", "center", "right_top", "right_bottom", "mobile"}
     optional_text = {"title": 120, "subtitle": 240, "cta_text": 80, "alt_text": 200}
     enum_fields = {
         "fit_mode": {"cover", "contain"},

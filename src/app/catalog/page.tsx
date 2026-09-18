@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import CategoryIcon from '@/components/CategoryIcon';
 
 import { getPublicCategories } from '@/lib/api-v1/server';
 
@@ -18,7 +19,7 @@ export default async function CatalogPage() {
             style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '30px 20px', background: 'white', borderRadius: '12px', border: '1px solid #eee', textDecoration: 'none', color: '#333', textAlign: 'center' }}
           >
             <div style={{ width: '60px', height: '60px', background: '#f5f5f5', color: category.color || 'var(--primary)', borderRadius: '50%', marginBottom: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '30px' }}>
-              {category.icon || '＋'}
+              <CategoryIcon id={category.id} icon={category.icon} size={36} />
             </div>
             <span style={{ fontWeight: 600 }}>{category.name}</span>
           </Link>

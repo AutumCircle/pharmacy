@@ -55,3 +55,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Development-only banner images and settings, never deploy.
+.local-banners/

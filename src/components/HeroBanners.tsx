@@ -17,6 +17,7 @@ const defaults: Record<HomepageBannerSlot, HomepageBanner> = {
   center: { ...basePresentation, slot: 'center', title: 'Скидка на все виды лекарств', subtitle: 'Без выходных · Работаем днём и ночью · Доставим быстро' },
   right_top: { ...basePresentation, slot: 'right_top', title: 'Лучшие цены на лекарства', subtitle: null, title_size: 20 },
   right_bottom: { ...basePresentation, slot: 'right_bottom', title: 'Бонус к чеку', subtitle: null, title_size: 20 },
+  mobile: { ...basePresentation, slot: 'mobile', title: null, subtitle: null },
 };
 
 function PublicBanner({ banner, className, cellClassName = '' }: { banner: HomepageBanner; className: string; cellClassName?: string }) {
@@ -39,7 +40,8 @@ export default function HeroBanners({ banners }: { banners?: HomepageBanner[] })
   const left = banner('left'); const center = banner('center');
   const rightTop = banner('right_top'); const rightBottom = banner('right_bottom');
   const sideBanners = [left, rightTop, rightBottom].filter((value): value is HomepageBanner => Boolean(value));
-  if (!center && sideBanners.length === 0) return null;
+  const mobile = banner('mobile');
+  if (!center && sideBanners.length === 0 && !mobile) return null;
   return (
     <section className="hero-grid" aria-label="Баннеры аптеки">
       <div className="hero-desktop-layout">
@@ -51,14 +53,9 @@ export default function HeroBanners({ banners }: { banners?: HomepageBanner[] })
         </div>}
       </div>
 
-      <div className="hero-mobile-layout">
-        {sideBanners.length > 0 && <div className="hero-mobile-side-track">
-          {sideBanners.map((item) => (
-            <PublicBanner key={item.slot} banner={item} className={`${item.slot.replace('_', '-')}-banner`} cellClassName={`hero-mobile-side-card hero-mobile-${item.slot.replace('_', '-')}`} />
-          ))}
-        </div>}
-        {center && <PublicBanner banner={center} className="center-banner" cellClassName="hero-mobile-main" />}
-      </div>
+      {mobile && <div className="hero-mobile-layout">
+        <PublicBanner banner={mobile} className="mobile-banner" />
+      </div>}
     </section>
   );
 }

@@ -55,6 +55,8 @@ export async function updateCategory(data: {
     await requireAdminSession();
     const { id, ...updates } = data;
     const response = await updateAdminCategory(id, updates);
+    revalidatePath('/');
+    revalidatePath('/catalog');
     revalidatePath('/admin/categories');
     return { success: true as const, category: response.data };
   } catch (error: unknown) {

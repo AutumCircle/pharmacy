@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { AdminHomepageBanner } from '@/lib/api-v1/admin-types';
+import { bannerDimensions, containImage } from '@/lib/banner-image';
 import { bannerCompositionDefaults, clamp, compositionField, elementLayout, type BannerEditableElement, type BannerViewport } from '@/lib/banner-layout';
 import { saveHomepageBanner } from '../actions';
 import BannerAdminPreview from '../BannerAdminPreview';
@@ -19,13 +20,18 @@ function simpleImageBanner(banner: AdminHomepageBanner): AdminHomepageBanner {
   };
 }
 
-async function prepareBannerImage(file: File): Promise<{ file: File; width: number; height: number }> {
-  const bitmap = await createImageBitmap(file); const width = bitmap.width; const height = bitmap.height;
-  const scale = Math.min(1, 1920 / width, 1920 / height); const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale));
+async function prepareBannerImage(file: File, slot: AdminHomepageBanner['slot']): Promise<{ file: File; width: number; height: number }> {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Выберите JPG, PNG или WebP');
+  if (file.size > 20 * 1024 * 1024) throw new Error('Исходное изображение должно быть меньше 20 МБ');
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = bannerDimensions[slot];
+  const placement = containImage(bitmap.width, bitmap.height, width, height);
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
   const context = canvas.getContext('2d');
   if (!context) { bitmap.close(); throw new Error('Браузер не смог обработать изображение'); }
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
+  context.fillStyle = '#FFFFFF'; context.fillRect(0, 0, width, height);
+  context.drawImage(bitmap, placement.x, placement.y, placement.width, placement.height); bitmap.close();
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.88));
   if (!blob) throw new Error('Браузер не смог подготовить WebP');
   if (blob.size > 3 * 1024 * 1024) throw new Error('После обработки изображение больше 3 МБ');
@@ -36,7 +42,7 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
   const normalizedInitial = useMemo(() => simpleImageBanner({ ...bannerCompositionDefaults, ...initialBanner }), [initialBanner]);
   const [saved, setSaved] = useState(normalizedInitial);
   const [draft, setDraft] = useState(normalizedInitial);
-  const [previewMode, setPreviewMode] = useState<BannerViewport>('desktop');
+  const previewMode: BannerViewport = draft.slot === 'mobile' ? 'mobile' : 'desktop';
   const [selected, setSelected] = useState<BannerEditableElement>('image');
   const [saving, setSaving] = useState(false); const [uploading, setUploading] = useState(false); const [message, setMessage] = useState('');
   const stageRef = useRef<HTMLDivElement>(null);
@@ -96,7 +102,7 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
   const uploadImage = async (file: File | undefined) => {
     if (!file) return; setUploading(true); setMessage('');
     try {
-      const prepared = await prepareBannerImage(file); const form = new FormData(); form.set('file', prepared.file); form.set('scope', 'banners');
+      const prepared = await prepareBannerImage(file, draft.slot); const form = new FormData(); form.set('file', prepared.file); form.set('scope', 'banners');
       const response = await fetch('/api/admin/media/images', { method: 'POST', body: form }); const payload = await response.json() as { url?: string; error?: string };
       if (!response.ok || !payload.url) throw new Error(payload.error || 'Не удалось загрузить изображение');
       setDraft((current) => {
@@ -135,15 +141,13 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
         <label className="admin-banner-active-toggle"><input type="checkbox" checked={draft.is_active} onChange={(event) => setField('is_active', event.target.checked)} />{draft.is_active ? 'Активен' : 'Черновик'}</label></div>
 
       <section className="admin-banner-editor-preview-panel">
-        <div className="admin-banner-preview-toolbar"><div className="admin-banner-mode-switch" role="group" aria-label="Режим предпросмотра"><button type="button" className={previewMode === 'desktop' ? 'is-active' : ''} onClick={() => setPreviewMode('desktop')}>Desktop · 1440</button><button type="button" className={previewMode === 'mobile' ? 'is-active' : ''} onClick={() => setPreviewMode('mobile')}>Mobile · 390</button></div>
-          </div>
-        <p className="admin-banner-onboarding">Изображение всегда показывается полностью и одинаково на компьютере и телефоне. Текст можно выбрать, перетащить и изменить за углы.</p>
+        <p className="admin-banner-onboarding">{draft.slot === 'mobile' ? 'Этот баннер виден только на смартфонах.' : 'Этот баннер виден только на компьютерах и больших планшетах.'} Ниже — весь баннер в пропорциях сайта. Текст можно выбрать, перетащить и изменить за углы.</p>
         {selected !== 'image' && <div className="admin-banner-direct-toolbar"><button type="button" onClick={resetPosition}>Вернуть выбранный текст на место</button></div>}
-        <div ref={stageRef} className={`admin-banner-preview-stage is-${previewMode}`}><BannerAdminPreview banner={draft} mode={previewMode} showSafeRegion selected={selected} onSelect={setSelected} onEditPointerDown={startEdit} /></div>
+        <div ref={stageRef} className={`admin-banner-preview-stage is-${previewMode}`}><BannerAdminPreview banner={draft} mode={previewMode} selected={selected} onSelect={setSelected} onEditPointerDown={startEdit} /></div>
       </section>
 
       <div className="admin-banner-settings-grid">
-        <section className="admin-banner-settings-card"><h2>Изображение</h2><p className="admin-control-note">Рекомендуемый размер: {bannerRecommendedDimensions[draft.slot]}. Исходный: {draft.image_width && draft.image_height ? `${draft.image_width} × ${draft.image_height} px` : 'неизвестен'}.</p>
+        <section className="admin-banner-settings-card"><h2>Изображение</h2><p className="admin-control-note">Размер баннера: {bannerRecommendedDimensions[draft.slot]}. Загруженное фото автоматически подгоняется без обрезки и искажения. Если пропорции отличаются, добавляются белые поля. Сохранённое изображение: {draft.image_width && draft.image_height ? `${draft.image_width} × ${draft.image_height} px` : 'не задано'}.</p>
           <label className="admin-field"><span>Загрузить или заменить</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploading} onChange={(event) => void uploadImage(event.target.files?.[0])} /></label>
           <div className="admin-inline-actions"><button type="button" className="admin-secondary-button" onClick={() => setDraft((current) => ({ ...current, image_url: null, image_width: null, image_height: null, is_active: false }))} disabled={!draft.image_url || uploading}>Убрать изображение</button>{uploading && <span>Загрузка…</span>}</div>
           <label className="admin-field"><span>Alt text</span><input maxLength={200} value={draft.alt_text || ''} onChange={(event) => setField('alt_text', event.target.value)} placeholder="Кратко опишите изображение" /></label>
@@ -157,8 +161,8 @@ export default function BannerEditorClient({ initialBanner }: { initialBanner: A
           <label className="admin-field"><span>Цвет текста</span><input type="color" value={draft.text_color} onChange={(event) => setField('text_color', event.target.value.toUpperCase())} /></label>
         </section>
 
-        <section className="admin-banner-settings-card"><h2>Overlay</h2><label className="admin-checkbox-field"><input type="checkbox" checked={draft.overlay_enabled} onChange={(event) => setField('overlay_enabled', event.target.checked)} />Включить overlay</label>
-          <label className="admin-range-field"><span>Прозрачность: {draft.overlay_opacity}%</span><input disabled={!draft.overlay_enabled} type="range" min="0" max="100" value={draft.overlay_opacity} onChange={(event) => setField('overlay_opacity', Number(event.target.value))} /></label>
+        <section className="admin-banner-settings-card"><h2>Слой под текстом</h2><label className="admin-checkbox-field"><input type="checkbox" checked={draft.overlay_enabled} onChange={(event) => setField('overlay_enabled', event.target.checked)} />Включить цветной слой</label>
+          <label className="admin-range-field"><span>Плотность слоя: {draft.overlay_opacity}%</span><input disabled={!draft.overlay_enabled} type="range" min="0" max="100" value={draft.overlay_opacity} onChange={(event) => setField('overlay_opacity', Number(event.target.value))} /></label>
           <div className="admin-two-column-controls"><label className="admin-field"><span>Цвет</span><input disabled={!draft.overlay_enabled} type="color" value={draft.overlay_color} onChange={(event) => setField('overlay_color', event.target.value.toUpperCase())} /></label><label className="admin-field"><span>Тип</span><select disabled={!draft.overlay_enabled} value={draft.overlay_type} onChange={(event) => setField('overlay_type', event.target.value as AdminHomepageBanner['overlay_type'])}><option value="gradient">Градиент</option><option value="solid">Сплошной</option></select></label></div>
         </section>
       </div>

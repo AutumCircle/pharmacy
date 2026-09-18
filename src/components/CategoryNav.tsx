@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import CategoryIcon from '@/components/CategoryIcon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { CategoriesResponse, PublicCategory } from '@/lib/api-v1/types';
@@ -74,7 +75,7 @@ export default function CategoryNav() {
         <div ref={rowRef} className="filter-bar" tabIndex={0} onKeyDown={handleKeyDown} aria-label="Прокручиваемый список категорий">
           {categories.map((category) => (
             <Link key={category.id} href={`/category/${category.slug}`} className="chip">
-              {category.icon ? `${category.icon} ` : ''}{category.name}
+              <CategoryIcon id={category.id} icon={category.icon} /> {category.name}
             </Link>
           ))}
         </div>

@@ -13,7 +13,7 @@ export default function BannersClient({ banners }: { banners: AdminHomepageBanne
       <div className="admin-banner-page-heading">
         <div>
           <h1>Баннеры главной страницы</h1>
-          <p>Выберите баннер, чтобы открыть большой preview и настройки изображения, текста и overlay.</p>
+          <p>Четыре баннера для компьютера и один отдельный для смартфонов. Выберите баннер, загрузите изображение и проверьте предпросмотр. Заголовки необязательны.</p>
         </div>
       </div>
       <div className="admin-banner-card-list">

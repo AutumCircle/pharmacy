@@ -158,8 +158,10 @@ export function resolvePublicMedicines(medicineIds: number[]): Promise<ResolveMe
   });
 }
 
-export function getPublicHomepageBanners(): Promise<HomepageBannersResponse> {
-  return request('/v1/public/homepage-banners', { cacheSeconds: 60 });
+export async function getPublicHomepageBanners(): Promise<HomepageBannersResponse> {
+  const response = await request<HomepageBannersResponse>('/v1/public/homepage-banners', { cacheSeconds: 60 });
+  const { withLocalBanners } = await import('@/lib/local-banners');
+  return { ...response, data: { ...response.data, banners: (await withLocalBanners(response.data.banners)).filter(banner => !('is_active' in banner) || banner.is_active) } };
 }
 
 export function getPublicFeaturedProducts(): Promise<FeaturedProductsResponse> {

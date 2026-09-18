@@ -18,10 +18,13 @@ export async function POST(request: Request) {
     if (!(file instanceof File) || !ALLOWED_TYPES.has(file.type) || file.size === 0 || file.size > MAX_BYTES) {
       return NextResponse.json({ error: 'Используйте JPEG, PNG или WebP размером не более 3 МБ' }, { status: 400 });
     }
-    if (scope !== 'banners' && scope !== 'products') {
+    if (scope !== 'banners' && scope !== 'products' && scope !== 'categories') {
       return NextResponse.json({ error: 'Неверный тип изображения' }, { status: 400 });
     }
     const data_base64 = Buffer.from(await file.arrayBuffer()).toString('base64');
+    if (process.env.NODE_ENV === 'development' && scope === 'banners') {
+      return NextResponse.json({ url: `data:${file.type};base64,${data_base64}` }, { status: 201 });
+    }
     const response = await uploadAdminMediaImage({
       content_type: file.type as 'image/jpeg' | 'image/png' | 'image/webp',
       data_base64,

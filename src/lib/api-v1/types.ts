@@ -78,7 +78,7 @@ export interface ResolvedMedicines {
   missing_medicine_ids: number[];
 }
 
-export type HomepageBannerSlot = 'left' | 'center' | 'right_top' | 'right_bottom';
+export type HomepageBannerSlot = 'left' | 'center' | 'right_top' | 'right_bottom' | 'mobile';
 export type BannerFitMode = 'cover' | 'contain';
 export type BannerOverlayType = 'solid' | 'gradient';
 export type BannerOverlayDirection = 'to_right' | 'to_left' | 'to_top' | 'to_bottom';

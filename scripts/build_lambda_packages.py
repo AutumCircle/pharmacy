@@ -145,6 +145,13 @@ def build() -> Path:
         "sha256": hashlib.sha256(wysiwyg_migration_payload).hexdigest(),
         "size_bytes": len(wysiwyg_migration_payload),
     })
+    mobile_destination = OUTPUT / "migration-0011-mobile-banner-once.zip"
+    _write_deterministic_zip(mobile_destination, [("lambda_function.py", ROOT / "backend" / "operations" / "banner_mobile_migration_once" / "lambda_function.py")])
+    mobile_payload = mobile_destination.read_bytes()
+    manifest_packages.append({
+        "file": mobile_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(mobile_payload).hexdigest(), "size_bytes": len(mobile_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

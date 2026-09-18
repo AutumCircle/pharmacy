@@ -1,4 +1,5 @@
 import 'server-only';
+import { withLocalBanners } from '@/lib/local-banners';
 
 import type { ApiErrorResponse, ApiSuccessResponse, OrderStatus } from './types';
 import type {
@@ -327,8 +328,9 @@ export function getAdminDuplicateGroup(groupKey: string): Promise<AdminDuplicate
   return request(`/v1/admin/medicine-duplicates${queryString({ group_key: groupKey })}`);
 }
 
-export function listAdminHomepageBanners(): Promise<AdminApiListResponse<AdminHomepageBanner>> {
-  return request('/v1/admin/homepage-banners');
+export async function listAdminHomepageBanners(): Promise<AdminApiListResponse<AdminHomepageBanner>> {
+  const response = await request<AdminApiListResponse<AdminHomepageBanner>>('/v1/admin/homepage-banners');
+  return { ...response, data: await withLocalBanners(response.data) };
 }
 
 export function updateAdminHomepageBanner(
@@ -341,7 +343,7 @@ export function updateAdminHomepageBanner(
 export function uploadAdminMediaImage(body: {
   content_type: 'image/jpeg' | 'image/png' | 'image/webp';
   data_base64: string;
-  scope: 'banners' | 'products';
+  scope: 'banners' | 'products' | 'categories';
 }): Promise<ApiSuccessResponse<{ url: string; key: string; size_bytes: number }>> {
   return request('/v1/admin/media/images', { method: 'POST', body, timeoutMs: 20_000 });
 }

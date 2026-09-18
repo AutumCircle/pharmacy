@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import CategoryIcon from '@/components/CategoryIcon';
 import { Suspense } from 'react';
 
 import HeroBanners from '@/components/HeroBanners';
@@ -118,7 +119,7 @@ export default async function Home({
               className="category-card"
               style={{ padding: '25px', background: 'white', borderRadius: '12px', textDecoration: 'none', color: '#333', textAlign: 'center', border: '1px solid #eee' }}
             >
-              <div style={{ fontSize: '30px', marginBottom: '10px', color: category.color || 'var(--primary)' }}>{category.icon || '＋'}</div>
+              <div style={{ fontSize: '30px', marginBottom: '10px', color: category.color || 'var(--primary)' }}><CategoryIcon id={category.id} icon={category.icon} size={36} /></div>
               <span style={{ fontWeight: 600 }}>{category.name}</span>
             </Link>
           ))}
