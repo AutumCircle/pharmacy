@@ -32,6 +32,7 @@ from backend.v1.shared.responses import error_response, request_id, success, suc
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
 MINIMUM_ORDER_SUBTOTAL = 50
+DEFAULT_ORDER_NOTIFIER_FUNCTION_NAME = "pharmacy-telegram-order-notifier"
 logger = logging.getLogger(__name__)
 
 
@@ -542,7 +543,10 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
 
 
 def notify_new_order(notification: dict[str, Any] | None) -> None:
-    function_name = os.environ.get("ORDER_NOTIFIER_FUNCTION_NAME", "").strip()
+    function_name = os.environ.get(
+        "ORDER_NOTIFIER_FUNCTION_NAME",
+        DEFAULT_ORDER_NOTIFIER_FUNCTION_NAME,
+    ).strip()
     if not notification or not function_name:
         return
     try:

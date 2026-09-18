@@ -36,17 +36,21 @@ class TelegramMessageTests(unittest.TestCase):
 
 
 class TelegramDispatchTests(unittest.TestCase):
-    def test_async_dispatch_and_disabled_configuration(self):
+    def test_async_dispatch_and_default_configuration(self):
         client = MagicMock()
         boto3 = MagicMock()
         boto3.client.return_value = client
-        with patch.dict(sys.modules, {"boto3": boto3}), patch.dict(os.environ, {"ORDER_NOTIFIER_FUNCTION_NAME": "notifier"}):
-            notify_new_order({"order_reference": "1234-001"})
-        self.assertEqual(client.invoke.call_args.kwargs["InvocationType"], "Event")
-        client.reset_mock()
-        with patch.dict(os.environ, {}, clear=True):
-            notify_new_order({"order_reference": "1234-001"})
-        client.invoke.assert_not_called()
+        with patch.dict(sys.modules, {"boto3": boto3}):
+            with patch.dict(os.environ, {"ORDER_NOTIFIER_FUNCTION_NAME": "notifier"}):
+                notify_new_order({"order_reference": "1234-001"})
+            self.assertEqual(client.invoke.call_args.kwargs["InvocationType"], "Event")
+            client.reset_mock()
+            with patch.dict(os.environ, {}, clear=True):
+                notify_new_order({"order_reference": "1234-001"})
+        self.assertEqual(
+            client.invoke.call_args.kwargs["FunctionName"],
+            "pharmacy-telegram-order-notifier",
+        )
 
 
 if __name__ == "__main__":
