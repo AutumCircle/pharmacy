@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
+import os
 import re
 from decimal import Decimal
 from typing import Any
@@ -30,6 +32,7 @@ from backend.v1.shared.responses import error_response, request_id, success, suc
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
 MINIMUM_ORDER_SUBTOTAL = 50
+logger = logging.getLogger(__name__)
 
 
 def _body(event: dict[str, Any]) -> dict[str, Any]:
@@ -391,7 +394,7 @@ def _order_response(order: dict[str, Any], items: list[dict[str, Any]]) -> dict[
     }
 
 
-def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[str, Any], int]:
+def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[str, Any], int, dict[str, Any] | None]:
     request = validate_create_order_request(payload)
     normalized_key = validate_idempotency_key(idempotency_key)
     request_hash = hashlib.sha256(
@@ -424,7 +427,7 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
                 raise ContractError("IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different request", http_status=409)
             if existing["response_body"] is None:
                 raise ContractError("IDEMPOTENCY_IN_PROGRESS", "Order request is still being processed", http_status=409)
-            return existing["response_body"], int(existing["response_status"])
+            return existing["response_body"], int(existing["response_status"]), None
 
         medicine_ids = [item["medicine_id"] for item in request["items"]]
         cur.execute(
@@ -447,16 +450,19 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
 
         order_items: list[dict[str, Any]] = []
         subtotal = 0
+        profit = Decimal("0")
         for item in request["items"]:
             medicine = medicines[item["medicine_id"]]
             selling_price = int(medicine["selling_unit_price"])
             line_total = selling_price * item["quantity"]
             subtotal += line_total
+            base_price = Decimal(str(medicine["price"]))
+            profit += (Decimal(selling_price) - base_price) * item["quantity"]
             order_items.append({
                 "medicine_id": medicine["id"],
                 "medicine_name": medicine["name"],
                 "quantity": item["quantity"],
-                "base_unit_price": Decimal(str(medicine["price"])),
+                "base_unit_price": base_price,
                 "selling_unit_price": selling_price,
                 "line_total": line_total,
             })
@@ -520,7 +526,35 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             """,
             (order["id"], json.dumps(response), normalized_key),
         )
-        return response, 201
+        notification = {
+            "admin_order_id": int(order["id"]),
+            "order_reference": order_reference,
+            "customer_name": request["customer_name"],
+            "phone": request["phone"],
+            "address": request["address"],
+            "comment": request["comment"],
+            "items": response_items,
+            "order_total": str(subtotal),
+            "profit": str(profit.quantize(Decimal("0.01"))),
+            "currency": "TJS",
+        }
+        return response, 201, notification
+
+
+def notify_new_order(notification: dict[str, Any] | None) -> None:
+    function_name = os.environ.get("ORDER_NOTIFIER_FUNCTION_NAME", "").strip()
+    if not notification or not function_name:
+        return
+    try:
+        import boto3
+        boto3.client("lambda").invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json.dumps(notification, ensure_ascii=False).encode("utf-8"),
+        )
+    except Exception:
+        # The customer order is already committed and must remain successful.
+        logger.exception("Unable to enqueue Telegram notification")
 
 
 def list_categories(query: dict[str, Any]) -> dict[str, Any]:
@@ -681,7 +715,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(track_orders(_body(event)), request=current_request_id)
         if method == "POST" and path.endswith("/public/orders"):
             headers = _headers(event)
-            response, status_code = create_order(_body(event), headers.get("idempotency-key", ""))
+            response, status_code, notification = create_order(_body(event), headers.get("idempotency-key", ""))
+            notify_new_order(notification)
             return success(response, status_code=status_code, request=current_request_id)
         raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
     except ContractError as exc:

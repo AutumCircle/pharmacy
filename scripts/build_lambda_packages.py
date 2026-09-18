@@ -62,6 +62,16 @@ def build() -> Path:
             "sha256": hashlib.sha256(payload).hexdigest(),
             "size_bytes": len(payload),
         })
+    telegram_destination = OUTPUT / "telegram-order-notifier.zip"
+    telegram_source = ROOT / "backend" / "v1" / "telegram_notifier" / "lambda_function.py"
+    _write_deterministic_zip(telegram_destination, [("lambda_function.py", telegram_source)])
+    telegram_payload = telegram_destination.read_bytes()
+    manifest_packages.append({
+        "file": telegram_destination.name,
+        "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(telegram_payload).hexdigest(),
+        "size_bytes": len(telegram_payload),
+    })
     legacy_destination = OUTPUT / "legacy-sync-receiver.zip"
     legacy_source = ROOT / "backend" / "lambda-legacy" / "sync-receiver" / "lambda_function.py"
     _write_deterministic_zip(legacy_destination, [("lambda_function.py", legacy_source)])

@@ -1,0 +1,1 @@
+"""Telegram order notification Lambda."""
