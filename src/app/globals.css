@@ -594,7 +594,7 @@ a {
 }
 .hero-desktop-layout {
   display: grid;
-  grid-template-columns: minmax(0, .9fr) minmax(0, 1.9fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, .88fr) minmax(0, 1.85fr) minmax(0, 1.06fr);
   align-items: start;
   gap: 18px;
 }

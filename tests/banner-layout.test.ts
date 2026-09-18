@@ -49,3 +49,8 @@ test('composition helpers clamp values and map fields without pixels', () => {
   assert.equal(compositionField('title', 'x', 'mobile', true), 'mobile_title_x');
   assert.equal(compositionField('image', 'scale', 'desktop', false), 'image_scale');
 });
+
+test('desktop banner columns keep the stacked right side level with the other banners', () => {
+  const css = readFileSync(new URL('../src/app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /grid-template-columns:\s*minmax\(0, \.88fr\)\s+minmax\(0, 1\.85fr\)\s+minmax\(0, 1\.06fr\)/);
+});
