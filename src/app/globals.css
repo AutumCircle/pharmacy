@@ -30,6 +30,21 @@ body {
   min-height: 100vh;
 }
 
+.public-layout-shell {
+  display: flex;
+  min-height: 100vh;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+
+.public-layout-shell > .main-content {
+  flex: 1 0 auto;
+}
+
+.public-layout-shell > .site-footer {
+  flex: 0 0 auto;
+}
+
 a {
   text-decoration: none;
   color: inherit;

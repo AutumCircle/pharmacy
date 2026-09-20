@@ -18,7 +18,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   }
 
   return (
-    <>
+    <div className="public-layout-shell">
       <header className="header">
         <div className="container">
           <div className="header-inner">
@@ -87,6 +87,6 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           <span>Избранное</span>
         </Link>
       </nav>
-    </>
+    </div>
   );
 }
