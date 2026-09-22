@@ -181,6 +181,7 @@ export type AdminOrderSummary = {
 };
 
 export type AdminOrderItem = {
+  order_item_id: number;
   medicine_id: number | null;
   medicine_name: string;
   base_unit_price: number | string | null;

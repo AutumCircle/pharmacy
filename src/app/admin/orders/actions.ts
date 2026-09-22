@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/admin-auth';
-import { deleteAdminOrder, updateAdminOrderStatus, updateAdminOrderTotal } from '@/lib/api-v1/admin-server';
+import { deleteAdminOrder, updateAdminOrderItemPrice, updateAdminOrderStatus } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import type { OrderStatus } from '@/lib/api-v1/types';
 
@@ -26,21 +26,24 @@ export async function updateOrderStatus(
   }
 }
 
-export async function updateOrderTotal(orderId: string, orderTotal: number) {
+export async function updateOrderItemPrice(orderId: string, orderItemId: number, sellingUnitPrice: number) {
   try {
     await requireAdminSession();
-    if (!Number.isFinite(orderTotal) || orderTotal <= 0 || orderTotal > 10_000_000) {
-      return { success: false as const, error: 'Введите корректную итоговую цену' };
+    if (!Number.isInteger(orderItemId) || orderItemId <= 0) {
+      return { success: false as const, error: 'Товар заказа не найден' };
     }
-    const response = await updateAdminOrderTotal(orderId, orderTotal);
+    if (!Number.isFinite(sellingUnitPrice) || sellingUnitPrice <= 0 || sellingUnitPrice > 10_000_000) {
+      return { success: false as const, error: 'Введите корректную цену продажи' };
+    }
+    const response = await updateAdminOrderItemPrice(orderId, orderItemId, sellingUnitPrice);
     revalidatePath('/admin');
     revalidatePath('/admin/orders');
     revalidatePath(`/admin/orders/${orderId}`);
-    return { success: true as const, orderTotal: Number(response.data.order_total) };
+    return { success: true as const, sellingUnitPrice: Number(response.data.selling_unit_price) };
   } catch (error: unknown) {
     return {
       success: false as const,
-      error: error instanceof Error ? error.message : 'Не удалось изменить цену заказа',
+      error: error instanceof Error ? error.message : 'Не удалось изменить цену товара',
     };
   }
 }

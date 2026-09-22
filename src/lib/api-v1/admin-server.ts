@@ -167,12 +167,13 @@ export function updateAdminOrderStatus(
   });
 }
 
-export function updateAdminOrderTotal(
+export function updateAdminOrderItemPrice(
   orderId: string,
-  orderTotal: number,
-): Promise<ApiSuccessResponse<{ order_id: string; order_total: number | string; currency: 'TJS' }>> {
+  orderItemId: number,
+  sellingUnitPrice: number,
+): Promise<ApiSuccessResponse<{ order_id: string; order_item_id: number; selling_unit_price: number | string; line_total: number | string; items_subtotal: number | string; order_total: number | string; currency: 'TJS' }>> {
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/status`, {
-    method: 'PATCH', body: { order_total: orderTotal },
+    method: 'PATCH', body: { order_item_id: orderItemId, selling_unit_price: sellingUnitPrice },
   });
 }
 

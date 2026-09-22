@@ -674,7 +674,7 @@ def get_order(order_id: str) -> dict[str, Any]:
         internal_id = order["id"]
         cur.execute(
             """
-            SELECT medicine_id, medicine_name, base_unit_price, selling_unit_price,
+            SELECT id AS order_item_id, medicine_id, medicine_name, base_unit_price, selling_unit_price,
                    quantity, line_total
             FROM order_items WHERE order_id = %s ORDER BY id ASC
             """,
@@ -726,29 +726,38 @@ def update_order_status(order_id: str, payload: dict[str, Any], actor_id: str) -
     return {"order_id": order_id, "status": new, "changed_at": changed_at}
 
 
-def update_order_total(
+def update_order_item_price(
     order_id: str,
     payload: dict[str, Any],
     actor_id: str,
     current_request_id: str,
 ) -> dict[str, Any]:
-    if set(payload) != {"order_total"}:
-        raise ContractError("VALIDATION_ERROR", "order_total is required")
-    raw_total = payload.get("order_total")
-    if isinstance(raw_total, bool):
-        raise ContractError("VALIDATION_ERROR", "order_total must be a positive number")
+    if set(payload) != {"order_item_id", "selling_unit_price"}:
+        raise ContractError("VALIDATION_ERROR", "order_item_id and selling_unit_price are required")
+    raw_item_id = payload.get("order_item_id")
+    if isinstance(raw_item_id, bool):
+        raise ContractError("VALIDATION_ERROR", "order_item_id must be an integer")
     try:
-        new_total = Decimal(str(raw_total)).quantize(Decimal("0.01"))
+        order_item_id = int(raw_item_id)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("VALIDATION_ERROR", "order_item_id must be an integer") from exc
+    if order_item_id <= 0:
+        raise ContractError("VALIDATION_ERROR", "order_item_id must be a positive integer")
+    raw_price = payload.get("selling_unit_price")
+    if isinstance(raw_price, bool):
+        raise ContractError("VALIDATION_ERROR", "selling_unit_price must be a positive number")
+    try:
+        new_price = Decimal(str(raw_price)).quantize(Decimal("0.01"))
     except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ContractError("VALIDATION_ERROR", "order_total must be a positive number") from exc
-    if not new_total.is_finite() or new_total <= 0 or new_total > Decimal("10000000"):
-        raise ContractError("VALIDATION_ERROR", "order_total must be between 0.01 and 10000000")
+        raise ContractError("VALIDATION_ERROR", "selling_unit_price must be a positive number") from exc
+    if not new_price.is_finite() or new_price <= 0 or new_price > Decimal("10000000"):
+        raise ContractError("VALIDATION_ERROR", "selling_unit_price must be between 0.01 and 10000000")
 
     lookup, lookup_values = _order_lookup(order_id)
     with transaction() as cur:
         cur.execute(
             f"""
-            SELECT id, order_total, COALESCE(order_reference, public_id, id::text) AS reference
+            SELECT id, COALESCE(order_reference, public_id, id::text) AS reference
             FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE
             """,
             lookup_values,
@@ -756,25 +765,52 @@ def update_order_total(
         order = cur.fetchone()
         if not order:
             raise ContractError("ORDER_NOT_FOUND", "Order was not found", http_status=404)
-        previous_total = order["order_total"]
         cur.execute(
-            "UPDATE orders SET order_total = %s, total_price = %s WHERE id = %s",
-            (new_total, new_total, order["id"]),
+            """
+            SELECT id, medicine_name, selling_unit_price, quantity
+            FROM order_items WHERE id = %s AND order_id = %s FOR UPDATE
+            """,
+            (order_item_id, order["id"]),
+        )
+        item = cur.fetchone()
+        if not item:
+            raise ContractError("ORDER_ITEM_NOT_FOUND", "Order item was not found", http_status=404)
+        line_total = (new_price * item["quantity"]).quantize(Decimal("0.01"))
+        cur.execute(
+            "UPDATE order_items SET selling_unit_price = %s, line_total = %s WHERE id = %s",
+            (new_price, line_total, item["id"]),
+        )
+        cur.execute(
+            "SELECT COALESCE(SUM(line_total), 0) AS items_subtotal FROM order_items WHERE order_id = %s",
+            (order["id"],),
+        )
+        items_subtotal = cur.fetchone()["items_subtotal"]
+        cur.execute(
+            "UPDATE orders SET items_subtotal = %s, order_total = %s, total_price = %s WHERE id = %s",
+            (items_subtotal, items_subtotal, items_subtotal, order["id"]),
         )
         _write_admin_audit(
             cur,
             actor_id=actor_id,
-            action="order.total_updated",
-            resource_type="order",
-            resource_id=order_id,
+            action="order.item_price_updated",
+            resource_type="order_item",
+            resource_id=str(order_item_id),
             request=current_request_id,
             details={
                 "reference": str(order["reference"]),
-                "previous_total": str(previous_total),
-                "new_total": str(new_total),
+                "medicine_name": str(item["medicine_name"]),
+                "previous_unit_price": str(item["selling_unit_price"]),
+                "new_unit_price": str(new_price),
+                "quantity": int(item["quantity"]),
+                "line_total": str(line_total),
+                "order_total": str(items_subtotal),
             },
         )
-    return {"order_id": order_id, "order_total": new_total, "currency": "TJS"}
+    return {
+        "order_id": order_id, "order_item_id": order_item_id,
+        "selling_unit_price": new_price, "line_total": line_total,
+        "items_subtotal": items_subtotal, "order_total": items_subtotal, "currency": "TJS",
+    }
 
 
 def delete_order(order_id: str, actor_id: str, current_request_id: str) -> dict[str, Any]:
@@ -2237,8 +2273,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if method == "PATCH" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "status":
             payload = _body(event)
             result = (
-                update_order_total(tail[1], payload, actor_id, current_request_id)
-                if set(payload) == {"order_total"}
+                update_order_item_price(tail[1], payload, actor_id, current_request_id)
+                if set(payload) == {"order_item_id", "selling_unit_price"}
                 else update_order_status(tail[1], payload, actor_id)
             )
             return success(result, request=current_request_id)

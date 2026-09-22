@@ -4,7 +4,7 @@ import { requireAdminSession } from '@/lib/admin-auth';
 import { getAdminOrder } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import OrderStatusControl from './OrderStatusControl';
-import OrderTotalEditor from './OrderTotalEditor';
+import OrderItemPriceEditor from './OrderItemPriceEditor';
 import OrderDeleteButton from '../OrderDeleteButton';
 
 export const dynamic = 'force-dynamic';
@@ -46,11 +46,7 @@ export default async function AdminOrderDetailPage({
             />
           </div>
         )}
-        <OrderTotalEditor
-          orderId={order.order_id}
-          initialTotal={Number(order.order_total || 0)}
-          currency={order.currency}
-        />
+        <p><strong>Итого:</strong> {Number(order.order_total || 0).toFixed(2)} {order.currency}</p>
         <p style={{ color: '#666' }}>Стоимость доставки в сумму заказа не включена.</p>
       </section>
 
@@ -65,7 +61,7 @@ export default async function AdminOrderDetailPage({
                 <td>{item.medicine_name}</td>
                 <td>{item.quantity}</td>
                 <td>{Number(item.base_unit_price || 0).toFixed(2)}</td>
-                <td>{Number(item.selling_unit_price || 0).toFixed(2)}</td>
+                <td><OrderItemPriceEditor orderId={order.order_id} orderItemId={item.order_item_id} initialPrice={Number(item.selling_unit_price || 0)} /></td>
                 <td>{Number(item.line_total || 0).toFixed(2)}</td>
               </tr>
             ))}
