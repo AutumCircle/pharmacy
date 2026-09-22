@@ -167,6 +167,15 @@ export function updateAdminOrderStatus(
   });
 }
 
+export function updateAdminOrderTotal(
+  orderId: string,
+  orderTotal: number,
+): Promise<ApiSuccessResponse<{ order_id: string; order_total: number | string; currency: 'TJS' }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/status`, {
+    method: 'PATCH', body: { order_total: orderTotal },
+  });
+}
+
 export function deleteAdminOrder(orderId: string): Promise<ApiSuccessResponse<{
   order_id: string;
   deleted: boolean;

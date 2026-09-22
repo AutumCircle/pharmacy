@@ -4,6 +4,7 @@ import { requireAdminSession } from '@/lib/admin-auth';
 import { getAdminOrder } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import OrderStatusControl from './OrderStatusControl';
+import OrderTotalEditor from './OrderTotalEditor';
 import OrderDeleteButton from '../OrderDeleteButton';
 
 export const dynamic = 'force-dynamic';
@@ -45,7 +46,11 @@ export default async function AdminOrderDetailPage({
             />
           </div>
         )}
-        <p><strong>Итого:</strong> {Number(order.order_total || 0).toFixed(2)} {order.currency}</p>
+        <OrderTotalEditor
+          orderId={order.order_id}
+          initialTotal={Number(order.order_total || 0)}
+          currency={order.currency}
+        />
         <p style={{ color: '#666' }}>Стоимость доставки в сумму заказа не включена.</p>
       </section>
 

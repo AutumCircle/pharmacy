@@ -726,6 +726,57 @@ def update_order_status(order_id: str, payload: dict[str, Any], actor_id: str) -
     return {"order_id": order_id, "status": new, "changed_at": changed_at}
 
 
+def update_order_total(
+    order_id: str,
+    payload: dict[str, Any],
+    actor_id: str,
+    current_request_id: str,
+) -> dict[str, Any]:
+    if set(payload) != {"order_total"}:
+        raise ContractError("VALIDATION_ERROR", "order_total is required")
+    raw_total = payload.get("order_total")
+    if isinstance(raw_total, bool):
+        raise ContractError("VALIDATION_ERROR", "order_total must be a positive number")
+    try:
+        new_total = Decimal(str(raw_total)).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ContractError("VALIDATION_ERROR", "order_total must be a positive number") from exc
+    if not new_total.is_finite() or new_total <= 0 or new_total > Decimal("10000000"):
+        raise ContractError("VALIDATION_ERROR", "order_total must be between 0.01 and 10000000")
+
+    lookup, lookup_values = _order_lookup(order_id)
+    with transaction() as cur:
+        cur.execute(
+            f"""
+            SELECT id, order_total, COALESCE(order_reference, public_id, id::text) AS reference
+            FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE
+            """,
+            lookup_values,
+        )
+        order = cur.fetchone()
+        if not order:
+            raise ContractError("ORDER_NOT_FOUND", "Order was not found", http_status=404)
+        previous_total = order["order_total"]
+        cur.execute(
+            "UPDATE orders SET order_total = %s, total_price = %s WHERE id = %s",
+            (new_total, new_total, order["id"]),
+        )
+        _write_admin_audit(
+            cur,
+            actor_id=actor_id,
+            action="order.total_updated",
+            resource_type="order",
+            resource_id=order_id,
+            request=current_request_id,
+            details={
+                "reference": str(order["reference"]),
+                "previous_total": str(previous_total),
+                "new_total": str(new_total),
+            },
+        )
+    return {"order_id": order_id, "order_total": new_total, "currency": "TJS"}
+
+
 def delete_order(order_id: str, actor_id: str, current_request_id: str) -> dict[str, Any]:
     """Soft-delete an eligible order while preserving its items and history."""
 
@@ -2184,7 +2235,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if method == "GET" and len(tail) == 2 and tail[0] == "orders":
             return success(get_order(tail[1]), request=current_request_id)
         if method == "PATCH" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "status":
-            return success(update_order_status(tail[1], _body(event), actor_id), request=current_request_id)
+            payload = _body(event)
+            result = (
+                update_order_total(tail[1], payload, actor_id, current_request_id)
+                if set(payload) == {"order_total"}
+                else update_order_status(tail[1], payload, actor_id)
+            )
+            return success(result, request=current_request_id)
         if method == "DELETE" and len(tail) == 2 and tail[0] == "orders":
             return success(delete_order(tail[1], actor_id, current_request_id), request=current_request_id)
         if method == "GET" and path.endswith("/admin/categories"):
