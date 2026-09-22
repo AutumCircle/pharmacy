@@ -21,6 +21,7 @@ from backend.v1.shared.contract import (
     ContractError,
     STATUS_TRANSITIONS,
     calculate_selling_unit_price,
+    normalize_phone,
     validate_status_transition,
 )
 from backend.v1.shared.authorization import require_admin_identity
@@ -322,6 +323,49 @@ def update_pricing_settings(
                     "markup_percent": str(percent),
                 },
             },
+        )
+    return updated
+
+
+def get_contact_settings() -> dict[str, Any]:
+    with transaction() as cur:
+        cur.execute(
+            """
+            SELECT delivery_contact_phone, updated_at, updated_by
+            FROM site_contact_settings WHERE singleton_id = 1
+            """
+        )
+        row = cur.fetchone()
+    if not row:
+        raise ContractError("CONTACT_SETTINGS_NOT_FOUND", "Contact settings were not found", http_status=500)
+    return dict(row)
+
+
+def update_contact_settings(payload: dict[str, Any], actor_id: str, current_request_id: str) -> dict[str, Any]:
+    if set(payload) != {"delivery_contact_phone"}:
+        raise ContractError("VALIDATION_ERROR", "delivery_contact_phone is required")
+    phone = normalize_phone(payload.get("delivery_contact_phone"))
+    with transaction() as cur:
+        cur.execute(
+            "SELECT delivery_contact_phone FROM site_contact_settings WHERE singleton_id = 1 FOR UPDATE"
+        )
+        previous = cur.fetchone()
+        if not previous:
+            raise ContractError("CONTACT_SETTINGS_NOT_FOUND", "Contact settings were not found", http_status=500)
+        cur.execute(
+            """
+            UPDATE site_contact_settings
+            SET delivery_contact_phone = %s, updated_at = CURRENT_TIMESTAMP, updated_by = %s
+            WHERE singleton_id = 1
+            RETURNING delivery_contact_phone, updated_at, updated_by
+            """,
+            (phone, actor_id),
+        )
+        updated = dict(cur.fetchone())
+        _write_admin_audit(
+            cur, actor_id=actor_id, action="contact_settings.updated",
+            resource_type="contact_settings", resource_id="1", request=current_request_id,
+            details={"previous_phone": previous["delivery_contact_phone"], "new_phone": phone},
         )
     return updated
 
@@ -2256,6 +2300,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if method == "PATCH" and tail == ["pricing-settings"]:
             return success(
                 update_pricing_settings(_body(event), actor_id, current_request_id),
+                request=current_request_id,
+            )
+        if method == "GET" and tail == ["contact-settings"]:
+            return success(get_contact_settings(), request=current_request_id)
+        if method == "PATCH" and tail == ["contact-settings"]:
+            return success(
+                update_contact_settings(_body(event), actor_id, current_request_id),
                 request=current_request_id,
             )
         if method == "GET" and tail == ["catalog", "stats"]:

@@ -162,6 +162,13 @@ def build() -> Path:
         "file": mobile_destination.name, "handler": "lambda_function.lambda_handler",
         "sha256": hashlib.sha256(mobile_payload).hexdigest(), "size_bytes": len(mobile_payload),
     })
+    contact_destination = OUTPUT / "migration-0013-contact-settings-once.zip"
+    _write_deterministic_zip(contact_destination, [("lambda_function.py", ROOT / "backend" / "operations" / "contact_settings_migration_once" / "lambda_function.py")])
+    contact_payload = contact_destination.read_bytes()
+    manifest_packages.append({
+        "file": contact_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(contact_payload).hexdigest(), "size_bytes": len(contact_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

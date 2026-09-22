@@ -1,8 +1,18 @@
+'use client';
+
 import Image from 'next/image';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { SITE_FOOTER } from '@/config/site-footer';
+import { formatTajikPhone, loadSiteContactSettings } from '@/lib/contact-settings';
 
 export default function Footer() {
+  const [deliveryPhone, setDeliveryPhone] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadSiteContactSettings().then((settings) => setDeliveryPhone(settings.delivery_contact_phone)).catch(() => undefined);
+  }, []);
+
   return (
     <footer className="site-footer">
       <div className="container footer-compact-grid">
@@ -29,6 +39,12 @@ export default function Footer() {
               <a className="footer-contact-link" href={phone.href} key={phone.href}>{phone.label}</a>
             ))}
           </div>
+          {deliveryPhone && (
+            <p style={{ marginTop: 8 }}>
+              <strong>Заказы и доставка:</strong><br />
+              <a className="footer-contact-link" href={`tel:${deliveryPhone}`}>{formatTajikPhone(deliveryPhone)}</a>
+            </p>
+          )}
         </section>
 
         <section className="footer-compact-section">

@@ -5,6 +5,7 @@ import { useCart } from '../../context/CartContext';
 import Link from 'next/link';
 import type { CreateOrderRequest, CreateOrderResponse, PublicOrder } from '@/lib/api-v1/types';
 import { invalidateTrackedOrders } from '@/lib/api-v1/client-reads';
+import { formatTajikPhone, loadSiteContactSettings } from '@/lib/contact-settings';
 
 function orderFingerprint(value: string): string {
   // This fingerprint only matches a pending retry with the same payload. It is
@@ -47,6 +48,7 @@ export default function CartPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<PublicOrder | null>(null);
+  const [deliveryContactPhone, setDeliveryContactPhone] = useState<string | null>(null);
   
   const [addresses, setAddresses] = useState<string[]>([]);
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
@@ -54,6 +56,7 @@ export default function CartPage() {
   const unavailableCount = items.filter((item) => !item.in_stock).length;
 
   useEffect(() => {
+    loadSiteContactSettings().then((settings) => setDeliveryContactPhone(settings.delivery_contact_phone)).catch(() => undefined);
     const timer = window.setTimeout(() => {
       const saved = localStorage.getItem('vatan_customer');
       if (saved) {
@@ -497,6 +500,11 @@ export default function CartPage() {
             Спасибо, {formData.name}. Сотрудник аптеки свяжется с вами по телефону <strong>+992 {displayPhone()}</strong>, чтобы подтвердить заказ и уточнить доставку.
           </p>
           <p style={{ fontSize: '14px', color: '#777', lineHeight: '1.5', marginBottom: '24px' }}>Пожалуйста, держите телефон доступным. Оплата производится наличными курьеру при получении.</p>
+          {deliveryContactPhone && (
+            <p style={{ fontSize: '16px', lineHeight: 1.5, marginBottom: 24 }}>
+              По вопросам заказа и доставки звоните ответственному: <a href={`tel:${deliveryContactPhone}`} style={{ color: 'var(--primary)', fontWeight: 700 }}>{formatTajikPhone(deliveryContactPhone)}</a>
+            </p>
+          )}
           {createdOrder && <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', padding: '16px', marginBottom: '24px', borderRadius: '12px', background: '#f7f7f7' }}><span style={{ color: '#666' }}>Сумма товаров</span><strong>{createdOrder.order_total.toFixed(0)} с.</strong></div>}
           <div className="order-success-actions" style={{ display: 'flex', gap: '12px' }}>
             <Link href="/tracking" style={{ display: 'inline-block', flex: 1, padding: '14px', borderRadius: '24px', background: 'var(--primary)', color: 'white', textDecoration: 'none', fontWeight: '600', fontSize: '15px' }}>Посмотреть заказ</Link>

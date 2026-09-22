@@ -10,6 +10,10 @@ export type OrderStatus = 'pending' | 'confirmed' | 'delivering' | 'delivered' |
 export type PaymentMethod = 'cash_on_delivery';
 export type PaymentStatus = 'unpaid';
 
+export type SiteContactSettings = {
+  delivery_contact_phone: string | null;
+};
+
 export interface ApiErrorDetail {
   fields?: Record<string, string>;
   medicine_ids?: number[];

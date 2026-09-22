@@ -683,6 +683,15 @@ def track_orders(payload: dict[str, Any]) -> dict[str, Any]:
     return {"data": [_order_response(order, items_by_order.get(order["id"], [])) for order in orders]}
 
 
+def get_site_settings() -> dict[str, Any]:
+    with transaction() as cur:
+        cur.execute(
+            "SELECT delivery_contact_phone FROM site_contact_settings WHERE singleton_id = 1"
+        )
+        row = cur.fetchone()
+    return {"delivery_contact_phone": row["delivery_contact_phone"] if row else None}
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     current_request_id = request_id()
     method = event.get("httpMethod", "").upper()
@@ -702,6 +711,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(list_featured_products(), request=current_request_id)
         if method == "GET" and path.endswith("/public/product-carousels"):
             return success(list_product_carousels(), request=current_request_id)
+        if method == "GET" and path.endswith("/public/site-settings"):
+            return success(get_site_settings(), request=current_request_id)
         if method == "GET" and path.endswith("/public/categories"):
             return success_document(list_categories(query), request=current_request_id)
         if method == "GET" and len(tail) == 3 and tail[0] == "categories" and tail[2] == "medicines":

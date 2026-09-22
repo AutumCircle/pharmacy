@@ -24,6 +24,7 @@ import type {
   AdminOrderDetail,
   AdminOrderSummary,
   AdminPricingSettings,
+  AdminContactSettings,
   AdminProductCarousel,
   CatalogSyncSummary,
 } from './admin-types';
@@ -306,6 +307,16 @@ export function updateAdminPricingSettings(body: {
   markup_percent: number;
 }): Promise<ApiSuccessResponse<AdminPricingSettings>> {
   return request('/v1/admin/pricing-settings', { method: 'PATCH', body });
+}
+
+export function getAdminContactSettings(): Promise<ApiSuccessResponse<AdminContactSettings>> {
+  return request('/v1/admin/contact-settings');
+}
+
+export function updateAdminContactSettings(deliveryContactPhone: string): Promise<ApiSuccessResponse<AdminContactSettings>> {
+  return request('/v1/admin/contact-settings', {
+    method: 'PATCH', body: { delivery_contact_phone: deliveryContactPhone },
+  });
 }
 
 export function listAdminMedicines(values: {

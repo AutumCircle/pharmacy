@@ -15,6 +15,7 @@ import type {
   HomepageBannersResponse,
   ProductCarouselsResponse,
   TrackOrdersResponse,
+  SiteContactSettings,
 } from './types';
 
 // CloudWatch shows that this Lambda normally completes warm requests in a few
@@ -217,6 +218,10 @@ export function sendOrderNotification(body: Record<string, unknown>): Promise<Ap
 
 export function trackPublicOrders(phone: string): Promise<TrackOrdersResponse> {
   return request('/v1/public/orders/track', { method: 'POST', body: { phone }, readOnly: true });
+}
+
+export function getPublicSiteSettings(): Promise<ApiSuccessResponse<SiteContactSettings>> {
+  return request('/v1/public/site-settings');
 }
 
 export type AnyApiSuccess<T> = ApiSuccessResponse<T> | ApiListResponse<T>;
