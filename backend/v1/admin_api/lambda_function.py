@@ -431,24 +431,70 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
                 COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
                 COUNT(*) FILTER (WHERE status = 'delivering') AS delivering,
                 COUNT(*) FILTER (WHERE status = 'delivered') AS delivered,
-                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
-                COALESCE(SUM(COALESCE(items_subtotal, total_price, 0)) FILTER (
-                    WHERE status = 'delivered'
-                      AND created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
-                ), 0) AS sales_total
+                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
             FROM orders
             WHERE deleted_at IS NULL
+            """
+        )
+        row = dict(cur.fetchone())
+        cur.execute(
+            """
+            SELECT
+                o.public_id,
+                COALESCE(o.order_reference, o.public_id, o.id::text) AS order_reference,
+                o.customer_name,
+                o.created_at,
+                COALESCE(SUM(oi.line_total), o.items_subtotal, o.total_price, 0) AS sales_total,
+                COALESCE(SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity), 0) AS pharmacy_total
+            FROM orders o
+            LEFT JOIN order_items oi ON oi.order_id = o.id
+            WHERE o.deleted_at IS NULL
+              AND o.status = 'delivered'
+              AND o.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
+            GROUP BY o.id, o.public_id, o.order_reference, o.customer_name, o.created_at,
+                     o.items_subtotal, o.total_price
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT 100
             """,
             (days,),
         )
-        row = dict(cur.fetchone())
+        delivered_orders = [dict(item) for item in cur.fetchall()]
+        cur.execute(
+            """
+            SELECT
+                COALESCE(SUM(financial.sales_total), 0) AS sales_total,
+                COALESCE(SUM(financial.pharmacy_total), 0) AS pharmacy_total
+            FROM (
+                SELECT
+                    o.id,
+                    COALESCE(SUM(oi.line_total), o.items_subtotal, o.total_price, 0) AS sales_total,
+                    COALESCE(SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity), 0) AS pharmacy_total
+                FROM orders o
+                LEFT JOIN order_items oi ON oi.order_id = o.id
+                WHERE o.deleted_at IS NULL
+                  AND o.status = 'delivered'
+                  AND o.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
+                GROUP BY o.id, o.items_subtotal, o.total_price
+            ) AS financial
+            """,
+            (days,),
+        )
+        financial_totals = dict(cur.fetchone())
+    for item in delivered_orders:
+        item["order_id"] = item.pop("public_id") or str(item["order_reference"])
+        item["profit"] = item["sales_total"] - item["pharmacy_total"]
     counts = {status: int(row[status] or 0) for status in STATUS_TRANSITIONS}
+    sales_total = financial_totals["sales_total"]
+    pharmacy_total = financial_totals["pharmacy_total"]
     return {
         "period_days": days,
         "order_counts": counts,
         "new_orders": counts["pending"],
         "active_orders": counts["pending"] + counts["confirmed"] + counts["delivering"],
-        "sales_total": row["sales_total"],
+        "sales_total": sales_total,
+        "pharmacy_total": pharmacy_total,
+        "profit_total": sales_total - pharmacy_total,
+        "delivered_orders": delivered_orders,
         "currency": "TJS",
     }
 

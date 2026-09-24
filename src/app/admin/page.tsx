@@ -38,7 +38,8 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
 
   const summary = summaryResult.status === 'fulfilled' ? summaryResult.value.data : {
     period_days: days, order_counts: { pending: 0, confirmed: 0, delivering: 0, delivered: 0, cancelled: 0 },
-    new_orders: 0, active_orders: 0, sales_total: 0, currency: 'TJS' as const,
+    new_orders: 0, active_orders: 0, sales_total: 0, pharmacy_total: 0, profit_total: 0,
+    delivered_orders: [], currency: 'TJS' as const,
   };
   const categories = categoriesResult.status === 'fulfilled' ? categoriesResult.value.data : [];
   const syncs = syncsResult.status === 'fulfilled' ? syncsResult.value.data : [];
@@ -84,13 +85,38 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
       <div style={{ background: 'white', padding: 20, borderRadius: 12, marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ color: '#666', marginBottom: 6 }}>Продажи доставленных заказов без доставки</div>
-            <strong style={{ fontSize: 28 }}>{Number(summary.sales_total).toFixed(2)} {summary.currency}</strong>
+            <div style={{ color: '#666', marginBottom: 6 }}>Финансы доставленных заказов</div>
+            <strong style={{ fontSize: 28 }}>Ваш заработок: {Number(summary.profit_total).toFixed(2)} {summary.currency}</strong>
           </div>
           <div className="admin-pagination" style={{ padding: 0 }}>
             {[7, 30, 90].map((period) => <Link key={period} href={`/admin?days=${period}`}>{period} дней</Link>)}
           </div>
         </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginTop: 20 }}>
+          <div style={{ padding: 16, borderRadius: 10, background: '#eef8f0' }}><div style={{ color: '#55705b', marginBottom: 6 }}>Вы заработали</div><strong style={{ fontSize: 24, color: '#1b7f35' }}>{Number(summary.profit_total).toFixed(2)} {summary.currency}</strong></div>
+          <div style={{ padding: 16, borderRadius: 10, background: '#fff5e8' }}><div style={{ color: '#7a6546', marginBottom: 6 }}>Отдать аптеке</div><strong style={{ fontSize: 24, color: '#a45d00' }}>{Number(summary.pharmacy_total).toFixed(2)} {summary.currency}</strong></div>
+          <div style={{ padding: 16, borderRadius: 10, background: '#f3f5f8' }}><div style={{ color: '#606873', marginBottom: 6 }}>Продано всего</div><strong style={{ fontSize: 24 }}>{Number(summary.sales_total).toFixed(2)} {summary.currency}</strong></div>
+        </div>
+        <h2 style={{ fontSize: 19, margin: '26px 0 12px' }}>История заработка по доставленным заказам</h2>
+        {summary.delivered_orders.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="admin-table">
+              <thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>Продано</th><th>Отдать аптеке</th><th>Ваш заработок</th></tr></thead>
+              <tbody>
+                {summary.delivered_orders.map((order) => (
+                  <tr key={order.order_id}>
+                    <td><Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`}>#{order.order_reference}</Link></td>
+                    <td>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE })}</td>
+                    <td>{order.customer_name}</td>
+                    <td>{Number(order.sales_total).toFixed(2)} {summary.currency}</td>
+                    <td>{Number(order.pharmacy_total).toFixed(2)} {summary.currency}</td>
+                    <td><strong style={{ color: '#1b7f35' }}>{Number(order.profit).toFixed(2)} {summary.currency}</strong></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p style={{ color: '#777' }}>За выбранный период доставленных заказов пока нет.</p>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginTop: 20 }}>
           {Object.entries(summary.order_counts).map(([status, count]) => (
             <Link key={status} href={`/admin/orders?status=${status}`} style={{ padding: 12, borderRadius: 8, background: '#f7f7f7', color: 'inherit', textDecoration: 'none' }}>

@@ -6,11 +6,13 @@ export const dynamic = 'force-dynamic';
 
 export default async function AdminContactPage() {
   await requireAdminSession();
+  let settings = null;
   try {
     const response = await getAdminContactSettings();
-    return <ContactSettingsClient initialSettings={response.data} />;
+    settings = response.data;
   } catch (error) {
     console.error('Failed to load contact settings', error);
-    return <div style={{ background: 'white', border: '1px solid #f2c7c7', borderRadius: 12, padding: 24 }}><h1 style={{ marginTop: 0 }}>Настройки контакта пока недоступны</h1><p style={{ marginBottom: 0, color: '#666' }}>Повторите попытку через несколько секунд.</p></div>;
   }
+  if (settings) return <ContactSettingsClient initialSettings={settings} />;
+  return <div style={{ background: 'white', border: '1px solid #f2c7c7', borderRadius: 12, padding: 24 }}><h1 style={{ marginTop: 0 }}>Настройки контакта пока недоступны</h1><p style={{ marginBottom: 0, color: '#666' }}>Повторите попытку через несколько секунд.</p></div>;
 }

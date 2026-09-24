@@ -35,6 +35,17 @@ export type AdminDashboardSummary = {
   new_orders: number;
   active_orders: number;
   sales_total: number | string;
+  pharmacy_total: number | string;
+  profit_total: number | string;
+  delivered_orders: Array<{
+    order_id: string;
+    order_reference: string;
+    customer_name: string;
+    created_at: string;
+    sales_total: number | string;
+    pharmacy_total: number | string;
+    profit: number | string;
+  }>;
   currency: 'TJS';
 };
 
