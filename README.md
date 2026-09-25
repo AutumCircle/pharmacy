@@ -1,34 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Аптека «Ватан»
 
-## Getting Started
+Интернет-витрина и система заказов аптеки «Ватан».
 
-First, run the development server:
+## С чего начать
 
-```bash
+Перед любой работой прочитайте:
+
+1. [`AGENTS.md`](AGENTS.md) — обязательные правила разработки и безопасности.
+2. [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) — архитектура, hosting, RDS, Lambda,
+   Telegram и Windows 7 sync agent.
+3. [`API_CONTRACT.md`](API_CONTRACT.md) — HTTP-контракты и границы доверия.
+
+## Локальный frontend
+
+```powershell
+npm install
+Copy-Item .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Заполните `.env.local` настоящими значениями только на своей машине. Никогда не добавляйте
+секреты в Git.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Проверки:
 
-## Learn More
+```powershell
+npm run lint
+npm run build
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Git workflow
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `main` — production-ready ветка и источник Vercel production deploy.
+- Для каждой задачи создавайте отдельную ветку: `codex/<feature>`, `claude/<feature>` или `fix/<issue>`.
+- Незавершённая задача: commit + push + Draft Pull Request.
+- Не работайте двум агентам в одной ветке одновременно.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Production data path
 
-## Deploy on Vercel
+```text
+Next.js (Vercel) -> API Gateway -> Python Lambda -> RDS PostgreSQL
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Только Lambda имеет доступ к PostgreSQL. Подробнее — в
+[`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md).
