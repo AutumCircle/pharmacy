@@ -6,6 +6,7 @@ from backend.v1.shared.contract import (
     normalize_phone,
     validate_create_order_request,
     validate_idempotency_key,
+    validate_staff_order_request,
     validate_status_transition,
 )
 
@@ -98,6 +99,23 @@ class IdempotencyTests(unittest.TestCase):
     def test_rejects_non_uuid(self):
         with self.assertRaises(ContractError):
             validate_idempotency_key("order-123")
+
+
+class StaffOrderValidationTests(unittest.TestCase):
+    def test_accepts_optional_name_and_required_contact_fields(self):
+        result = validate_staff_order_request({
+            "customer_name": "", "phone": "917123456", "address": "Айни 29",
+            "landmark": "рядом с аптекой", "source": "whatsapp",
+        })
+        self.assertEqual(result["phone"], "+992917123456")
+        self.assertEqual(result["customer_name"], "")
+
+    def test_rejects_non_exact_phone_and_unknown_source(self):
+        for phone, source in (("+992917123456", "phone"), ("91712345", "phone"), ("917123456", "telegram")):
+            with self.assertRaises(ContractError):
+                validate_staff_order_request({
+                    "phone": phone, "address": "Айни 29", "landmark": "школа", "source": source,
+                })
 
 
 class StatusTransitionTests(unittest.TestCase):

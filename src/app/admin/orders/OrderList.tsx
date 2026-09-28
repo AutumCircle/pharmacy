@@ -32,6 +32,8 @@ const transitions: Record<OrderStatus, OrderStatus[]> = {
   cancelled: [],
 };
 
+const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефон' } as const;
+
 export default function OrderList({ initialOrders }: { initialOrders: AdminOrderSummary[] }) {
   const router = useRouter();
   const [orderRows, setOrderRows] = useState(initialOrders);
@@ -81,8 +83,12 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'center' }}>
               <div>
                 <h3 style={{ margin: '0 0 8px' }}>Заказ {order.order_reference || order.order_id}</h3>
-                <div>{new Date(order.created_at).toLocaleString('ru-RU')} · {order.customer_name}</div>
+                <div>{new Date(order.created_at).toLocaleString('ru-RU')} · {order.customer_name || 'Имя не указано'}</div>
                 <div style={{ color: '#666', marginTop: 4 }}>{order.phone} · {order.address}</div>
+                {order.created_by_staff_account_id && <div style={{ color: '#a4141b', marginTop: 6, fontWeight: 650 }}>
+                  Аптека {order.created_by_staff_account_id} · {order.created_by_staff_username}
+                  {order.order_source ? ` · ${sourceLabels[order.order_source]}` : ''}
+                </div>}
                 <div style={{ marginTop: 8, fontWeight: 700 }}>
                   {Number(order.order_total || 0).toFixed(2)} {order.currency}
                 </div>

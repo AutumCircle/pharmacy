@@ -7,6 +7,8 @@ import OrderStatusControl from './OrderStatusControl';
 import OrderItemPriceEditor from './OrderItemPriceEditor';
 import OrderDeleteButton from '../OrderDeleteButton';
 
+const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефонный звонок' } as const;
+
 export const dynamic = 'force-dynamic';
 
 export default async function AdminOrderDetailPage({
@@ -30,9 +32,12 @@ export default async function AdminOrderDetailPage({
       <Link href="/admin/orders">← Назад к заказам</Link>
       <h1 style={{ margin: '24px 0' }}>Заказ {order.order_reference || order.order_id}</h1>
       <section style={{ background: 'white', padding: 20, borderRadius: 12, marginBottom: 20 }}>
-        <p><strong>Клиент:</strong> {order.customer_name}</p>
+        {order.created_by_staff_account_id && <p><strong>Принял заказ:</strong> Аптека {order.created_by_staff_account_id} · {order.created_by_staff_username}</p>}
+        {order.order_source && <p><strong>Источник:</strong> {sourceLabels[order.order_source]}</p>}
+        <p><strong>Клиент:</strong> {order.customer_name || 'Не указан'}</p>
         <p><strong>Телефон:</strong> {order.phone}</p>
         <p><strong>Адрес:</strong> {order.address}</p>
+        {order.landmark && <p><strong>Ориентир:</strong> {order.landmark}</p>}
         <p><strong>Комментарий:</strong> {order.notes || 'Не указан'}</p>
         <p><strong>Создан:</strong> {new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</p>
         <p><strong>Статус:</strong></p>
@@ -51,6 +56,7 @@ export default async function AdminOrderDetailPage({
       </section>
 
       <h2>Состав заказа</h2>
+      {order.items.length === 0 && <p style={{ background: '#fff8e6', padding: 14, borderRadius: 8 }}>Товары уточняются по телефону.</p>}
       <div style={{ overflowX: 'auto', background: 'white', borderRadius: 12 }}>
         <table className="admin-table">
           <thead><tr><th>medicine_id</th><th>Товар</th><th>Количество</th><th>Базовая цена</th><th>Цена продажи</th><th>Сумма</th></tr></thead>

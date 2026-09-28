@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import os
@@ -22,6 +23,8 @@ from backend.v1.shared.contract import (
     STATUS_TRANSITIONS,
     calculate_selling_unit_price,
     normalize_phone,
+    validate_idempotency_key,
+    validate_staff_order_request,
     validate_status_transition,
 )
 from backend.v1.shared.authorization import require_admin_identity
@@ -676,6 +679,101 @@ def _order_lookup(order_id: str) -> tuple[str, tuple[Any, ...]]:
     return "public_id = %s", (order_id,)
 
 
+def create_staff_order(
+    payload: dict[str, Any],
+    idempotency_key: str,
+    account: dict[str, Any],
+    current_request_id: str,
+) -> tuple[dict[str, Any], int, dict[str, Any] | None]:
+    request = validate_staff_order_request(payload)
+    normalized_key = validate_idempotency_key(idempotency_key)
+    request_hash = hashlib.sha256(
+        json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO order_idempotency (idempotency_key, request_hash)
+            VALUES (%s, %s)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            RETURNING id
+            """,
+            (normalized_key, request_hash),
+        )
+        if not cur.fetchone():
+            cur.execute(
+                """
+                SELECT request_hash, response_status, response_body
+                FROM order_idempotency WHERE idempotency_key = %s FOR UPDATE
+                """,
+                (normalized_key,),
+            )
+            existing = cur.fetchone()
+            if not existing or existing["request_hash"] != request_hash:
+                raise ContractError("IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different request", http_status=409)
+            if existing["response_body"] is None:
+                raise ContractError("IDEMPOTENCY_IN_PROGRESS", "Order request is still being processed", http_status=409)
+            return existing["response_body"], int(existing["response_status"]), None
+
+        public_id = f"ord_{uuid4().hex}"
+        cur.execute(
+            """
+            INSERT INTO orders (
+                user_id, customer_name, phone, phone_normalized, address, notes,
+                total_price, items_subtotal, order_total, public_id, status,
+                payment_method, payment_status, currency,
+                created_by_staff_account_id, order_source, landmark
+            )
+            VALUES (NULL, %s, %s, %s, %s, NULL, 0, 0, 0, %s, 'pending',
+                    'cash_on_delivery', 'unpaid', 'TJS', %s, %s, %s)
+            RETURNING id, public_id, status, created_at
+            """,
+            (
+                request["customer_name"], request["phone"], request["phone"], request["address"], public_id,
+                account["account_id"], request["source"], request["landmark"],
+            ),
+        )
+        order = dict(cur.fetchone())
+        order_reference = f"{request['phone'][-4:]}-{order['id']:03d}"
+        cur.execute("UPDATE orders SET order_reference = %s WHERE id = %s", (order_reference, order["id"]))
+        cur.execute(
+            """
+            INSERT INTO order_status_history
+                (order_id, from_status, to_status, actor_type, actor_id, reason)
+            VALUES (%s, NULL, 'pending', 'staff', %s, %s)
+            """,
+            (order["id"], str(account["account_id"]), f"Источник: {request['source']}"),
+        )
+        response = {
+            "order_id": order["public_id"], "order_reference": order_reference,
+            "status": order["status"], "created_at": order["created_at"],
+            "created_by_staff_account_id": account["account_id"],
+            "created_by_staff_username": account["username"], "order_source": request["source"],
+        }
+        cur.execute(
+            """
+            UPDATE order_idempotency
+            SET order_id = %s, response_status = 201, response_body = %s::jsonb,
+                completed_at = CURRENT_TIMESTAMP
+            WHERE idempotency_key = %s
+            """,
+            (order["id"], json.dumps(response, default=str), normalized_key),
+        )
+        _write_admin_audit(
+            cur, actor_id=f"staff:{account['account_id']}", action="staff.order.created",
+            resource_type="order", resource_id=order["public_id"], request=current_request_id,
+            details={"staff_account_id": account["account_id"], "source": request["source"]},
+        )
+        notification = {
+            "notification_kind": "staff_manual_order", "admin_order_id": int(order["id"]),
+            "order_reference": order_reference, "customer_name": request["customer_name"],
+            "phone": request["phone"], "address": request["address"], "landmark": request["landmark"],
+            "order_source": request["source"], "created_by_staff_account_id": account["account_id"],
+            "created_by_staff_username": account["username"], "items": [], "order_total": "0",
+        }
+        return response, 201, notification
+
+
 def list_orders(query: dict[str, Any]) -> dict[str, Any]:
     limit = _limit(query)
     clauses: list[str] = ["o.deleted_at IS NULL"]
@@ -726,8 +824,11 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
             f"""
             SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
                    o.address, o.items_subtotal, o.order_total, o.currency, o.status,
-                   o.payment_method, o.payment_status, o.notes, o.created_at
+                   o.payment_method, o.payment_status, o.notes, o.created_at,
+                   o.order_source, o.landmark, o.created_by_staff_account_id,
+                   sa.username AS created_by_staff_username
             FROM orders o
+            LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
             {where}
             ORDER BY o.created_at DESC, o.id DESC
             LIMIT %s
@@ -749,13 +850,17 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
 
 def get_order(order_id: str) -> dict[str, Any]:
     lookup, lookup_values = _order_lookup(order_id)
+    qualified_lookup = "o.id = %s AND o.public_id IS NULL" if order_id.startswith("legacy_") else "o.public_id = %s"
     with transaction() as cur:
         cur.execute(
             f"""
-            SELECT id, public_id, order_reference, customer_name, phone, address,
-                   items_subtotal, order_total, currency, status, payment_method,
-                   payment_status, notes, created_at
-            FROM orders WHERE {lookup} AND deleted_at IS NULL
+            SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone, o.address,
+                   o.items_subtotal, o.order_total, o.currency, o.status, o.payment_method,
+                   o.payment_status, o.notes, o.created_at, o.order_source, o.landmark,
+                   o.created_by_staff_account_id, sa.username AS created_by_staff_username
+            FROM orders o
+            LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
+            WHERE {qualified_lookup} AND o.deleted_at IS NULL
             """,
             lookup_values,
         )
@@ -2349,6 +2454,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 if staff_path == "/v1/staff/medicines":
                     return success_document(list_medicines(event.get("queryStringParameters") or {}), request=current_request_id)
                 return success(catalog_stats(), request=current_request_id)
+            if staff_method == "POST" and staff_path == "/v1/staff/orders":
+                account = staff_accounts.session_account(event)
+                headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
+                result, status_code, notification = create_staff_order(
+                    _body(event), str(headers.get("idempotency-key") or ""), account, current_request_id,
+                )
+                payload = {**result, "_notification": notification} if notification else result
+                return success(payload, status_code=status_code, request=current_request_id)
             raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
         actor_id = require_admin_identity(event)
         method = str(event.get("httpMethod") or "").upper()

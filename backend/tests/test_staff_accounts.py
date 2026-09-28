@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from backend.v1.shared import staff_accounts as staff
 from backend.v1.shared.contract import ContractError
-from backend.v1.admin_api.lambda_function import lambda_handler
+from backend.v1.admin_api.lambda_function import create_staff_order, lambda_handler
 
 
 class StaffTests(unittest.TestCase):
@@ -79,6 +79,30 @@ class StaffTests(unittest.TestCase):
         response = lambda_handler(self.event('/v1/staff/login', 'POST', body={'username': 'employee_two', 'password': 'Example-only-strong7!'}), None)
         self.assertEqual(response['statusCode'], 200)
         self.assertEqual(set(json.loads(response['body'])['data']), {'token'})
+
+    def test_second_employee_can_create_manual_order_without_catalog(self):
+        second = {**self.account, 'account_id': 2, 'username': 'vatan_2', 'catalog_access': False}
+        order_cursor = Mock()
+        order_cursor.fetchone.side_effect = [
+            {'id': 1},
+            {'id': 12, 'public_id': 'ord_test', 'status': 'pending', 'created_at': '2026-09-28T10:00:00Z'},
+        ]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            response, status, notification = create_staff_order({
+                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone',
+            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', second, 'req_test')
+        self.assertEqual(status, 201)
+        self.assertEqual(response['created_by_staff_account_id'], 2)
+        self.assertEqual(notification['created_by_staff_username'], 'vatan_2')
+        sql_calls = ' '.join(call.args[0] for call in order_cursor.execute.call_args_list)
+        self.assertIn('created_by_staff_account_id', sql_calls)
+        self.assertIn('staff.order.created', str(order_cursor.execute.call_args_list))
 
     def test_second_employee_cannot_read_catalog(self):
         second = {**self.account, 'account_id': 2, 'catalog_access': False}

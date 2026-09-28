@@ -31,6 +31,8 @@ class ContractError(ValueError):
 
 ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items"}
 ORDER_ITEM_FIELDS = {"medicine_id", "quantity"}
+STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source"}
+STAFF_ORDER_SOURCES = frozenset({"instagram", "whatsapp", "phone"})
 STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"confirmed", "cancelled"}),
     "confirmed": frozenset({"delivering", "cancelled"}),
@@ -224,6 +226,53 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
         "address": address,
         "comment": comment,
         "items": normalized_items,
+    }
+
+
+def validate_staff_order_request(payload: Any) -> dict[str, Any]:
+    """Validate a manual order lead entered by either pharmacy employee."""
+
+    if not isinstance(payload, dict):
+        raise ContractError("VALIDATION_ERROR", "Request body must be a JSON object")
+    unknown_fields = sorted(set(payload) - STAFF_ORDER_FIELDS)
+    if unknown_fields:
+        raise ContractError(
+            "VALIDATION_ERROR",
+            "Request validation failed",
+            fields={field: "field is not allowed" for field in unknown_fields},
+        )
+
+    name_value = payload.get("customer_name")
+    if name_value is None or name_value == "":
+        customer_name = ""
+    elif isinstance(name_value, str) and len(name_value.strip()) <= 120:
+        customer_name = name_value.strip()
+    else:
+        raise ContractError(
+            "VALIDATION_ERROR", "Request validation failed",
+            fields={"customer_name": "must contain at most 120 characters"},
+        )
+
+    phone_value = payload.get("phone")
+    if not isinstance(phone_value, str) or len(phone_value) != 9 or not phone_value.isdigit():
+        raise ContractError(
+            "VALIDATION_ERROR", "Request validation failed",
+            fields={"phone": "must contain exactly 9 digits"},
+        )
+    address = _required_text(payload.get("address"), "address", minimum=3, maximum=500)
+    landmark = _required_text(payload.get("landmark"), "landmark", minimum=2, maximum=300)
+    source = payload.get("source")
+    if source not in STAFF_ORDER_SOURCES:
+        raise ContractError(
+            "VALIDATION_ERROR", "Request validation failed",
+            fields={"source": "must be instagram, whatsapp or phone"},
+        )
+    return {
+        "customer_name": customer_name,
+        "phone": f"+992{phone_value}",
+        "address": address,
+        "landmark": landmark,
+        "source": source,
     }
 
 

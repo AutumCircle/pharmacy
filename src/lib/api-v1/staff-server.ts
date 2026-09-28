@@ -1,10 +1,17 @@
 import 'server-only';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { StaffAccount } from './staff-types';
+import type { CreateStaffOrderRequest, StaffAccount, StaffOrderCreated } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
-async function request<T>(path: string, token?: string, credentials?: { username: string; password: string }): Promise<T> {
+type StaffRequestOptions = {
+  token?: string;
+  method?: 'GET' | 'POST';
+  body?: unknown;
+  idempotencyKey?: string;
+};
+
+async function request<T>(path: string, options: StaffRequestOptions = {}): Promise<T> {
   const base = process.env.API_V1_BASE_URL;
   const apiKey = process.env.API_KEY;
   const bearer = process.env.STAFF_API_BEARER_TOKEN;
@@ -12,10 +19,12 @@ async function request<T>(path: string, token?: string, credentials?: { username
   const url = new URL(base);
   if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('STAFF_API_CONFIGURATION_ERROR');
   const response = await fetch(`${url.toString().replace(/\/$/, '')}/v1/staff/${path}`, {
-    method: credentials ? 'POST' : 'GET',
+    method: options.method ?? 'GET',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey,
-      Authorization: `Bearer ${bearer}`, ...(token ? { 'x-staff-session': token } : {}) },
-    body: credentials ? JSON.stringify(credentials) : undefined,
+      Authorization: `Bearer ${bearer}`,
+      ...(options.token ? { 'x-staff-session': options.token } : {}),
+      ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}) },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: 'no-store', signal: AbortSignal.timeout(10_000),
   });
   const payload: unknown = await response.json().catch(() => null);
@@ -30,13 +39,13 @@ async function request<T>(path: string, token?: string, credentials?: { username
 }
 
 export async function loginStaff(credentials: { username: string; password: string }) {
-  const result = await request<ApiSuccessResponse<{ token: string }>>('login', undefined, credentials);
+  const result = await request<ApiSuccessResponse<{ token: string }>>('login', { method: 'POST', body: credentials });
   if (typeof result.data?.token !== 'string') throw new Error('UPSTREAM_INVALID_RESPONSE');
   return result.data.token;
 }
 
 export async function getStaffSession(token: string): Promise<StaffAccount> {
-  const { data } = await request<ApiSuccessResponse<StaffAccount>>('session', token);
+  const { data } = await request<ApiSuccessResponse<StaffAccount>>('session', { token });
   if (!data || ![1, 2].includes(data.account_id) || typeof data.catalog_access !== 'boolean'
     || typeof data.username !== 'string' || !Number.isInteger(data.credential_version)) throw new Error('UPSTREAM_INVALID_RESPONSE');
   return data;
@@ -44,9 +53,15 @@ export async function getStaffSession(token: string): Promise<StaffAccount> {
 
 export function listStaffMedicines(token: string, values: { q: string; availability: string; page: number; limit: number }) {
   const query = new URLSearchParams(Object.entries(values).map(([key, value]) => [key, String(value)]));
-  return request<AdminNumberedListResponse<AdminMedicine>>(`medicines?${query}`, token);
+  return request<AdminNumberedListResponse<AdminMedicine>>(`medicines?${query}`, { token });
 }
 
 export function getStaffCatalogStats(token: string) {
-  return request<ApiSuccessResponse<AdminCatalogStats>>('catalog/stats', token);
+  return request<ApiSuccessResponse<AdminCatalogStats>>('catalog/stats', { token });
+}
+
+export function createStaffOrder(token: string, body: CreateStaffOrderRequest, idempotencyKey: string) {
+  return request<ApiSuccessResponse<StaffOrderCreated & { _notification?: Record<string, unknown> }>>('orders', {
+    token, method: 'POST', body, idempotencyKey,
+  });
 }

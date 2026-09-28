@@ -64,6 +64,24 @@ def _item_lines(event: dict[str, Any], price_key: str) -> list[str]:
 
 
 def format_owner_message(event: dict[str, Any]) -> str:
+    if event.get("notification_kind") == "staff_manual_order":
+        reference, customer, phone, address = _identity(event)
+        account_id = html.escape(str(event.get("created_by_staff_account_id") or "—"))
+        username = html.escape(str(event.get("created_by_staff_username") or "—"))
+        source_labels = {"instagram": "Instagram", "whatsapp": "WhatsApp", "phone": "Телефонный звонок"}
+        source = source_labels.get(str(event.get("order_source")), "—")
+        landmark = html.escape(str(event.get("landmark") or "—"))
+        return "\n".join([
+            f"🏥 <b>Новый заказ из аптеки {account_id}</b>",
+            f"🧾 Заказ: {reference}",
+            f"👤 Сотрудник: {username}",
+            f"📨 Источник: {source}",
+            "",
+            f"Клиент: {customer}",
+            f"📞 Телефон: {phone}",
+            f"📍 Адрес: {address}",
+            f"🧭 Ориентир: {landmark}",
+        ])
     reference, _, _, _ = _identity(event)
     lines = [
         f"📊 <b>Новый заказ {reference} — для владельца</b>",
@@ -173,14 +191,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     delivery_chat_id = os.environ.get("TELEGRAM_DELIVERY_CHAT_ID", "").strip() or owner_chat_id
     if not token or not owner_chat_id:
         raise RuntimeError("Telegram notification configuration is incomplete")
-    deliveries = (
-        (owner_chat_id, format_owner_message(notification)),
-        (pharmacy_chat_id, format_pharmacy_message(notification)),
-        (delivery_chat_id, format_delivery_message(notification)),
-    )
+    if notification.get("notification_kind") == "staff_manual_order":
+        deliveries = ((owner_chat_id, format_owner_message(notification)),)
+    else:
+        deliveries = (
+            (owner_chat_id, format_owner_message(notification)),
+            (pharmacy_chat_id, format_pharmacy_message(notification)),
+            (delivery_chat_id, format_delivery_message(notification)),
+        )
     for chat_id, text in deliveries:
         _send_message(token, chat_id, text, notification)
-    result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": 3}
+    result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": len(deliveries)}
     if is_api_gateway:
         return {
             "statusCode": 200,

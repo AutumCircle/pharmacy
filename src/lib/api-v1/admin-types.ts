@@ -195,6 +195,10 @@ export type AdminOrderSummary = {
   payment_status: PaymentStatus;
   notes: string | null;
   created_at: string;
+  order_source: 'instagram' | 'whatsapp' | 'phone' | null;
+  landmark: string | null;
+  created_by_staff_account_id: 1 | 2 | null;
+  created_by_staff_username: string | null;
 };
 
 export type AdminOrderItem = {
