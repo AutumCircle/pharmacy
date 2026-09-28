@@ -29,6 +29,15 @@ import type {
   CatalogSyncSummary,
 } from './admin-types';
 import { ApiV1Error } from './server';
+import type { StaffAccount } from './staff-types';
+
+export function listStaffAccounts(): Promise<ApiSuccessResponse<StaffAccount[]>> {
+  return request('/v1/admin/staff');
+}
+
+export function updateStaffAccount(accountId: number, body: { username: string; password?: string }): Promise<ApiSuccessResponse<StaffAccount>> {
+  return request(`/v1/admin/staff/${accountId}`, { method: 'PATCH', body });
+}
 
 // The deployed admin Lambda has the same sub-second cold-start profile as the
 // public Lambda, so a 25-second wait only hides an unhealthy connection.

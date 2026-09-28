@@ -13,7 +13,7 @@ export async function proxy(request: NextRequest) {
   const requiredRole = pathname.startsWith('/admin') ? 'admin' : 'staff';
   if (role !== requiredRole) {
     const url = request.nextUrl.clone();
-    url.pathname = role === 'admin' ? '/admin' : role === 'staff' ? '/staff/medicines' : `/${requiredRole}/login`;
+    url.pathname = role === 'admin' ? '/admin' : role === 'staff' ? '/staff' : `/${requiredRole}/login`;
     return NextResponse.redirect(url);
   }
   return NextResponse.next();

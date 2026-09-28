@@ -2,10 +2,9 @@ import { NextResponse } from 'next/server';
 import {
   ADMIN_SESSION_COOKIE,
   ADMIN_SESSION_SECONDS,
-  createStaffSession,
-  deriveStaffPassword,
-  secretsEqual,
 } from '@/lib/admin-session';
+import { loginStaff } from '@/lib/api-v1/staff-server';
+import { ApiV1Error } from '@/lib/api-v1/server';
 
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -21,6 +20,12 @@ export async function POST(request: Request) {
   try {
     const address = clientAddress(request);
     const now = Date.now();
+    for (const [key, value] of attempts) {
+      if (value.resetAt <= now) attempts.delete(key);
+    }
+    if (attempts.size >= 10_000 && address && !attempts.has(address)) {
+      return NextResponse.json({ error: 'Слишком много попыток. Повторите позже.' }, { status: 429 });
+    }
     const currentAttempt = address ? attempts.get(address) : undefined;
     if (currentAttempt && currentAttempt.resetAt > now && currentAttempt.count >= MAX_ATTEMPTS) {
       return NextResponse.json({ error: 'Слишком много попыток. Повторите через 15 минут.' }, { status: 429 });
@@ -35,21 +40,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Авторизация сотрудников не настроена' }, { status: 503 });
     }
 
-    const staffUsername = process.env.STAFF_USERNAME || 'pharmacy_staff';
-    const staffPassword = process.env.STAFF_PASSWORD || await deriveStaffPassword(sessionSecret);
-    const [usernameValid, passwordValid] = await Promise.all([
-      secretsEqual(typeof credentials.username === 'string' ? credentials.username : '', staffUsername),
-      secretsEqual(typeof credentials.password === 'string' ? credentials.password : '', staffPassword),
-    ]);
+    let token: string | null = null;
+    if (typeof credentials.username === 'string' && typeof credentials.password === 'string'
+      && credentials.username.length <= 64 && credentials.password.length <= 128) {
+      try {
+        token = await loginStaff({ username: credentials.username, password: credentials.password });
+      } catch (error) {
+        if (error instanceof ApiV1Error && error.status === 429) {
+          return NextResponse.json({ error: 'Слишком много попыток. Повторите через 15 минут.' }, { status: 429 });
+        }
+        if (!(error instanceof ApiV1Error) || error.status !== 401) throw error;
+      }
+    }
 
-    if (usernameValid && passwordValid) {
+    if (token) {
       if (address) attempts.delete(address);
       const response = NextResponse.json({ success: true });
       const forwardedProtocol = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
       const requestIsHttps = forwardedProtocol
         ? forwardedProtocol === 'https'
         : new URL(request.url).protocol === 'https:';
-      response.cookies.set(ADMIN_SESSION_COOKIE, await createStaffSession(sessionSecret), {
+      response.cookies.set(ADMIN_SESSION_COOKIE, token, {
         httpOnly: true,
         secure: requestIsHttps,
         sameSite: 'lax',

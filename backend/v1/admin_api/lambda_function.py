@@ -28,6 +28,7 @@ from backend.v1.shared.authorization import require_admin_identity
 from backend.v1.shared.database import transaction
 from backend.v1.shared.responses import error_response, request_id, success, success_document
 from backend.v1.shared.xlsx_export import build_out_of_stock_workbook
+from backend.v1.shared import staff_accounts
 
 
 DEFAULT_LIMIT = 20
@@ -2333,12 +2334,33 @@ def list_syncs(query: dict[str, Any]) -> dict[str, Any]:
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     current_request_id = request_id()
     try:
+        # Staff calls never inherit the admin service identity. Only these exact
+        # read routes are reachable, with a current DB-backed employee session.
+        staff_path = str(event.get("path") or "")
+        staff_method = str(event.get("httpMethod") or "").upper()
+        if staff_path.startswith("/v1/staff/"):
+            staff_accounts.require_service(event)
+            if staff_method == "POST" and staff_path == "/v1/staff/login":
+                return success(staff_accounts.login(_body(event)), request=current_request_id)
+            if staff_method == "GET" and staff_path == "/v1/staff/session":
+                return success(staff_accounts.session_account(event), request=current_request_id)
+            if staff_method == "GET" and staff_path in {"/v1/staff/medicines", "/v1/staff/catalog/stats"}:
+                staff_accounts.session_account(event, catalog=True)
+                if staff_path == "/v1/staff/medicines":
+                    return success_document(list_medicines(event.get("queryStringParameters") or {}), request=current_request_id)
+                return success(catalog_stats(), request=current_request_id)
+            raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
         actor_id = require_admin_identity(event)
         method = str(event.get("httpMethod") or "").upper()
         path = str(event.get("path") or "")
         query = event.get("queryStringParameters") or {}
         parts = [part for part in path.strip("/").split("/") if part]
         tail = parts[parts.index("admin") + 1:] if "admin" in parts else []
+        if method == "GET" and tail == ["staff"]:
+            return success(staff_accounts.list_accounts(), request=current_request_id)
+        if method == "PATCH" and len(tail) == 2 and tail[0] == "staff":
+            return success(staff_accounts.update_account(_positive_int(tail[1], "account_id"),
+                _body(event), actor_id, current_request_id, _write_admin_audit), request=current_request_id)
         if method == "GET" and tail == ["dashboard"]:
             return success(dashboard_summary(query), request=current_request_id)
         if method == "GET" and tail == ["pricing-settings"]:
@@ -2495,8 +2517,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     except psycopg2.IntegrityError:
         return error_response(ContractError("CONFLICT", "Resource conflicts with existing data", http_status=409), request=current_request_id)
     except psycopg2.Error as exc:
-        LOGGER.exception("Admin API database error request_id=%s pgcode=%s", current_request_id, exc.pgcode)
+        LOGGER.error("Admin API database error request_id=%s pgcode=%s", current_request_id, exc.pgcode)
         return error_response(ContractError("INTERNAL_ERROR", "Internal server error", http_status=500), request=current_request_id)
     except Exception:
-        LOGGER.exception("Admin API unexpected error request_id=%s", current_request_id)
+        LOGGER.error("Admin API unexpected error request_id=%s", current_request_id)
         return error_response(ContractError("INTERNAL_ERROR", "Internal server error", http_status=500), request=current_request_id)

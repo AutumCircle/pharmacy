@@ -45,10 +45,6 @@ export function createAdminSession(secret: string): Promise<string> {
   return createSession(secret, 'admin');
 }
 
-export function createStaffSession(secret: string): Promise<string> {
-  return createSession(secret, 'staff');
-}
-
 export async function readSessionRole(token: string | undefined, secret: string): Promise<SessionRole | null> {
   if (!token) return null;
   const [payloadPart, signaturePart, extra] = token.split('.');
@@ -77,13 +73,6 @@ export async function verifyAdminSession(token: string | undefined, secret: stri
 
 export async function verifyStaffSession(token: string | undefined, secret: string): Promise<boolean> {
   return (await readSessionRole(token, secret)) === 'staff';
-}
-
-export async function deriveStaffPassword(secret: string): Promise<string> {
-  const signature = await crypto.subtle.sign(
-    'HMAC', await signingKey(secret), encoder.encode('vatan-pharmacy-staff-password-v1'),
-  );
-  return `Vt-${encode(new Uint8Array(signature)).slice(0, 28)}!7`;
 }
 
 export async function secretsEqual(left: string, right: string): Promise<boolean> {

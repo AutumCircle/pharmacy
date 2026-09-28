@@ -14,6 +14,7 @@ const menu = [
   { name: 'Категории', path: '/admin/categories', icon: '▣' },
   { name: 'Цены', path: '/admin/pricing', icon: '%' },
   { name: 'Контакт доставки', path: '/admin/contact', icon: '☎' },
+  { name: 'Сотрудники', path: '/admin/staff', icon: '♙' },
   { name: 'Баннеры', path: '/admin/banners', icon: '▧' },
   { name: 'Карусели', path: '/admin/carousels', icon: '★' },
   { name: 'Синхронизации', path: '/admin/history', icon: '↻' },

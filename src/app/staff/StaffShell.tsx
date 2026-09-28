@@ -16,7 +16,7 @@ export default function StaffShell({ children }: { children: React.ReactNode }) 
   return (
     <div className="staff-shell">
       <header className="staff-header">
-        <div><strong>Vatan Pharmacy</strong><span>Каталог для работников</span></div>
+        <div><strong>Vatan Pharmacy</strong><span>Кабинет сотрудника</span></div>
         <button type="button" onClick={logout}>Выйти</button>
       </header>
       <main className="staff-main">{children}</main>

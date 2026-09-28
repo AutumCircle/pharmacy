@@ -26,7 +26,7 @@ export default function StaffLoginPage() {
         setError(result.error || 'Ошибка входа');
         return;
       }
-      router.replace('/staff/medicines');
+      router.replace('/staff');
       router.refresh();
     } catch {
       setError('Ошибка сети');

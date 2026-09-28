@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requireStaffSession } from '@/lib/staff-auth';
-import { getAdminCatalogStats, listAdminMedicines } from '@/lib/api-v1/admin-server';
+import { getStaffCatalogStats, listStaffMedicines } from '@/lib/api-v1/staff-server';
 
 export const dynamic = 'force-dynamic';
 const PHARMACY_TIME_ZONE = 'Asia/Dushanbe';
@@ -24,7 +24,7 @@ function pageHref(page: number, availability: Availability, q: string): string {
 export default async function StaffMedicinesPage({ searchParams }: {
   searchParams: Promise<{ page?: string; availability?: string; q?: string }>;
 }) {
-  await requireStaffSession();
+  const { token } = await requireStaffSession(true);
   const params = await searchParams;
   const page = Math.max(1, Number.parseInt(params.page || '1', 10) || 1);
   const availability: Availability = ['in_stock', 'out_of_stock'].includes(params.availability || '')
@@ -32,8 +32,8 @@ export default async function StaffMedicinesPage({ searchParams }: {
     : 'all';
   const query = (params.q || '').trim();
   const [medicinesResult, statsResult] = await Promise.all([
-    listAdminMedicines({ q: query, availability, page, limit: 50 }),
-    getAdminCatalogStats(),
+    listStaffMedicines(token, { q: query, availability, page, limit: 50 }),
+    getStaffCatalogStats(token),
   ]);
   const stats = statsResult.data;
   const updatedAt = stats.last_updated_at;

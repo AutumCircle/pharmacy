@@ -59,3 +59,4 @@ yarn-error.log*
 next-env.d.ts
 # Development-only banner images and settings, never deploy.
 .local-banners/
+.staff-bootstrap/
