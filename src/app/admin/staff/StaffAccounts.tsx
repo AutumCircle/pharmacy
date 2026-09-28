@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import type { StaffAccount } from '@/lib/api-v1/staff-types';
-import { saveStaffAccount } from './actions';
 
 function AccountForm({ account }: { account: StaffAccount }) {
   const [username, setUsername] = useState(account.username);
@@ -14,10 +13,20 @@ function AccountForm({ account }: { account: StaffAccount }) {
     setBusy(true);
     setMessage('');
     try {
-      const result = await saveStaffAccount(account.account_id, username, password || undefined);
-      setMessage(result.error || 'Изменения сохранены. Сотруднику нужно войти снова.');
-    } catch {
-      setMessage('Не удалось сохранить изменения. Повторите попытку.');
+      const response = await fetch(`/api/admin/staff/${account.account_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, ...(password ? { password } : {}) }),
+      });
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const payload = result && typeof result === 'object' ? result as { error?: { message?: string } | string } : {};
+        const error = typeof payload.error === 'string' ? payload.error : payload.error?.message;
+        throw new Error(error || 'Не удалось сохранить изменения');
+      }
+      setMessage('Изменения сохранены. Сотруднику нужно войти снова.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Не удалось сохранить изменения. Повторите попытку.');
     } finally {
       setPassword('');
       setBusy(false);
