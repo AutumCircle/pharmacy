@@ -46,9 +46,10 @@ class StaffTests(unittest.TestCase):
         self.assertFalse(staff.verify_password(password, 'broken'))
 
     def test_strong_password_and_username_validation(self):
-        for value in ('short', 'abcdefghijklmnop', 'Abcdefghijklmnop1', 'X' * 129, None):
+        for value in ('short', 'X' * 129, None):
             with self.assertRaises(ContractError):
                 staff.validate_password(value)
+        self.assertEqual(staff.validate_password('simple6'), 'simple6')
         for value in ('ab', 'name with spaces', "bad'login", None):
             with self.assertRaises(ContractError):
                 staff.username(value)
@@ -104,19 +105,20 @@ class StaffTests(unittest.TestCase):
         self.assertIn('created_by_staff_account_id', sql_calls)
         self.assertIn('staff.order.created', str(order_cursor.execute.call_args_list))
 
-    def test_second_employee_cannot_read_catalog(self):
-        second = {**self.account, 'account_id': 2, 'catalog_access': False}
-        self.cursor.fetchone.return_value = second
+    def test_employee_without_catalog_cannot_read_catalog(self):
+        without_catalog = {**self.account, 'account_id': 1, 'catalog_access': False}
+        self.cursor.fetchone.return_value = without_catalog
         for path in ('/v1/staff/medicines', '/v1/staff/catalog/stats'):
             with patch('backend.v1.admin_api.lambda_function.list_medicines') as medicines:
-                response = lambda_handler(self.event(path, token=staff.create_session(second)), None)
+                response = lambda_handler(self.event(path, token=staff.create_session(without_catalog)), None)
                 self.assertEqual(response['statusCode'], 403)
                 medicines.assert_not_called()
 
-    def test_first_employee_can_read_catalog(self):
-        self.cursor.fetchone.return_value = self.account
+    def test_employee_with_catalog_can_read_catalog(self):
+        with_catalog = {**self.account, 'account_id': 2, 'catalog_access': True}
+        self.cursor.fetchone.return_value = with_catalog
         with patch('backend.v1.admin_api.lambda_function.list_medicines', return_value={'data': [], 'page': {}}) as medicines:
-            response = lambda_handler(self.event('/v1/staff/medicines', token=staff.create_session(self.account)), None)
+            response = lambda_handler(self.event('/v1/staff/medicines', token=staff.create_session(with_catalog)), None)
             self.assertEqual(response['statusCode'], 200)
             medicines.assert_called_once()
 

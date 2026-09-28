@@ -39,8 +39,8 @@ function AccountForm({ account }: { account: StaffAccount }) {
     <input id={`login-${account.account_id}`} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" pattern="[A-Za-z0-9_.\-]{3,64}" minLength={3} maxLength={64} required disabled={busy} />
     <p aria-label="Пароль установлен">•••••••• — пароль установлен</p>
     <label htmlFor={`password-${account.account_id}`}>Новый пароль (оставьте пустым, чтобы сохранить текущий)</label>
-    <input id={`password-${account.account_id}`} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={14} maxLength={128} disabled={busy} />
-    <small>14–128 символов: строчная и заглавная латинские буквы, цифра и специальный символ.</small>
+    <input id={`password-${account.account_id}`} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} maxLength={128} disabled={busy} />
+    <small>От 6 до 128 символов.</small>
     <button type="submit" disabled={busy}>{busy ? 'Сохранение…' : 'Сохранить'}</button>
     <p role="status">{message}</p>
   </form>;

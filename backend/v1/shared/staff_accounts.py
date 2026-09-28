@@ -26,9 +26,8 @@ def username(value):
 
 
 def validate_password(value):
-    if (not isinstance(value, str) or not 14 <= len(value) <= 128
-            or not all(re.search(pattern, value) for pattern in (r"[a-z]", r"[A-Z]", r"[0-9]", r"[^A-Za-z0-9\s]"))):
-        raise ContractError("VALIDATION_ERROR", "Пароль: 14–128 символов, строчная и заглавная буквы, цифра и специальный символ")
+    if not isinstance(value, str) or not 6 <= len(value) <= 128:
+        raise ContractError("VALIDATION_ERROR", "Пароль должен содержать от 6 до 128 символов")
     return value
 
 
