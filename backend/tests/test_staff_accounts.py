@@ -132,6 +132,14 @@ class StaffTests(unittest.TestCase):
         response = lambda_handler({'path': '/v1/staff/login', 'httpMethod': 'POST', 'headers': {'x-api-key': 'not-auth'}}, None)
         self.assertEqual(response['statusCode'], 403)
 
+    def test_derived_service_token_works_without_extra_vercel_variable(self):
+        self.cursor.fetchone.return_value = self.account
+        with patch.dict(os.environ, {'STAFF_API_BEARER_TOKEN': ''}):
+            event = self.event('/v1/staff/session', token=staff.create_session(self.account))
+            event['headers']['Authorization'] = 'Bearer ' + staff._derived_service_token()
+            response = lambda_handler(event, None)
+        self.assertEqual(response['statusCode'], 200)
+
     def test_shared_admin_and_staff_service_credential_is_rejected(self):
         with patch.dict(os.environ, {'STAFF_API_BEARER_TOKEN': os.environ['ADMIN_API_BEARER_TOKEN']}):
             response = lambda_handler(self.event('/v1/staff/login', 'POST'), None)

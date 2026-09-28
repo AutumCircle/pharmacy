@@ -10,13 +10,13 @@ import re
 import secrets
 import time
 
-from .authorization import _static_bearer_identity
 from .contract import ContractError
 from .database import transaction
 
 ITERATIONS = 600_000
 SESSION_SECONDS = 8 * 60 * 60
 PUBLIC_COLUMNS = "account_id, username, catalog_access, credential_version, true AS password_set"
+SERVICE_TOKEN_CONTEXT = b"pharmacy-vatan:staff-api:v1"
 
 
 def username(value):
@@ -68,10 +68,21 @@ def create_session(account):
     return payload + "." + _encode(hmac.new(_secret(), payload.encode(), hashlib.sha256).digest())
 
 
+def _derived_service_token():
+    return hmac.new(_secret(), SERVICE_TOKEN_CONTEXT, hashlib.sha256).hexdigest()
+
+
 def require_service(event):
-    if os.environ.get("STAFF_API_BEARER_TOKEN") == os.environ.get("ADMIN_API_BEARER_TOKEN"):
+    configured = os.environ.get("STAFF_API_BEARER_TOKEN", "").strip()
+    admin = os.environ.get("ADMIN_API_BEARER_TOKEN", "").strip()
+    if configured and configured == admin:
         raise ContractError("FORBIDDEN", "Staff service must use a separate credential", http_status=403)
-    if not _static_bearer_identity(event, "STAFF_API_BEARER_TOKEN", "staff-service"):
+    headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
+    supplied = str(headers.get("authorization") or "")
+    allowed = supplied == f"Bearer {_derived_service_token()}"
+    if configured:
+        allowed = allowed or hmac.compare_digest(supplied, f"Bearer {configured}")
+    if not allowed:
         raise ContractError("FORBIDDEN", "Staff service authorization is required", http_status=403)
 
 

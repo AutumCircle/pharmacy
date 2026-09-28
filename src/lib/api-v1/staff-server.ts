@@ -1,4 +1,5 @@
 import 'server-only';
+import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
 import type { CreateStaffOrderRequest, StaffAccount, StaffOrderCreated } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
@@ -14,8 +15,12 @@ type StaffRequestOptions = {
 async function request<T>(path: string, options: StaffRequestOptions = {}): Promise<T> {
   const base = process.env.API_V1_BASE_URL;
   const apiKey = process.env.API_KEY;
-  const bearer = process.env.STAFF_API_BEARER_TOKEN;
-  if (!base || !apiKey || !bearer || bearer.length < 32) throw new Error('STAFF_API_CONFIGURATION_ERROR');
+  const sessionSecret = process.env.ADMIN_SESSION_SECRET;
+  const bearer = process.env.STAFF_API_BEARER_TOKEN
+    || (sessionSecret && sessionSecret.length >= 32
+      ? createHmac('sha256', sessionSecret).update('pharmacy-vatan:staff-api:v1').digest('hex')
+      : '');
+  if (!base || !apiKey || bearer.length < 32) throw new Error('STAFF_API_CONFIGURATION_ERROR');
   const url = new URL(base);
   if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('STAFF_API_CONFIGURATION_ERROR');
   const response = await fetch(`${url.toString().replace(/\/$/, '')}/v1/staff/${path}`, {
