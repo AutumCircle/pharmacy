@@ -13,6 +13,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [created, setCreated] = useState('');
+  const [notificationSent, setNotificationSent] = useState(true);
   const [formKey, setFormKey] = useState(0);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -34,6 +35,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       const result = await response.json();
       if (!response.ok) throw new Error(result?.error?.message || result?.error || 'Не удалось сохранить заказ');
       setCreated(result.data.order_reference);
+      setNotificationSent(result.data.notification_sent === true);
       setFormKey((value) => value + 1);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Не удалось сохранить заказ');
@@ -45,7 +47,9 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       <div className="staff-title-row">
         <div><h1>Новый заказ</h1><p>Аптека {accountId} · {username}</p></div>
       </div>
-      {created && <div className="staff-order-success">Заказ {created} сохранён. Владелец получил уведомление.</div>}
+      {created && <div className={notificationSent ? 'staff-order-success' : 'staff-order-warning'}>
+        Заказ {created} сохранён. {notificationSent ? 'Владелец получил уведомление.' : 'Уведомление не отправлено — сообщите администратору.'}
+      </div>}
       {error && <div className="staff-login-error">{error}</div>}
       <form key={formKey} className="staff-order-form" onSubmit={submit}>
         <label>Имя клиента <span>необязательно</span><input name="customer_name" maxLength={120} autoComplete="name" /></label>

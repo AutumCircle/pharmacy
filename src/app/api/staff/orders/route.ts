@@ -28,14 +28,16 @@ export async function POST(request: Request) {
     const response = await createStaffOrder(token, body, idempotencyKey);
     const notification = response.data._notification;
     delete response.data._notification;
+    let notificationSent = false;
     if (notification) {
       try {
         await sendOrderNotification(notification);
+        notificationSent = true;
       } catch (error) {
         console.error('Staff order was created, but notification failed', error);
       }
     }
-    return NextResponse.json(response, { status: 201 });
+    return NextResponse.json({ ...response, data: { ...response.data, notification_sent: notificationSent } }, { status: 201 });
   } catch (error) {
     return apiRouteError(error);
   }
