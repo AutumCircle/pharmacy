@@ -115,10 +115,14 @@ class TelegramDispatchTests(unittest.TestCase):
         }
         with patch.dict("os.environ", {
             "TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_OWNER_CHAT_ID": "owner",
+            "TELEGRAM_DELIVERY_BOT_TOKEN": "delivery-token",
             "TELEGRAM_DELIVERY_CHAT_ID": "courier",
         }):
             response = lambda_handler(event, None)
         self.assertEqual(send_message.call_count, 2)
+        delivery_call = send_message.call_args_list[1]
+        self.assertEqual(delivery_call.args[:2], ("delivery-token", "courier"))
+        self.assertFalse(delivery_call.kwargs["include_admin_link"])
         self.assertEqual(json.loads(response["body"])["data"]["messages_sent"], 2)
 
 

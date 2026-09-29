@@ -165,7 +165,14 @@ def format_message(event: dict[str, Any]) -> str:
     return format_owner_message(event)
 
 
-def _send_message(token: str, chat_id: str, text: str, event: dict[str, Any]) -> None:
+def _send_message(
+    token: str,
+    chat_id: str,
+    text: str,
+    event: dict[str, Any],
+    *,
+    include_admin_link: bool = True,
+) -> None:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "text": text,
@@ -174,7 +181,7 @@ def _send_message(token: str, chat_id: str, text: str, event: dict[str, Any]) ->
     }
     base_url = os.environ.get("ADMIN_ORDER_BASE_URL", "").strip().rstrip("/")
     order_id = event.get("admin_order_id")
-    if base_url.startswith("https://") and isinstance(order_id, int):
+    if include_admin_link and base_url.startswith("https://") and isinstance(order_id, int):
         payload["reply_markup"] = {
             "inline_keyboard": [[{"text": "Открыть заказ", "url": f"{base_url}/{order_id}"}]],
         }
@@ -215,6 +222,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         return authorization
     notification, is_api_gateway = _notification_event(event)
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    delivery_token = os.environ.get("TELEGRAM_DELIVERY_BOT_TOKEN", "").strip() or token
     legacy_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     owner_chat_id = os.environ.get("TELEGRAM_OWNER_CHAT_ID", "").strip() or legacy_chat_id
     pharmacy_chat_id = os.environ.get("TELEGRAM_PHARMACY_CHAT_ID", "").strip() or owner_chat_id
@@ -222,18 +230,24 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not token or not owner_chat_id:
         raise RuntimeError("Telegram notification configuration is incomplete")
     if notification.get("notification_kind") == "staff_manual_order":
-        deliveries = [(owner_chat_id, format_owner_message(notification))]
+        deliveries = [(token, owner_chat_id, format_owner_message(notification), True)]
         configured_delivery_chat = os.environ.get("TELEGRAM_DELIVERY_CHAT_ID", "").strip()
         if configured_delivery_chat and configured_delivery_chat != owner_chat_id:
-            deliveries.append((configured_delivery_chat, format_delivery_message(notification)))
+            deliveries.append((delivery_token, configured_delivery_chat, format_delivery_message(notification), False))
     else:
         deliveries = (
-            (owner_chat_id, format_owner_message(notification)),
-            (pharmacy_chat_id, format_pharmacy_message(notification)),
-            (delivery_chat_id, format_delivery_message(notification)),
+            (token, owner_chat_id, format_owner_message(notification), True),
+            (token, pharmacy_chat_id, format_pharmacy_message(notification), True),
+            (delivery_token, delivery_chat_id, format_delivery_message(notification), False),
         )
-    for chat_id, text in deliveries:
-        _send_message(token, chat_id, text, notification)
+    for message_token, chat_id, text, include_admin_link in deliveries:
+        _send_message(
+            message_token,
+            chat_id,
+            text,
+            notification,
+            include_admin_link=include_admin_link,
+        )
     result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": len(deliveries)}
     if is_api_gateway:
         return {
