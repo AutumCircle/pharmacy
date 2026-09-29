@@ -466,6 +466,50 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
         cur.execute(
             """
             SELECT
+                COUNT(*) AS total_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id IS NULL) AS client_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id IS NOT NULL) AS pharmacy_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id = 1) AS pharmacy_1_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id = 2) AS pharmacy_2_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id IS NOT NULL
+                                  AND order_source = 'instagram') AS instagram_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id IS NOT NULL
+                                  AND order_source = 'whatsapp') AS whatsapp_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id IS NOT NULL
+                                  AND order_source = 'phone') AS phone_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id IS NOT NULL
+                                  AND order_source IS NULL) AS unspecified_source_orders
+            FROM orders
+            WHERE deleted_at IS NULL
+              AND created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
+            """,
+            (days,),
+        )
+        origin_counts = dict(cur.fetchone())
+        cur.execute(
+            """
+            SELECT
+                o.id,
+                o.public_id,
+                COALESCE(o.order_reference, o.public_id, o.id::text) AS order_reference,
+                o.customer_name,
+                o.created_at,
+                COALESCE(o.order_total, o.items_subtotal, o.total_price, 0) AS order_total,
+                o.status,
+                o.created_by_staff_account_id,
+                o.order_source
+            FROM orders o
+            WHERE o.deleted_at IS NULL
+              AND o.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT 20
+            """,
+            (days,),
+        )
+        recent_orders = [dict(item) for item in cur.fetchall()]
+        cur.execute(
+            """
+            SELECT
                 COALESCE(SUM(financial.sales_total), 0) AS sales_total,
                 COALESCE(SUM(financial.pharmacy_total), 0) AS pharmacy_total
             FROM (
@@ -487,6 +531,10 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
     for item in delivered_orders:
         item["order_id"] = item.pop("public_id") or str(item["order_reference"])
         item["profit"] = item["sales_total"] - item["pharmacy_total"]
+    for item in recent_orders:
+        internal_id = item.pop("id")
+        item["order_id"] = item.pop("public_id") or f"legacy_{internal_id}"
+    origin_counts = {key: int(value or 0) for key, value in origin_counts.items()}
     counts = {status: int(row[status] or 0) for status in STATUS_TRANSITIONS}
     sales_total = financial_totals["sales_total"]
     pharmacy_total = financial_totals["pharmacy_total"]
@@ -498,6 +546,8 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
         "sales_total": sales_total,
         "pharmacy_total": pharmacy_total,
         "profit_total": sales_total - pharmacy_total,
+        "origin_counts": origin_counts,
+        "recent_orders": recent_orders,
         "delivered_orders": delivered_orders,
         "currency": "TJS",
     }

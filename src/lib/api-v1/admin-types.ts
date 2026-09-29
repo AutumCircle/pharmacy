@@ -37,6 +37,27 @@ export type AdminDashboardSummary = {
   sales_total: number | string;
   pharmacy_total: number | string;
   profit_total: number | string;
+  origin_counts: {
+    total_orders: number;
+    client_orders: number;
+    pharmacy_orders: number;
+    pharmacy_1_orders: number;
+    pharmacy_2_orders: number;
+    instagram_orders: number;
+    whatsapp_orders: number;
+    phone_orders: number;
+    unspecified_source_orders: number;
+  };
+  recent_orders: Array<{
+    order_id: string;
+    order_reference: string;
+    customer_name: string;
+    created_at: string;
+    order_total: number | string;
+    status: OrderStatus;
+    created_by_staff_account_id: 1 | 2 | null;
+    order_source: 'instagram' | 'whatsapp' | 'phone' | null;
+  }>;
   delivered_orders: Array<{
     order_id: string;
     order_reference: string;

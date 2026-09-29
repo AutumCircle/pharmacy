@@ -9,6 +9,13 @@ import {
 
 export const dynamic = 'force-dynamic';
 const PHARMACY_TIME_ZONE = 'Asia/Dushanbe';
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'Новый', confirmed: 'Подтверждён', delivering: 'Доставляется',
+  delivered: 'Доставлен', cancelled: 'Отменён',
+};
+const SOURCE_LABELS: Record<string, string> = {
+  instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефонный звонок',
+};
 
 function timeAgo(value: string | null): string {
   if (!value) return 'нет данных';
@@ -39,6 +46,12 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
   const summary = summaryResult.status === 'fulfilled' ? summaryResult.value.data : {
     period_days: days, order_counts: { pending: 0, confirmed: 0, delivering: 0, delivered: 0, cancelled: 0 },
     new_orders: 0, active_orders: 0, sales_total: 0, pharmacy_total: 0, profit_total: 0,
+    origin_counts: {
+      total_orders: 0, client_orders: 0, pharmacy_orders: 0, pharmacy_1_orders: 0,
+      pharmacy_2_orders: 0, instagram_orders: 0, whatsapp_orders: 0,
+      phone_orders: 0, unspecified_source_orders: 0,
+    },
+    recent_orders: [],
     delivered_orders: [], currency: 'TJS' as const,
   };
   const categories = categoriesResult.status === 'fulfilled' ? categoriesResult.value.data : [];
@@ -60,6 +73,19 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
     { label: 'Активные заказы', value: summary.active_orders, href: '/admin/orders', color: '#ad4d00' },
     { label: 'Активные категории', value: activeCategories, href: '/admin/categories', color: '#00838f' },
   ];
+  const originCards = [
+    { label: 'Все заказы', value: summary.origin_counts.total_orders, color: '#37474f' },
+    { label: 'Клиенты сайта', value: summary.origin_counts.client_orders, color: '#1565c0' },
+    { label: 'Из аптек', value: summary.origin_counts.pharmacy_orders, color: '#6a1b9a' },
+    { label: 'Аптека 1', value: summary.origin_counts.pharmacy_1_orders, color: '#00838f' },
+    { label: 'Аптека 2', value: summary.origin_counts.pharmacy_2_orders, color: '#ad4d00' },
+  ];
+  const channelCards = [
+    { label: 'Instagram', value: summary.origin_counts.instagram_orders },
+    { label: 'WhatsApp', value: summary.origin_counts.whatsapp_orders },
+    { label: 'Телефонные звонки', value: summary.origin_counts.phone_orders },
+    { label: 'Источник не указан', value: summary.origin_counts.unspecified_source_orders },
+  ];
 
   return (
     <div>
@@ -78,6 +104,60 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
           </Link>
         ))}
       </div>
+      <section style={{ background: 'white', padding: 20, borderRadius: 12, marginTop: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ color: '#666', marginBottom: 5 }}>Происхождение заказов</div>
+            <h2 style={{ fontSize: 22, margin: 0 }}>За последние {days} дней</h2>
+          </div>
+          <div className="admin-pagination" style={{ padding: 0 }}>
+            {[7, 30, 90].map((period) => (
+              <Link
+                key={period}
+                href={`/admin?days=${period}`}
+                style={period === days ? { background: '#b5121b', color: 'white' } : undefined}
+              >{period} дней</Link>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginTop: 20 }}>
+          {originCards.map((card) => (
+            <div key={card.label} style={{ padding: 16, borderRadius: 10, background: '#f7f8f8', borderTop: `3px solid ${card.color}` }}>
+              <div style={{ color: '#616b70', marginBottom: 6 }}>{card.label}</div>
+              <strong style={{ fontSize: 26, color: card.color }}>{card.value.toLocaleString('ru-RU')}</strong>
+            </div>
+          ))}
+        </div>
+        <h3 style={{ fontSize: 17, margin: '22px 0 10px' }}>Как поступили заказы из аптек</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+          {channelCards.map((card) => (
+            <div key={card.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: 13, borderRadius: 9, background: '#faf2f3' }}>
+              <span>{card.label}</span><strong>{card.value.toLocaleString('ru-RU')}</strong>
+            </div>
+          ))}
+        </div>
+        <h3 style={{ fontSize: 19, margin: '26px 0 12px' }}>Последние заказы</h3>
+        {summary.recent_orders.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="admin-table">
+              <thead><tr><th>Заказ</th><th>Дата</th><th>Откуда</th><th>Канал</th><th>Клиент</th><th>Сумма</th><th>Статус</th></tr></thead>
+              <tbody>
+                {summary.recent_orders.map((order) => (
+                  <tr key={order.order_id}>
+                    <td><Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`}>#{order.order_reference}</Link></td>
+                    <td>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE })}</td>
+                    <td>{order.created_by_staff_account_id ? `Аптека ${order.created_by_staff_account_id}` : 'Клиент сайта'}</td>
+                    <td>{order.order_source ? SOURCE_LABELS[order.order_source] : order.created_by_staff_account_id ? 'Не указан' : 'Сайт'}</td>
+                    <td>{order.customer_name || 'Не указано'}</td>
+                    <td>{Number(order.order_total).toFixed(2)} {summary.currency}</td>
+                    <td>{STATUS_LABELS[order.status] || order.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p style={{ color: '#777' }}>За выбранный период заказов пока нет.</p>}
+      </section>
       <div style={{ background: 'white', padding: 20, borderRadius: 12, marginTop: 24 }}>
         Последняя v1-синхронизация: <strong>{lastSync?.status || 'нет данных'}</strong>
         {lastSync && ` · ${new Date(lastSync.created_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE })}`}
@@ -87,9 +167,6 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
           <div>
             <div style={{ color: '#666', marginBottom: 6 }}>Финансы доставленных заказов</div>
             <strong style={{ fontSize: 28 }}>Ваш заработок: {Number(summary.profit_total).toFixed(2)} {summary.currency}</strong>
-          </div>
-          <div className="admin-pagination" style={{ padding: 0 }}>
-            {[7, 30, 90].map((period) => <Link key={period} href={`/admin?days=${period}`}>{period} дней</Link>)}
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginTop: 20 }}>
