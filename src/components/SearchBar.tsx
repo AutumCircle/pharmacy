@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useState, useEffect, useRef, useTransition } from 'react';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import type { MedicineSearchResponse, PublicMedicine } from '@/lib/api-v1/types';
 
 export default function SearchBar() {
@@ -15,6 +15,9 @@ export default function SearchBar() {
   const requestRef = useRef<AbortController | null>(null);
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const activeQuery = pathname === '/' ? (searchParams.get('q') || '').trim() : '';
+  const [navigationPending, startNavigation] = useTransition();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -26,16 +29,16 @@ export default function SearchBar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Clear search when navigating to a new page
+  // Keep the submitted term visible on the results page and clear it elsewhere.
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setQuery('');
+      setQuery(activeQuery);
       setSuggestions([]);
       setShowDropdown(false);
-      setSearchSubmitted(false);
+      setSearchSubmitted(activeQuery.length >= 2);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [pathname]);
+  }, [activeQuery, pathname]);
 
   useEffect(() => {
     const fetchSuggestions = async () => {
@@ -78,13 +81,17 @@ export default function SearchBar() {
   }, [query, searchSubmitted]);
 
   const runSearch = () => {
-    if (query.trim()) {
+    const normalizedQuery = query.trim();
+    if (normalizedQuery.length >= 2) {
       inputRef.current?.blur();
       requestRef.current?.abort();
       setSearchSubmitted(true);
       setSuggestions([]);
       setShowDropdown(false);
-      router.push(`/?q=${encodeURIComponent(query)}`);
+      startNavigation(() => {
+        if (pathname === '/' && activeQuery === normalizedQuery) router.refresh();
+        else router.push(`/?q=${encodeURIComponent(normalizedQuery)}`);
+      });
     }
   };
 
@@ -116,14 +123,20 @@ export default function SearchBar() {
           className="search-input" 
           placeholder="Найти по названию среди более 10 000 лекарств"
         />
-        <button type="submit" className="search-submit" aria-label="Найти">
-          {loading ? (
+        <button type="submit" className="search-submit" aria-label="Найти" aria-busy={navigationPending} disabled={navigationPending}>
+          {loading || navigationPending ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="spinner"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a10 10 0 0 1 10 10"></path></svg>
           ) : (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           )}
         </button>
       </form>
+
+      {navigationPending && (
+        <div className="search-navigation-status" role="status" aria-live="polite">
+          <span className="search-navigation-dot" aria-hidden /> Ищем «{query.trim()}»…
+        </div>
+      )}
 
       {showDropdown && query.trim().length >= 2 && (
         <div style={{

@@ -26,7 +26,7 @@ async function SearchResults({ q, cursor, page }: { q: string; cursor?: string; 
   }
   return (
     <section className="products-section" style={{ paddingTop: '30px' }}>
-      <h1 className="section-title">Результаты поиска</h1>
+      <h1 className="section-title">Результаты поиска: «{q}»</h1>
       <p style={{ color: '#666', marginBottom: '20px' }}>Найдено на этой странице: {response.data.length}</p>
       {response.data.length > 0 ? (
         <div className="medicine-grid">
@@ -79,7 +79,7 @@ export default async function Home({
   if (q.length >= 2) {
     return (
       <div className="container">
-        <Suspense fallback={<SearchLoading />}>
+        <Suspense key={`${q}:${cursor || ''}:${page}`} fallback={<SearchLoading />}>
           <SearchResults q={q} cursor={cursor} page={page} />
         </Suspense>
       </div>

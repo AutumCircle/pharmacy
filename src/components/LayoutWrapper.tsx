@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import CartIcon from './CartIcon';
@@ -31,7 +32,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
               <span className="logo-text">ВАТАН<br/><span style={{fontSize: '10px', display: 'block', color: '#B71C1C'}}>АПТЕКА</span></span>
             </Link>
             
-            <SearchBar />
+            <Suspense fallback={<div className="search-wrapper" aria-hidden />}>
+              <SearchBar />
+            </Suspense>
 
             <div className="header-actions">
               <Link href="/catalog" className="action-item">
