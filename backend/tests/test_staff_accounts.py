@@ -88,6 +88,10 @@ class StaffTests(unittest.TestCase):
             {'id': 1},
             {'id': 12, 'public_id': 'ord_test', 'status': 'pending', 'created_at': '2026-09-28T10:00:00Z'},
         ]
+        order_cursor.fetchall.return_value = [{
+            'id': 44, 'name': 'Test medicine', 'price': '10.00',
+            'selling_unit_price': 11, 'in_stock': True,
+        }]
 
         @contextmanager
         def order_transaction():
@@ -97,12 +101,14 @@ class StaffTests(unittest.TestCase):
             response, status, notification = create_staff_order({
                 'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
                 'landmark': 'напротив школы', 'source': 'phone',
+                'items': [{'medicine_id': 44, 'quantity': 2}],
             }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', second, 'req_test')
         self.assertEqual(status, 201)
         self.assertEqual(response['created_by_staff_account_id'], 2)
         self.assertEqual(notification['created_by_staff_username'], 'vatan_2')
         sql_calls = ' '.join(call.args[0] for call in order_cursor.execute.call_args_list)
         self.assertIn('created_by_staff_account_id', sql_calls)
+        self.assertIn('jsonb_to_recordset', sql_calls)
         self.assertIn('staff.order.created', str(order_cursor.execute.call_args_list))
 
     def test_employee_without_catalog_cannot_read_catalog(self):

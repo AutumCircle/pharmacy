@@ -31,7 +31,7 @@ class ContractError(ValueError):
 
 ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items"}
 ORDER_ITEM_FIELDS = {"medicine_id", "quantity"}
-STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source"}
+STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items"}
 STAFF_ORDER_SOURCES = frozenset({"instagram", "whatsapp", "phone"})
 STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"confirmed", "cancelled"}),
@@ -267,12 +267,38 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
             "VALIDATION_ERROR", "Request validation failed",
             fields={"source": "must be instagram, whatsapp or phone"},
         )
+    items_value = payload.get("items", [])
+    if not isinstance(items_value, list) or len(items_value) > 50:
+        raise ContractError(
+            "VALIDATION_ERROR", "Request validation failed",
+            fields={"items": "must contain at most 50 items"},
+        )
+    items: list[dict[str, int]] = []
+    seen: set[int] = set()
+    for index, item in enumerate(items_value):
+        if not isinstance(item, dict) or set(item) != ORDER_ITEM_FIELDS:
+            raise ContractError(
+                "VALIDATION_ERROR", "Request validation failed",
+                fields={f"items[{index}]": "medicine_id and quantity are required"},
+            )
+        medicine_id, quantity = item.get("medicine_id"), item.get("quantity")
+        if not _is_integer(medicine_id) or medicine_id <= 0:
+            raise ContractError("VALIDATION_ERROR", "Request validation failed",
+                                fields={f"items[{index}].medicine_id": "must be a positive integer"})
+        if not _is_integer(quantity) or not 1 <= quantity <= 99:
+            raise ContractError("VALIDATION_ERROR", "Request validation failed",
+                                fields={f"items[{index}].quantity": "must be between 1 and 99"})
+        if medicine_id in seen:
+            raise ContractError("DUPLICATE_ORDER_ITEM", "Order contains a duplicate medicine", http_status=400)
+        seen.add(medicine_id)
+        items.append({"medicine_id": medicine_id, "quantity": quantity})
     return {
         "customer_name": customer_name,
         "phone": f"+992{phone_value}",
         "address": address,
         "landmark": landmark,
         "source": source,
+        "items": items,
     }
 
 

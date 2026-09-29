@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { StaffOrderSource } from '@/lib/api-v1/staff-types';
+import type { StaffOrderMedicine, StaffOrderSource } from '@/lib/api-v1/staff-types';
 
 const sources: Array<{ value: StaffOrderSource; label: string }> = [
   { value: 'instagram', label: 'Instagram' },
@@ -15,6 +15,32 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
   const [created, setCreated] = useState('');
   const [notificationSent, setNotificationSent] = useState(true);
   const [formKey, setFormKey] = useState(0);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<StaffOrderMedicine[]>([]);
+  const [items, setItems] = useState<Array<StaffOrderMedicine & { quantity: number }>>([]);
+
+  async function searchMedicines() {
+    if (query.trim().length < 2) { setError('Введите минимум 2 символа для поиска лекарства'); return; }
+    setSearching(true); setError('');
+    try {
+      const response = await fetch(`/api/staff/order-medicines?q=${encodeURIComponent(query.trim())}`, { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error?.message || 'Не удалось выполнить поиск');
+      setResults(result.data || []);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Не удалось выполнить поиск');
+    } finally { setSearching(false); }
+  }
+
+  function addMedicine(medicine: StaffOrderMedicine) {
+    setItems((current) => current.some((item) => item.medicine_id === medicine.medicine_id)
+      ? current : [...current, { ...medicine, quantity: 1 }]);
+  }
+
+  const pharmacyTotal = items.reduce(
+    (total, item) => total + Number(item.base_unit_price) * item.quantity, 0,
+  );
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -26,6 +52,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       address: String(data.get('address') || '').trim(),
       landmark: String(data.get('landmark') || '').trim(),
       source: String(data.get('source') || ''),
+      items: items.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })),
     };
     try {
       const response = await fetch('/api/staff/orders', {
@@ -37,6 +64,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       setCreated(result.data.order_reference);
       setNotificationSent(result.data.notification_sent === true);
       setFormKey((value) => value + 1);
+      setItems([]); setResults([]); setQuery('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Не удалось сохранить заказ');
     } finally { setSubmitting(false); }
@@ -52,6 +80,34 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       </div>}
       {error && <div className="staff-login-error">{error}</div>}
       <form key={formKey} className="staff-order-form" onSubmit={submit}>
+        <fieldset className="staff-medicine-picker">
+          <legend>Лекарства <span>необязательно</span></legend>
+          <p>Для сотрудников показана базовая цена аптеки без наценки.</p>
+          <div className="staff-search">
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название лекарства" />
+            <button type="button" disabled={searching} onClick={searchMedicines}>{searching ? 'Поиск…' : 'Найти'}</button>
+          </div>
+          {results.length > 0 && <div className="staff-picker-results">
+            {results.map((medicine) => <div key={medicine.medicine_id}>
+              <span><strong>{medicine.medicine_name}</strong><small>{Number(medicine.base_unit_price).toFixed(2)} TJS</small></span>
+              <button type="button" onClick={() => addMedicine(medicine)} disabled={items.some((item) => item.medicine_id === medicine.medicine_id)}>
+                {items.some((item) => item.medicine_id === medicine.medicine_id) ? 'Добавлено' : 'Добавить'}
+              </button>
+            </div>)}
+          </div>}
+          {items.length > 0 && <div className="staff-selected-items">
+            <h3>Добавлено в заказ</h3>
+            {items.map((item) => <div key={item.medicine_id}>
+              <span><strong>{item.medicine_name}</strong><small>{Number(item.base_unit_price).toFixed(2)} TJS × {item.quantity}</small></span>
+              <input aria-label={`Количество ${item.medicine_name}`} type="number" min={1} max={99} value={item.quantity} onChange={(event) => {
+                const quantity = Math.min(99, Math.max(1, Number(event.target.value) || 1));
+                setItems((current) => current.map((entry) => entry.medicine_id === item.medicine_id ? { ...entry, quantity } : entry));
+              }} />
+              <button type="button" onClick={() => setItems((current) => current.filter((entry) => entry.medicine_id !== item.medicine_id))}>Убрать</button>
+            </div>)}
+            <div className="staff-pharmacy-total"><span>Сумма по базовым ценам</span><strong>{pharmacyTotal.toFixed(2)} TJS</strong></div>
+          </div>}
+        </fieldset>
         <label>Имя клиента <span>необязательно</span><input name="customer_name" maxLength={120} autoComplete="name" /></label>
         <label>Телефон <span>ровно 9 цифр</span><div className="staff-phone"><b>+992</b><input name="phone" required inputMode="numeric" pattern="[0-9]{9}" minLength={9} maxLength={9} placeholder="917123456" autoComplete="tel-national" /></div></label>
         <label>Адрес<input name="address" required minLength={3} maxLength={500} autoComplete="street-address" /></label>

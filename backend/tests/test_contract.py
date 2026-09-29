@@ -106,9 +106,11 @@ class StaffOrderValidationTests(unittest.TestCase):
         result = validate_staff_order_request({
             "customer_name": "", "phone": "917123456", "address": "Айни 29",
             "landmark": "рядом с аптекой", "source": "whatsapp",
+            "items": [{"medicine_id": 12, "quantity": 2}],
         })
         self.assertEqual(result["phone"], "+992917123456")
         self.assertEqual(result["customer_name"], "")
+        self.assertEqual(result["items"], [{"medicine_id": 12, "quantity": 2}])
 
     def test_rejects_non_exact_phone_and_unknown_source(self):
         for phone, source in (("+992917123456", "phone"), ("91712345", "phone"), ("917123456", "telegram")):
@@ -116,6 +118,13 @@ class StaffOrderValidationTests(unittest.TestCase):
                 validate_staff_order_request({
                     "phone": phone, "address": "Айни 29", "landmark": "школа", "source": source,
                 })
+
+    def test_rejects_duplicate_staff_order_items(self):
+        with self.assertRaises(ContractError):
+            validate_staff_order_request({
+                "phone": "917123456", "address": "Айни 29", "landmark": "школа", "source": "phone",
+                "items": [{"medicine_id": 3, "quantity": 1}, {"medicine_id": 3, "quantity": 2}],
+            })
 
 
 class StatusTransitionTests(unittest.TestCase):

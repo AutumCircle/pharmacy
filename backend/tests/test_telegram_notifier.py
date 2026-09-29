@@ -58,11 +58,14 @@ class TelegramMessageTests(unittest.TestCase):
             "created_by_staff_account_id": 2, "created_by_staff_username": "vatan_2",
             "order_source": "instagram", "customer_name": "", "phone": "+992917123456",
             "address": "Айни 29", "landmark": "напротив школы",
+            "items": [{"medicine_name": "NOW D3", "quantity": 2, "base_line_total": 100, "line_total": 106}],
+            "base_total": 100, "order_total": 106, "profit": 6,
         })
         self.assertIn("аптеки 2", text)
         self.assertIn("vatan_2", text)
         self.assertIn("Instagram", text)
         self.assertIn("напротив школы", text)
+        self.assertIn("100.00 с. / 106.00 с.", text)
 
 
 class TelegramDispatchTests(unittest.TestCase):
@@ -100,6 +103,23 @@ class TelegramDispatchTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(send_message.call_count, 1)
         self.assertEqual(json.loads(response["body"])["data"]["messages_sent"], 1)
+
+    @patch("backend.v1.telegram_notifier.lambda_function._send_message")
+    def test_staff_order_sends_separate_courier_message_when_configured(self, send_message):
+        event = {
+            "requestContext": {"requestId": "test"},
+            "body": json.dumps({
+                "notification_kind": "staff_manual_order", "order_reference": "1234-001",
+                "address": "Айни 29", "landmark": "школа", "items": [],
+            }),
+        }
+        with patch.dict("os.environ", {
+            "TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_OWNER_CHAT_ID": "owner",
+            "TELEGRAM_DELIVERY_CHAT_ID": "courier",
+        }):
+            response = lambda_handler(event, None)
+        self.assertEqual(send_message.call_count, 2)
+        self.assertEqual(json.loads(response["body"])["data"]["messages_sent"], 2)
 
 
 if __name__ == "__main__":

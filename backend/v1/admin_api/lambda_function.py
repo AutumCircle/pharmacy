@@ -579,6 +579,28 @@ def list_medicines(query: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def search_staff_order_medicines(query: dict[str, Any]) -> dict[str, Any]:
+    search = str(query.get("q") or "").strip()
+    if not 2 <= len(search) <= 120:
+        raise ContractError("VALIDATION_ERROR", "q must contain between 2 and 120 characters")
+    pattern = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with transaction() as cur:
+        cur.execute(
+            """
+            SELECT id AS medicine_id, name AS medicine_name, price AS base_unit_price,
+                   source_sku, country, vendor, in_stock
+            FROM medicines
+            WHERE in_stock IS TRUE
+              AND (name ILIKE %s ESCAPE '\\' OR COALESCE(source_sku, '') ILIKE %s ESCAPE '\\')
+            ORDER BY lower(name) ASC, id ASC
+            LIMIT 20
+            """,
+            (pattern, pattern),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    return {"data": rows, "page": {"number": 1, "size": 20, "total_items": len(rows), "total_pages": 1}}
+
+
 def export_out_of_stock_medicines() -> dict[str, Any]:
     with transaction() as cur:
         cur.execute("SELECT COUNT(*) AS count FROM medicines WHERE in_stock IS NOT TRUE")
@@ -715,6 +737,41 @@ def create_staff_order(
                 raise ContractError("IDEMPOTENCY_IN_PROGRESS", "Order request is still being processed", http_status=409)
             return existing["response_body"], int(existing["response_status"]), None
 
+        order_items: list[dict[str, Any]] = []
+        base_total = Decimal("0")
+        selling_total = Decimal("0")
+        if request["items"]:
+            medicine_ids = [item["medicine_id"] for item in request["items"]]
+            cur.execute(
+                """
+                SELECT id, name, price, in_stock, vatan_selling_unit_price(price) AS selling_unit_price
+                FROM medicines WHERE id = ANY(%s) FOR UPDATE
+                """,
+                (medicine_ids,),
+            )
+            medicines = {int(row["id"]): dict(row) for row in cur.fetchall()}
+            missing = [medicine_id for medicine_id in medicine_ids if medicine_id not in medicines]
+            if missing:
+                raise ContractError("MEDICINE_NOT_FOUND", "One or more medicines were not found", http_status=404)
+            unavailable = [medicine_id for medicine_id in medicine_ids if not medicines[medicine_id]["in_stock"]]
+            if unavailable:
+                raise ContractError("ORDER_ITEMS_UNAVAILABLE", "One or more medicines are unavailable", http_status=409)
+            for requested_item in request["items"]:
+                medicine = medicines[requested_item["medicine_id"]]
+                quantity = requested_item["quantity"]
+                base_price = Decimal(str(medicine["price"]))
+                selling_price = Decimal(str(medicine["selling_unit_price"]))
+                base_line_total = base_price * quantity
+                selling_line_total = selling_price * quantity
+                base_total += base_line_total
+                selling_total += selling_line_total
+                order_items.append({
+                    "medicine_id": int(medicine["id"]), "medicine_name": medicine["name"],
+                    "quantity": quantity, "base_unit_price": str(base_price),
+                    "selling_unit_price": str(selling_price), "base_line_total": str(base_line_total),
+                    "line_total": str(selling_line_total),
+                })
+
         public_id = f"ord_{uuid4().hex}"
         cur.execute(
             """
@@ -724,18 +781,35 @@ def create_staff_order(
                 payment_method, payment_status, currency,
                 created_by_staff_account_id, order_source, landmark
             )
-            VALUES (NULL, %s, %s, %s, %s, NULL, 0, 0, 0, %s, 'pending',
+            VALUES (NULL, %s, %s, %s, %s, NULL, %s, %s, %s, %s, 'pending',
                     'cash_on_delivery', 'unpaid', 'TJS', %s, %s, %s)
             RETURNING id, public_id, status, created_at
             """,
             (
-                request["customer_name"], request["phone"], request["phone"], request["address"], public_id,
+                request["customer_name"], request["phone"], request["phone"], request["address"],
+                selling_total, selling_total, selling_total, public_id,
                 account["account_id"], request["source"], request["landmark"],
             ),
         )
         order = dict(cur.fetchone())
         order_reference = f"{request['phone'][-4:]}-{order['id']:03d}"
         cur.execute("UPDATE orders SET order_reference = %s WHERE id = %s", (order_reference, order["id"]))
+        if order_items:
+            cur.execute(
+                """
+                INSERT INTO order_items (
+                    order_id, medicine_id, medicine_name, price, quantity,
+                    base_unit_price, selling_unit_price, line_total
+                )
+                SELECT %s, item.medicine_id, item.medicine_name, item.selling_unit_price,
+                       item.quantity, item.base_unit_price, item.selling_unit_price, item.line_total
+                FROM jsonb_to_recordset(%s::jsonb) AS item(
+                    medicine_id integer, medicine_name text, quantity integer,
+                    base_unit_price numeric, selling_unit_price numeric, line_total numeric
+                )
+                """,
+                (order["id"], json.dumps(order_items, ensure_ascii=False)),
+            )
         cur.execute(
             """
             INSERT INTO order_status_history
@@ -749,6 +823,7 @@ def create_staff_order(
             "status": order["status"], "created_at": order["created_at"],
             "created_by_staff_account_id": account["account_id"],
             "created_by_staff_username": account["username"], "order_source": request["source"],
+            "items": order_items, "pharmacy_total": str(base_total), "order_total": str(selling_total),
         }
         cur.execute(
             """
@@ -769,7 +844,9 @@ def create_staff_order(
             "order_reference": order_reference, "customer_name": request["customer_name"],
             "phone": request["phone"], "address": request["address"], "landmark": request["landmark"],
             "order_source": request["source"], "created_by_staff_account_id": account["account_id"],
-            "created_by_staff_username": account["username"], "items": [], "order_total": "0",
+            "created_by_staff_username": account["username"], "items": order_items,
+            "base_total": str(base_total), "order_total": str(selling_total),
+            "profit": str(selling_total - base_total),
         }
         return response, 201, notification
 
@@ -2454,6 +2531,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 if staff_path == "/v1/staff/medicines":
                     return success_document(list_medicines(event.get("queryStringParameters") or {}), request=current_request_id)
                 return success(catalog_stats(), request=current_request_id)
+            if staff_method == "GET" and staff_path == "/v1/staff/order-medicines":
+                staff_accounts.session_account(event)
+                return success_document(
+                    search_staff_order_medicines(event.get("queryStringParameters") or {}),
+                    request=current_request_id,
+                )
             if staff_method == "POST" and staff_path == "/v1/staff/orders":
                 account = staff_accounts.session_account(event)
                 headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}

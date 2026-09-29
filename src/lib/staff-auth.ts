@@ -1,14 +1,14 @@
 import 'server-only';
 
 import { cookies } from 'next/headers';
-import { ADMIN_SESSION_COOKIE, verifyStaffSession } from './admin-session';
+import { STAFF_SESSION_COOKIE, verifyStaffSession } from './admin-session';
 import { getStaffSession } from './api-v1/staff-server';
 import { ApiV1Error } from './api-v1/server';
 import { redirect } from 'next/navigation';
 
 export async function requireStaffSession(catalog = false) {
   const secret = process.env.ADMIN_SESSION_SECRET;
-  const token = (await cookies()).get(ADMIN_SESSION_COOKIE)?.value;
+  const token = (await cookies()).get(STAFF_SESSION_COOKIE)?.value;
   if (!secret || !(await verifyStaffSession(token, secret))) {
     redirect('/staff/login');
   }

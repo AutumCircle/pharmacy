@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
-  ADMIN_SESSION_COOKIE,
   ADMIN_SESSION_SECONDS,
+  STAFF_SESSION_COOKIE,
 } from '@/lib/admin-session';
 import { loginStaff } from '@/lib/api-v1/staff-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
       const requestIsHttps = forwardedProtocol
         ? forwardedProtocol === 'https'
         : new URL(request.url).protocol === 'https:';
-      response.cookies.set(ADMIN_SESSION_COOKIE, token, {
+      response.cookies.set(STAFF_SESSION_COOKIE, token, {
         httpOnly: true,
         secure: requestIsHttps,
         sameSite: 'lax',

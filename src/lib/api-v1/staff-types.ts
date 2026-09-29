@@ -14,6 +14,17 @@ export type CreateStaffOrderRequest = {
   address: string;
   landmark: string;
   source: StaffOrderSource;
+  items: Array<{ medicine_id: number; quantity: number }>;
+};
+
+export type StaffOrderMedicine = {
+  medicine_id: number;
+  medicine_name: string;
+  base_unit_price: number | string;
+  source_sku: string | null;
+  country: string | null;
+  vendor: string | null;
+  in_stock: boolean;
 };
 
 export type StaffOrderCreated = {

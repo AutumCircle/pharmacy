@@ -62,6 +62,21 @@
 .staff-phone input { border: 0; box-shadow: none!important; }
 .staff-order-form fieldset { margin: 0; padding: 0; border: 0; }
 .staff-order-form legend { margin-bottom: 10px; font-size: 14px; font-weight: 700; }
+.staff-medicine-picker { display: grid; gap: 10px; }
+.staff-medicine-picker legend span { color: #737d76; font-size: 12px; font-weight: 500; }
+.staff-medicine-picker>p { margin: -4px 0 4px; color: #687269; font-size: 13px; }
+.staff-medicine-picker .staff-search { margin: 0; }
+.staff-picker-results,.staff-selected-items { display: grid; gap: 8px; padding: 10px; border: 1px solid #e0e5e1; border-radius: 11px; background: #f8faf8; }
+.staff-picker-results>div,.staff-selected-items>div:not(.staff-pharmacy-total) { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 9px; border-radius: 8px; background: #fff; }
+.staff-picker-results span,.staff-selected-items span { display: grid; gap: 3px; min-width: 0; }
+.staff-picker-results strong,.staff-selected-items strong { overflow-wrap: anywhere; }
+.staff-picker-results small,.staff-selected-items small { color: #687269; }
+.staff-picker-results button,.staff-selected-items button { padding: 8px 11px; border: 1px solid #d7ddd8; border-radius: 8px; background: #fff; cursor: pointer; }
+.staff-picker-results button:disabled { color: #687269; cursor: default; }
+.staff-selected-items h3 { margin: 2px 3px 4px; font-size: 15px; }
+.staff-selected-items>div:not(.staff-pharmacy-total) { grid-template-columns: minmax(0,1fr) 70px auto; }
+.staff-selected-items input { padding: 8px; text-align: center; }
+.staff-pharmacy-total { display: flex; justify-content: space-between; gap: 16px; padding: 12px 5px 4px; }
 .staff-source-options { display: grid; grid-template-columns: repeat(3,1fr); gap: 9px; }
 .staff-source-options label { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 10px; border: 1px solid #d7ddd8; border-radius: 10px; cursor: pointer; }
 .staff-source-options input { width: auto; accent-color: #b71920; }
@@ -69,4 +84,4 @@
 .staff-submit:disabled { opacity: .65; cursor: wait; }
 .staff-order-success { margin-bottom: 16px; padding: 14px 16px; border: 1px solid #b9ddc3; border-radius: 11px; background: #effaf2; color: #17632e; }
 .staff-order-warning { margin-bottom: 16px; padding: 14px 16px; border: 1px solid #f1cf82; border-radius: 11px; background: #fff8e6; color: #7b4d00; }
-@media(max-width:700px){.staff-header{align-items:flex-start;flex-wrap:wrap}.staff-nav{order:3;width:100%}.staff-nav a{flex:1;text-align:center}.staff-main{padding-top:22px}.staff-title-row{display:grid}.staff-sync-status{min-width:0}.staff-search{grid-template-columns:1fr}.staff-search button{width:100%}.staff-login-card{padding:26px 20px}.staff-table{min-width:0}.staff-table thead{display:none}.staff-table,.staff-table tbody,.staff-table tr,.staff-table td{display:block}.staff-table tr{padding:13px 15px;border-bottom:1px solid #edf0ee}.staff-table td{padding:5px 0;border:0}.staff-table td:first-child{margin-bottom:5px}.staff-table td:nth-child(2)::before{content:'Базовая цена: ';font-weight:400;color:#687269}.staff-table td:nth-child(3){margin-top:5px}.staff-source-options{grid-template-columns:1fr}.staff-source-options label{justify-content:flex-start}.staff-order-form{padding:20px 16px}}
+@media(max-width:700px){.staff-header{align-items:flex-start;flex-wrap:wrap}.staff-nav{order:3;width:100%}.staff-nav a{flex:1;text-align:center}.staff-main{padding-top:22px}.staff-title-row{display:grid}.staff-sync-status{min-width:0}.staff-search{grid-template-columns:1fr}.staff-search button{width:100%}.staff-login-card{padding:26px 20px}.staff-table{min-width:0}.staff-table thead{display:none}.staff-table,.staff-table tbody,.staff-table tr,.staff-table td{display:block}.staff-table tr{padding:13px 15px;border-bottom:1px solid #edf0ee}.staff-table td{padding:5px 0;border:0}.staff-table td:first-child{margin-bottom:5px}.staff-table td:nth-child(2)::before{content:'Базовая цена: ';font-weight:400;color:#687269}.staff-table td:nth-child(3){margin-top:5px}.staff-source-options{grid-template-columns:1fr}.staff-source-options label{justify-content:flex-start}.staff-order-form{padding:20px 16px}.staff-selected-items>div:not(.staff-pharmacy-total){grid-template-columns:minmax(0,1fr) 62px}.staff-selected-items>div:not(.staff-pharmacy-total) button{grid-column:1/-1}.staff-picker-results>div{align-items:start}}

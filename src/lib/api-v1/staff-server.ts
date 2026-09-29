@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { CreateStaffOrderRequest, StaffAccount, StaffOrderCreated } from './staff-types';
+import type { CreateStaffOrderRequest, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
@@ -69,4 +69,9 @@ export function createStaffOrder(token: string, body: CreateStaffOrderRequest, i
   return request<ApiSuccessResponse<StaffOrderCreated & { _notification?: Record<string, unknown> }>>('orders', {
     token, method: 'POST', body, idempotencyKey,
   });
+}
+
+export function searchStaffOrderMedicines(token: string, query: string) {
+  const params = new URLSearchParams({ q: query });
+  return request<AdminNumberedListResponse<StaffOrderMedicine>>(`order-medicines?${params}`, { token });
 }

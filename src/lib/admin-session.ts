@@ -1,6 +1,7 @@
 const encoder = new TextEncoder();
 
 export const ADMIN_SESSION_COOKIE = 'vatan_admin_session';
+export const STAFF_SESSION_COOKIE = 'vatan_staff_session';
 export const ADMIN_SESSION_SECONDS = 8 * 60 * 60;
 
 export type SessionRole = 'admin' | 'staff';
