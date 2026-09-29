@@ -13,7 +13,7 @@ import OrdersIcon from './OrdersIcon';
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   
-  if (pathname.startsWith('/admin')) {
+  if (pathname.startsWith('/admin') || pathname.startsWith('/staff')) {
     return <main className="main-content">{children}</main>;
   }
 
