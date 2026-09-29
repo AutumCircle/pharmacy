@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     const idempotencyKey = request.headers.get('idempotency-key');
     if (!idempotencyKey) return NextResponse.json({ error: 'Повторите отправку' }, { status: 400 });
     const body: unknown = await request.json();
-    if (!isRequest(body)) return NextResponse.json({ error: 'Проверьте обязательные поля' }, { status: 400 });
+    if (!isRequest(body)) return NextResponse.json({ error: 'Проверьте заполнение полей' }, { status: 400 });
     const response = await createStaffOrder(token, body, idempotencyKey);
     const notification = response.data._notification;
     delete response.data._notification;

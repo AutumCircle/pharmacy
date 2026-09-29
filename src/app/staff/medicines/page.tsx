@@ -41,7 +41,7 @@ export default async function StaffMedicinesPage({ searchParams }: {
   return (
     <div>
       <section className="staff-title-row">
-        <div><h1>Каталог лекарств</h1><p>Базовые цены аптеки без наценки</p></div>
+        <div><h1>Каталог лекарств</h1></div>
         <div className="staff-sync-status">
           <span>Каталог обновлён</span>
           <strong>{timeAgo(updatedAt)}</strong>
@@ -64,7 +64,7 @@ export default async function StaffMedicinesPage({ searchParams }: {
       <div className="staff-result-count">Найдено: {medicinesResult.page.total_items.toLocaleString('ru-RU')}</div>
       <div className="staff-table-wrap">
         <table className="staff-table">
-          <thead><tr><th>Лекарство</th><th>Базовая цена</th><th>Наличие</th></tr></thead>
+          <thead><tr><th>Лекарство</th><th>Цена</th><th>Наличие</th></tr></thead>
           <tbody>
             {medicinesResult.data.map((medicine) => (
               <tr key={medicine.medicine_id}>

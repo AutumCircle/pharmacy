@@ -81,8 +81,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       {error && <div className="staff-login-error">{error}</div>}
       <form key={formKey} className="staff-order-form" onSubmit={submit}>
         <fieldset className="staff-medicine-picker">
-          <legend>Лекарства <span>необязательно</span></legend>
-          <p>Для сотрудников показана базовая цена аптеки без наценки.</p>
+          <legend>Лекарства</legend>
           <div className="staff-search">
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название лекарства" />
             <button type="button" disabled={searching} onClick={searchMedicines}>{searching ? 'Поиск…' : 'Найти'}</button>
@@ -105,10 +104,10 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
               }} />
               <button type="button" onClick={() => setItems((current) => current.filter((entry) => entry.medicine_id !== item.medicine_id))}>Убрать</button>
             </div>)}
-            <div className="staff-pharmacy-total"><span>Сумма по базовым ценам</span><strong>{pharmacyTotal.toFixed(2)} TJS</strong></div>
+            <div className="staff-pharmacy-total"><span>Сумма</span><strong>{pharmacyTotal.toFixed(2)} TJS</strong></div>
           </div>}
         </fieldset>
-        <label>Имя клиента <span>необязательно</span><input name="customer_name" maxLength={120} autoComplete="name" /></label>
+        <label>Имя клиента<input name="customer_name" maxLength={120} autoComplete="name" /></label>
         <label>Телефон <span>ровно 9 цифр</span><div className="staff-phone"><b>+992</b><input name="phone" required inputMode="numeric" pattern="[0-9]{9}" minLength={9} maxLength={9} placeholder="917123456" autoComplete="tel-national" /></div></label>
         <label>Адрес<input name="address" required minLength={3} maxLength={500} autoComplete="street-address" /></label>
         <label>Ориентир<textarea name="landmark" required minLength={2} maxLength={300} rows={3} placeholder="Например: рядом со школой №…" /></label>
