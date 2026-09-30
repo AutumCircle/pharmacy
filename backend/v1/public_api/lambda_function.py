@@ -9,7 +9,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import re
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -25,11 +24,13 @@ from backend.v1.shared.contract import (
 )
 from backend.v1.shared.database import transaction
 from backend.v1.shared.responses import error_response, request_id, success, success_document
+from backend.v1.shared.search_ranking import query_variants, rank_candidates, retrieval_terms
 
 
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
 MINIMUM_ORDER_SUBTOTAL = 50
+SEARCH_CANDIDATE_POOL = 400
 
 
 def _body(event: dict[str, Any]) -> dict[str, Any]:
@@ -123,9 +124,10 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
             "Request validation failed",
             fields={"q": "must contain between 2 and 120 characters"},
         )
-    q = " ".join(q.split()).casefold()
-    tokens = list(dict.fromkeys(re.findall(r"[^\W_]+", q, flags=re.UNICODE)))[:12]
-    if not tokens:
+    q = " ".join(q.split())
+    variants = query_variants(q)
+    terms = retrieval_terms(variants)
+    if not terms:
         raise ContractError(
             "VALIDATION_ERROR",
             "Request validation failed",
@@ -139,67 +141,47 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(offset, int) or offset < 0 or offset > 100_000:
             raise ContractError("VALIDATION_ERROR", "Request validation failed", fields={"cursor": "is invalid"})
 
-    params: list[Any] = [q, tokens]
-    params.extend([limit + 1, offset])
-
     with transaction() as cur:
         cur.execute(
-            f"""
+            """
             WITH search_input AS (
-                SELECT %s::text AS q, %s::text[] AS tokens
+                SELECT %s::text[] AS terms
             ),
-            ranked AS MATERIALIZED (
+            candidates AS MATERIALIZED (
                 SELECT m.id, m.name, m.price, m.country, m.vendor, m.in_stock,
                        m.updated_at, m.image_url,
-                       vatan_selling_unit_price(m.price) AS selling_unit_price,
-                       ROUND((
-                           CASE
-                               WHEN lower(m.name) = input.q THEN 10000
-                               WHEN lower(m.name) LIKE input.q || '%%' THEN 8000
-                               WHEN lower(m.name) LIKE '%%' || input.q || '%%' THEN 7000
-                               ELSE 0
-                           END
-                           + 700 * (
-                               SELECT COUNT(*)
-                               FROM unnest(input.tokens) AS token
-                               WHERE lower(m.name) LIKE '%%' || token || '%%'
-                           )
-                           + 100 * COALESCE((
-                               SELECT SUM(
-                                   CASE
-                                       WHEN lower(m.name) LIKE '%%' || token || '%%' THEN 1.0
-                                       WHEN length(token) >= 3 THEN word_similarity(token, lower(m.name))
-                                       ELSE 0.0
-                                   END
-                               )
-                               FROM unnest(input.tokens) AS token
-                           ), 0)
-                           + 200 * similarity(lower(m.name), input.q)
-                       )::numeric, 6) AS relevance
+                       translate(lower(m.name), 'ё', 'е') AS search_name
                 FROM medicines AS m
-                CROSS JOIN search_input AS input
                 WHERE m.in_stock IS TRUE
-                  AND (
-                      m.name ILIKE '%%' || input.q || '%%'
-                      OR m.name %% input.q
-                      OR EXISTS (
-                          SELECT 1
-                          FROM unnest(input.tokens) AS token
-                          WHERE m.name ILIKE '%%' || token || '%%'
-                             OR (length(token) >= 3 AND word_similarity(token, m.name) >= 0.30)
-                      )
-                  )
             )
-            SELECT id, name, price, country, vendor, in_stock, updated_at, image_url,
-                   selling_unit_price, relevance
-            FROM ranked
-            ORDER BY relevance DESC, name ASC, id ASC
+            SELECT c.id, c.name, c.price, c.country, c.vendor, c.in_stock, c.updated_at, c.image_url,
+                   vatan_selling_unit_price(c.price) AS selling_unit_price,
+                   recall.score AS recall_score
+            FROM candidates AS c
+            CROSS JOIN search_input AS input
+            CROSS JOIN LATERAL (
+                SELECT COALESCE(SUM(GREATEST(
+                           CASE WHEN c.search_name LIKE '%%' || term || '%%' THEN 1.0 ELSE 0.0 END,
+                           CASE WHEN length(term) >= 3 THEN word_similarity(term, c.search_name) ELSE 0.0 END
+                       )), 0) AS score,
+                       bool_or(
+                           c.search_name LIKE '%%' || term || '%%'
+                           OR (length(term) >= 3 AND word_similarity(term, c.search_name) >= 0.25)
+                       ) AS matched
+                FROM unnest(input.terms) AS term
+            ) AS recall
+            WHERE recall.matched
+            ORDER BY recall.score DESC, c.name ASC, c.id ASC
             LIMIT %s
-            OFFSET %s
             """,
-            tuple(params),
+            (terms, SEARCH_CANDIDATE_POOL),
         )
-        rows = [dict(row) for row in cur.fetchall()]
+        candidates = [dict(row) for row in cur.fetchall()]
+
+    # PostgreSQL only guarantees recall; the typo-aware order is decided in Python.
+    # If the ranker rejects everything, fall back to the trigram order instead of "nothing found".
+    ranked = rank_candidates(q, candidates) or candidates
+    rows = ranked[offset:offset + limit + 1]
 
     has_more = len(rows) > limit
     rows = rows[:limit]
