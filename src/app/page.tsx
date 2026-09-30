@@ -4,10 +4,10 @@ import { Suspense } from 'react';
 
 import HeroBanners from '@/components/HeroBanners';
 import ProductCarousel from '@/components/ProductCarousel';
+import Pagination from '@/components/Pagination';
 import ProductCard from '@/components/ProductCard';
 import StoreBenefits from '@/components/StoreBenefits';
 import { getPublicCategories, getPublicFeaturedProducts, getPublicHomepageBanners, getPublicProductCarousels, searchPublicMedicines } from '@/lib/api-v1/server';
-import { getPaginationItems } from '@/lib/pagination';
 import type { HomepageBanner, ProductCarousel as ProductCarouselData } from '@/lib/api-v1/types';
 
 const SEARCH_PAGE_SIZE = 24; // divisible by 2, 3, 4 and 6 grid columns, so full pages never end with a half row
@@ -39,9 +39,17 @@ async function SearchResults({ q, page }: { q: string; page: number }) {
       <h1 className="section-title">Результаты поиска: «{q}»</h1>
       <p style={{ color: '#666', marginBottom: '20px' }}>
         {totalItems !== undefined
-          ? `Найдено: ${totalItems.toLocaleString('ru-RU')}${totalPages > 1 ? ` · страница ${currentPage} из ${totalPages}` : ''}`
-          : `Найдено на этой странице: ${response.data.length}`}
+          ? `Найдено лекарств: ${totalItems.toLocaleString('ru-RU')}${totalPages > 1 ? ` · страница ${currentPage} из ${totalPages}` : ''}`
+          : null}
       </p>
+      {response.did_you_mean && (
+        <p style={{ marginBottom: '20px' }}>
+          {response.data.length > 0 ? 'Показаны результаты для ' : 'Возможно, вы искали: '}
+          <Link href={`/?q=${encodeURIComponent(response.did_you_mean)}`} style={{ color: 'var(--primary)', fontWeight: 700 }}>
+            «{response.did_you_mean}»
+          </Link>
+        </p>
+      )}
       {response.data.length > 0 ? (
         <div className="medicine-grid">
           {response.data.map((medicine) => <ProductCard key={medicine.medicine_id} item={medicine} />)}
@@ -49,21 +57,7 @@ async function SearchResults({ q, page }: { q: string; page: number }) {
       ) : (
         <div className="empty-state" style={{ padding: '60px', textAlign: 'center' }}>Ничего не найдено</div>
       )}
-      {totalPages > 1 && (
-        <nav className="pagination category-pagination" aria-label="Страницы результатов поиска">
-          <Link className={currentPage <= 1 ? 'disabled' : ''} aria-disabled={currentPage <= 1} href={pageHref(Math.max(1, currentPage - 1))}>← Назад</Link>
-          <div className="category-pagination-pages">
-            {getPaginationItems(currentPage, totalPages).map((item) => typeof item === 'number' ? (
-              item === currentPage ? (
-                <span key={item} className="pagination-page-number" aria-current="page" aria-label={`Страница ${item}`}>{item}</span>
-              ) : (
-                <Link key={item} className="pagination-number-link" href={pageHref(item)} aria-label={`Страница ${item}`}>{item}</Link>
-              )
-            ) : <span key={item} className="pagination-ellipsis" aria-hidden="true">…</span>)}
-          </div>
-          <Link className={currentPage >= totalPages ? 'disabled' : ''} aria-disabled={currentPage >= totalPages} href={pageHref(Math.min(totalPages, currentPage + 1))}>Далее →</Link>
-        </nav>
-      )}
+      <Pagination page={currentPage} totalPages={totalPages} pageHref={pageHref} label="Страницы результатов поиска" />
     </section>
   );
 }

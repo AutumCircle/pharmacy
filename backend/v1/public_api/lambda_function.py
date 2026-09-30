@@ -24,7 +24,7 @@ from backend.v1.shared.contract import (
 )
 from backend.v1.shared.database import transaction
 from backend.v1.shared.responses import error_response, request_id, success, success_document
-from backend.v1.shared.search_ranking import query_variants, rank_candidates, retrieval_terms
+from backend.v1.shared.search_ranking import did_you_mean, query_variants, rank_candidates, retrieval_terms
 
 
 MAX_PAGE_SIZE = 100
@@ -181,8 +181,10 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
         candidates = [dict(row) for row in cur.fetchall()]
 
     # PostgreSQL only guarantees recall; the typo-aware order is decided in Python.
-    # If the ranker rejects everything, fall back to the trigram order instead of "nothing found".
-    ranked = rank_candidates(q, candidates) or candidates
+    # Nothing relevant: return no products, only a "did you mean" hint from the closest name.
+    ranked = rank_candidates(q, candidates)
+    suggestion_source = ranked[0]["name"] if ranked else candidates[0]["name"] if candidates else None
+    suggestion = did_you_mean(q, suggestion_source) if suggestion_source else None
     rows = ranked[offset:offset + limit]
     total_items = len(ranked)
     has_more = offset + limit < total_items
@@ -199,6 +201,7 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
             "total_items": total_items,
             "total_pages": max(1, -(-total_items // limit)),
         },
+        "did_you_mean": suggestion,
     }
 
 

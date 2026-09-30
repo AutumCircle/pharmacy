@@ -1,8 +1,6 @@
-import Link from 'next/link';
-
 import ProductCard from '@/components/ProductCard';
 import { getPublicCategoryMedicines } from '@/lib/api-v1/server';
-import { getPaginationItems } from '@/lib/pagination';
+import Pagination from '@/components/Pagination';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +20,6 @@ export default async function CategoryPage({
   const pageHref = (number: number) => number === 1
     ? `/category/${encodeURIComponent(slug)}`
     : `/category/${encodeURIComponent(slug)}?page=${number}`;
-  const paginationItems = getPaginationItems(page, response.page.total_pages);
 
   return (
     <div className="container" style={{ paddingTop: '20px', paddingBottom: '50px' }}>
@@ -41,21 +38,7 @@ export default async function CategoryPage({
           В этой категории пока нет доступных товаров
         </div>
       )}
-      {response.page.total_pages > 1 && (
-        <nav className="pagination category-pagination" aria-label="Страницы категории">
-          <Link className={page <= 1 ? 'disabled' : ''} aria-disabled={page <= 1} href={pageHref(Math.max(1, page - 1))}>← Назад</Link>
-          <div className="category-pagination-pages">
-            {paginationItems.map((item) => typeof item === 'number' ? (
-              item === page ? (
-                <span key={item} className="pagination-page-number" aria-current="page" aria-label={`Страница ${item}`}>{item}</span>
-              ) : (
-                <Link key={item} className="pagination-number-link" href={pageHref(item)} aria-label={`Страница ${item}`}>{item}</Link>
-              )
-            ) : <span key={item} className="pagination-ellipsis" aria-hidden="true">…</span>)}
-          </div>
-          <Link className={page >= response.page.total_pages ? 'disabled' : ''} aria-disabled={page >= response.page.total_pages} href={pageHref(Math.min(response.page.total_pages, page + 1))}>Далее →</Link>
-        </nav>
-      )}
+      <Pagination page={page} totalPages={response.page.total_pages} pageHref={pageHref} label="Страницы категории" />
     </div>
   );
 }

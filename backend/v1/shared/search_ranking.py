@@ -80,7 +80,10 @@ _SILENT = frozenset("ьъ")
 SIGNIFICANT_WEIGHT = 1.0
 NUMBER_WEIGHT = 0.5
 GENERIC_WEIGHT = 0.3
-MIN_SCORE = 0.3
+MIN_SCORE = 0.45
+# Once confident matches exist, weaker ones are hidden instead of filling pages with noise.
+CONFIDENT_SCORE = 0.9
+MAX_GAP_FROM_BEST = 0.35
 
 
 def _transliterate(text: str) -> str:
@@ -235,8 +238,7 @@ def word_match(token: str, word: str) -> float:
             score = 0.88 - 0.12 * full
         if prefix <= allowed:
             score = max(score, 0.8 - 0.12 * prefix)
-    if len(token) >= 4 and token in word:
-        score = max(score, 0.5)
+    # No plain "substring inside a word" matches: "фикс" must not find "Зеффикс".
     return score
 
 
@@ -302,5 +304,32 @@ def rank_candidates(query: str, rows: Iterable[dict[str, Any]], max_tokens: int 
         score = score_name(variants, str(row.get("name") or ""))
         if score >= MIN_SCORE:
             scored.append((score, row))
+    if scored:
+        best = max(score for score, _ in scored)
+        if best >= CONFIDENT_SCORE:
+            scored = [(score, row) for score, row in scored if score >= best - MAX_GAP_FROM_BEST]
     scored.sort(key=lambda item: (-round(item[0], 6), len(tokenize(str(item[1]["name"]))), str(item[1]["name"]).casefold(), item[1]["id"]))
     return [row for _, row in scored]
+
+
+def did_you_mean(query: str, name: str) -> str | None:
+    """Corrected query built from the words of the best match, if the query had a typo."""
+    words = [word for word in re.findall(r"[^\W\d_]+", name) if len(word) >= 2]
+    normalized_words = [normalize(word) for word in words]
+    corrected: list[str] = []
+    changed = False
+    for token in tokenize(query):
+        if token.isdigit() or token in GENERIC_WORDS or len(token) < 4:
+            corrected.append(token)
+            continue
+        best_score, best_word = 0.0, None
+        for original, normalized in zip(words, normalized_words):
+            score = word_match(token, normalized)
+            if score > best_score:
+                best_score, best_word = score, original
+        if best_word and best_score < 0.9:
+            corrected.append(best_word.capitalize())
+            changed = True
+        else:
+            corrected.append(token)
+    return " ".join(corrected) if changed else None

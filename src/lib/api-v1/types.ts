@@ -212,5 +212,6 @@ export type FeaturedProductsResponse = ApiSuccessResponse<{ products: FeaturedPr
 export type ProductCarouselsResponse = ApiSuccessResponse<{ carousels: ProductCarousel[] }>;
 export interface MedicineSearchResponse extends ApiListResponse<PublicMedicine> {
   page: CursorPage & Partial<NumberedPage>;
+  did_you_mean?: string | null;
 }
 export type CategoriesResponse = ApiListResponse<PublicCategory>;

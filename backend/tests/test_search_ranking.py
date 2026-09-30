@@ -151,7 +151,8 @@ class SearchEndpointTests(unittest.TestCase):
         self.assertIn("word_similarity", sql)
         self.assertEqual(params[0], ["кетанол"])
         self.assertEqual([item["medicine_name"] for item in page["data"]], ["Кетонал 100мг капс №25"])
-        self.assertTrue(page["page"]["has_more"])
+        self.assertEqual(page["page"]["total_items"], 1)
+        self.assertEqual(page["did_you_mean"], "Кетонал капс")
 
     def test_numbered_page_reports_totals(self):
         names = [f"Нурофен {dose}мг таб №10" for dose in range(1, 51)]
@@ -162,10 +163,12 @@ class SearchEndpointTests(unittest.TestCase):
         self.assertEqual(page["page"]["total_pages"], 3)
         self.assertFalse(page["page"]["has_more"])
 
-    def test_falls_back_to_database_order_when_ranker_rejects_all(self):
-        page, _ = self._search({"q": "zzqx"}, ["Кетонал 100мг капс №25"])
+    def test_irrelevant_candidates_are_not_shown_but_suggested(self):
+        page, _ = self._search({"q": "кетонол"}, ["Кетонал 100мг капс №25", "Кетоконазол 50мг капс №50"])
         self.assertEqual([item["medicine_name"] for item in page["data"]], ["Кетонал 100мг капс №25"])
-
+        self.assertEqual(page["did_you_mean"], "Кетонал")
+        page, _ = self._search({"q": "zzqx"}, ["Кетонал 100мг капс №25"])
+        self.assertEqual(page["data"], [])
 
 if __name__ == "__main__":
     unittest.main()
