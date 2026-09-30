@@ -104,6 +104,16 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(_ranked_names("амоксицилин 500")[0], "Амоксициллин 500мг капс №16")
         self.assertEqual(_ranked_names("цефтриоксон")[0], "Цефтриаксон 1г пор д/ин фл №1")
 
+    def test_similar_suffix_brands_do_not_outrank_typo(self):
+        names = [row["name"] for row in rank_candidates("Осфикс", _rows([
+            "Зеффикс,т.п.о,0.1,№ 28",
+            "Графикс №10 таб.",
+            "Графикс Эйр № 12",
+            "Графикс Презер класик №12",
+            "Освикс (клопидогрель) 75 мг №30 тб",
+        ]))]
+        self.assertEqual(names, ["Освикс (клопидогрель) 75 мг №30 тб"])
+
     def test_number_does_not_outweigh_misspelled_name(self):
         self.assertEqual(_ranked_names("парацитамол 500")[0], "Парацетамол 500мг таб №10")
 
@@ -142,6 +152,15 @@ class SearchEndpointTests(unittest.TestCase):
         self.assertEqual(params[0], ["кетанол"])
         self.assertEqual([item["medicine_name"] for item in page["data"]], ["Кетонал 100мг капс №25"])
         self.assertTrue(page["page"]["has_more"])
+
+    def test_numbered_page_reports_totals(self):
+        names = [f"Нурофен {dose}мг таб №10" for dose in range(1, 51)]
+        page, _ = self._search({"q": "нурофен", "limit": "24", "page": "3"}, names)
+        self.assertEqual(len(page["data"]), 2)
+        self.assertEqual(page["page"]["number"], 3)
+        self.assertEqual(page["page"]["total_items"], 50)
+        self.assertEqual(page["page"]["total_pages"], 3)
+        self.assertFalse(page["page"]["has_more"])
 
     def test_falls_back_to_database_order_when_ranker_rejects_all(self):
         page, _ = self._search({"q": "zzqx"}, ["Кетонал 100мг капс №25"])

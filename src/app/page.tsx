@@ -7,10 +7,13 @@ import ProductCarousel from '@/components/ProductCarousel';
 import ProductCard from '@/components/ProductCard';
 import StoreBenefits from '@/components/StoreBenefits';
 import { getPublicCategories, getPublicFeaturedProducts, getPublicHomepageBanners, getPublicProductCarousels, searchPublicMedicines } from '@/lib/api-v1/server';
+import { getPaginationItems } from '@/lib/pagination';
 import type { HomepageBanner, ProductCarousel as ProductCarouselData } from '@/lib/api-v1/types';
 
-async function SearchResults({ q, cursor, page }: { q: string; cursor?: string; page: number }) {
-  const response = await searchPublicMedicines(q, 20, cursor).catch(() => null);
+const SEARCH_PAGE_SIZE = 24; // divisible by 2, 3, 4 and 6 grid columns, so full pages never end with a half row
+
+async function SearchResults({ q, page }: { q: string; page: number }) {
+  const response = await searchPublicMedicines(q, SEARCH_PAGE_SIZE, undefined, page).catch(() => null);
   if (!response) {
     return (
       <section className="products-section" style={{ paddingTop: '30px' }}>
@@ -24,10 +27,21 @@ async function SearchResults({ q, cursor, page }: { q: string; cursor?: string; 
       </section>
     );
   }
+  const currentPage = response.page.number ?? page;
+  // Older API versions return only has_more; then the last known page is the next one.
+  const totalPages = response.page.total_pages ?? (response.page.has_more ? currentPage + 1 : currentPage);
+  const totalItems = response.page.total_items;
+  const pageHref = (number: number) => number === 1
+    ? `/?q=${encodeURIComponent(q)}`
+    : `/?q=${encodeURIComponent(q)}&page=${number}`;
   return (
     <section className="products-section" style={{ paddingTop: '30px' }}>
       <h1 className="section-title">Результаты поиска: «{q}»</h1>
-      <p style={{ color: '#666', marginBottom: '20px' }}>Найдено на этой странице: {response.data.length}</p>
+      <p style={{ color: '#666', marginBottom: '20px' }}>
+        {totalItems !== undefined
+          ? `Найдено: ${totalItems.toLocaleString('ru-RU')}${totalPages > 1 ? ` · страница ${currentPage} из ${totalPages}` : ''}`
+          : `Найдено на этой странице: ${response.data.length}`}
+      </p>
       {response.data.length > 0 ? (
         <div className="medicine-grid">
           {response.data.map((medicine) => <ProductCard key={medicine.medicine_id} item={medicine} />)}
@@ -35,21 +49,19 @@ async function SearchResults({ q, cursor, page }: { q: string; cursor?: string; 
       ) : (
         <div className="empty-state" style={{ padding: '60px', textAlign: 'center' }}>Ничего не найдено</div>
       )}
-      {(page > 1 || (response.page.has_more && response.page.next_cursor)) && (
-        <nav className="pagination" aria-label="Страницы результатов поиска" style={{ marginTop: '40px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
-          {page > 1 ? (
-            <Link href={page === 2 || !response.page.previous_cursor
-              ? `/?q=${encodeURIComponent(q)}`
-              : `/?q=${encodeURIComponent(q)}&cursor=${encodeURIComponent(response.page.previous_cursor)}&page=${page - 1}`}>
-              ← Предыдущая
-            </Link>
-          ) : <span />}
-          <span aria-current="page" aria-label={`Страница ${page}`} className="pagination-page-number">{page}</span>
-          {response.page.has_more && response.page.next_cursor ? (
-            <Link href={`/?q=${encodeURIComponent(q)}&cursor=${encodeURIComponent(response.page.next_cursor)}&page=${page + 1}`}>
-              Следующая →
-            </Link>
-          ) : <span />}
+      {totalPages > 1 && (
+        <nav className="pagination category-pagination" aria-label="Страницы результатов поиска">
+          <Link className={currentPage <= 1 ? 'disabled' : ''} aria-disabled={currentPage <= 1} href={pageHref(Math.max(1, currentPage - 1))}>← Назад</Link>
+          <div className="category-pagination-pages">
+            {getPaginationItems(currentPage, totalPages).map((item) => typeof item === 'number' ? (
+              item === currentPage ? (
+                <span key={item} className="pagination-page-number" aria-current="page" aria-label={`Страница ${item}`}>{item}</span>
+              ) : (
+                <Link key={item} className="pagination-number-link" href={pageHref(item)} aria-label={`Страница ${item}`}>{item}</Link>
+              )
+            ) : <span key={item} className="pagination-ellipsis" aria-hidden="true">…</span>)}
+          </div>
+          <Link className={currentPage >= totalPages ? 'disabled' : ''} aria-disabled={currentPage >= totalPages} href={pageHref(Math.min(totalPages, currentPage + 1))}>Далее →</Link>
         </nav>
       )}
     </section>
@@ -68,19 +80,18 @@ function SearchLoading() {
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; cursor?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }) {
   const params = await searchParams;
   const q = typeof params.q === 'string' ? params.q.trim() : '';
-  const cursor = typeof params.cursor === 'string' ? params.cursor : undefined;
   const requestedPage = Number(params.page);
-  const page = cursor && Number.isInteger(requestedPage) && requestedPage > 1 ? Math.min(requestedPage, 5000) : 1;
+  const page = Number.isInteger(requestedPage) && requestedPage > 1 ? Math.min(requestedPage, 5000) : 1;
 
   if (q.length >= 2) {
     return (
       <div className="container">
-        <Suspense key={`${q}:${cursor || ''}:${page}`} fallback={<SearchLoading />}>
-          <SearchResults q={q} cursor={cursor} page={page} />
+        <Suspense key={`${q}:${page}`} fallback={<SearchLoading />}>
+          <SearchResults q={q} page={page} />
         </Suspense>
       </div>
     );

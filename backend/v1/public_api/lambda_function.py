@@ -140,6 +140,8 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
         offset = cursor.get("offset")
         if not isinstance(offset, int) or offset < 0 or offset > 100_000:
             raise ContractError("VALIDATION_ERROR", "Request validation failed", fields={"cursor": "is invalid"})
+    elif query.get("page"):
+        offset = (_page_number(query) - 1) * limit
 
     with transaction() as cur:
         cur.execute(
@@ -181,10 +183,9 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
     # PostgreSQL only guarantees recall; the typo-aware order is decided in Python.
     # If the ranker rejects everything, fall back to the trigram order instead of "nothing found".
     ranked = rank_candidates(q, candidates) or candidates
-    rows = ranked[offset:offset + limit + 1]
-
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    rows = ranked[offset:offset + limit]
+    total_items = len(ranked)
+    has_more = offset + limit < total_items
     next_cursor = _encode_cursor({"offset": offset + limit}) if has_more else None
     previous_cursor = _encode_cursor({"offset": max(0, offset - limit)}) if offset > 0 else None
     return {
@@ -193,6 +194,10 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
             "next_cursor": next_cursor,
             "previous_cursor": previous_cursor,
             "has_more": has_more,
+            "number": offset // limit + 1,
+            "size": limit,
+            "total_items": total_items,
+            "total_pages": max(1, -(-total_items // limit)),
         },
     }
 

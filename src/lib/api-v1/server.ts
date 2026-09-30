@@ -145,8 +145,8 @@ function queryString(values: Record<string, string | number | null | undefined>)
   return encoded ? `?${encoded}` : '';
 }
 
-export function searchPublicMedicines(q: string, limit = 20, cursor?: string): Promise<MedicineSearchResponse> {
-  return request(`/v1/public/medicines/search${queryString({ q, limit, cursor })}`, { cacheSeconds: 30 });
+export function searchPublicMedicines(q: string, limit = 20, cursor?: string, page?: number): Promise<MedicineSearchResponse> {
+  return request(`/v1/public/medicines/search${queryString({ q, limit, cursor, page: cursor ? undefined : page })}`, { cacheSeconds: 30 });
 }
 
 export function getPublicMedicine(medicineId: number): Promise<MedicineResponse> {

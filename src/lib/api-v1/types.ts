@@ -210,5 +210,7 @@ export type ResolveMedicinesResponse = ApiSuccessResponse<ResolvedMedicines>;
 export type HomepageBannersResponse = ApiSuccessResponse<{ banners: HomepageBanner[] }>;
 export type FeaturedProductsResponse = ApiSuccessResponse<{ products: FeaturedProduct[] }>;
 export type ProductCarouselsResponse = ApiSuccessResponse<{ carousels: ProductCarousel[] }>;
-export type MedicineSearchResponse = ApiListResponse<PublicMedicine>;
+export interface MedicineSearchResponse extends ApiListResponse<PublicMedicine> {
+  page: CursorPage & Partial<NumberedPage>;
+}
 export type CategoriesResponse = ApiListResponse<PublicCategory>;
