@@ -126,7 +126,7 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
         )
     q = " ".join(q.split())
     variants = query_variants(q)
-    terms = retrieval_terms(variants)
+    terms = retrieval_terms(variants, raw_query=q)
     if not terms:
         raise ContractError(
             "VALIDATION_ERROR",

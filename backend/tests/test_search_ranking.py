@@ -58,6 +58,12 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(retrieval_terms(query_variants("кетанол капс 100")), ["кетанол"])
         self.assertEqual(retrieval_terms(query_variants("таб")), ["таб"])
 
+    def test_retrieval_keeps_latin_brand_spelling(self):
+        terms = retrieval_terms(query_variants("box"), raw_query="box")
+        self.assertEqual(terms[0], "box")
+        self.assertIn("бокс", terms)
+        self.assertEqual(retrieval_terms(query_variants("Now"), raw_query="Now")[0], "now")
+
 
 class DistanceTests(unittest.TestCase):
     def test_common_russian_confusions_are_cheaper(self):
@@ -169,6 +175,13 @@ class SearchEndpointTests(unittest.TestCase):
         self.assertEqual(page["did_you_mean"], "Кетонал")
         page, _ = self._search({"q": "zzqx"}, ["Кетонал 100мг капс №25"])
         self.assertEqual(page["data"], [])
+
+    def test_latin_brand_beats_transliterated_and_fuzzy_matches(self):
+        names = ["Таблетница бокс", "Медаокс №10", "BOX Аптечка домашняя (маленькая)", "Бозентас №20"]
+        page, cursor = self._search({"q": "box", "limit": "24"}, names)
+        self.assertEqual(cursor.execute.call_args.args[1][0][0], "box")
+        self.assertEqual(page["data"][0]["medicine_name"], "BOX Аптечка домашняя (маленькая)")
+        self.assertNotIn("Медаокс №10", [item["medicine_name"] for item in page["data"]])
 
 if __name__ == "__main__":
     unittest.main()
