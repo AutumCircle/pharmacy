@@ -156,13 +156,17 @@ def query_variants(query: str, max_tokens: int = 12) -> list[list[QueryToken]]:
     return [variant for variant in variants if variant]
 
 
-def retrieval_terms(variants: Sequence[Sequence[QueryToken]], limit: int = 24) -> list[str]:
+def retrieval_terms(variants: Sequence[Sequence[QueryToken]], limit: int = 24, raw_query: str = "") -> list[str]:
     """Words sent to PostgreSQL for candidate retrieval.
 
     Generic words and numbers are left out whenever the query has a real
     medicine word, otherwise "таб" alone would flood the candidate pool.
     """
-    terms: list[str] = []
+    # Keep Latin brand names in the SQL recall pool. Ranking transliterates
+    # "box" to "бокс", but a catalogue row named "BOX ..." would otherwise
+    # never reach the Python ranker because SQL searches the original name.
+    terms = [token for token in _TOKEN_RE.findall(raw_query.casefold())
+             if len(token) >= 2 and any("a" <= char <= "z" for char in token)]
     for tokens in variants:
         significant = [token for token in tokens if token.is_significant]
         for token in significant or tokens:
