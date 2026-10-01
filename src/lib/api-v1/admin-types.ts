@@ -103,6 +103,13 @@ export type AdminMedicineExport = {
   row_count: number;
 };
 
+export type AdminAvailableMedicineExport = {
+  filename: string;
+  content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' | 'text/csv; charset=utf-8';
+  content_base64: string;
+  row_count: number;
+};
+
 export type AdminFeaturedProduct = {
   medicine_id: number;
   medicine_name: string;

@@ -15,6 +15,7 @@ import type {
   AdminMedicine,
   AdminMedicineCandidate,
   AdminMedicineExport,
+  AdminAvailableMedicineExport,
   AdminBatchAddResult,
   AdminBatchRemoveResult,
   AdminCarouselProduct,
@@ -48,6 +49,7 @@ type AdminRequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   timeoutMs?: number;
+  headers?: Record<string, string>;
 };
 
 function configuration() {
@@ -114,6 +116,7 @@ async function request<T>(path: string, options: AdminRequestOptions = {}): Prom
           'Content-Type': 'application/json',
           'x-api-key': apiKey,
           Authorization: `Bearer ${bearerToken}`,
+          ...options.headers,
         },
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         cache: 'no-store',
@@ -348,6 +351,13 @@ export function listAdminMedicines(values: {
 
 export function exportAdminOutOfStockMedicines(): Promise<ApiSuccessResponse<AdminMedicineExport>> {
   return request('/v1/admin/medicines/out-of-stock-export', { timeoutMs: 30_000 });
+}
+
+export function exportAdminAvailableMedicines(format: 'xlsx' | 'csv', siteOrigin: string): Promise<ApiSuccessResponse<AdminAvailableMedicineExport>> {
+  return request(`/v1/admin/medicines/available-export?format=${format}`, {
+    timeoutMs: 30_000,
+    headers: { 'x-public-site-url': siteOrigin },
+  });
 }
 
 export function listAdminDuplicateGroups(page = 1, limit = 50): Promise<AdminNumberedListResponse<AdminDuplicateGroup>> {

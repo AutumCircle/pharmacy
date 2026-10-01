@@ -46,6 +46,20 @@ export default async function AdminMedicinesPage({ searchParams }: {
           <p style={{ color: '#666', margin: 0 }}>Найдено: {response.page.total_items.toLocaleString('ru-RU')}</p>
         </div>
         <a
+          href="/api/admin/medicines/available-export/xlsx"
+          className="admin-export-button"
+          download
+        >
+          Скачать доступные (.xlsx)
+        </a>
+        <a
+          href="/api/admin/medicines/available-export/csv"
+          className="admin-export-button"
+          download
+        >
+          Скачать доступные (.csv)
+        </a>
+        <a
           href="/api/admin/medicines/out-of-stock-export"
           className="admin-export-button"
           download

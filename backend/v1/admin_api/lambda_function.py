@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 import boto3
@@ -30,7 +30,11 @@ from backend.v1.shared.contract import (
 from backend.v1.shared.authorization import require_admin_identity
 from backend.v1.shared.database import transaction
 from backend.v1.shared.responses import error_response, request_id, success, success_document
-from backend.v1.shared.xlsx_export import build_out_of_stock_workbook
+from backend.v1.shared.xlsx_export import (
+    build_available_medicines_csv,
+    build_available_medicines_workbook,
+    build_out_of_stock_workbook,
+)
 from backend.v1.shared import staff_accounts
 
 
@@ -678,6 +682,51 @@ def export_out_of_stock_medicines() -> dict[str, Any]:
         "filename": f"vatan-out-of-stock-{generated_at:%Y-%m-%d}.xlsx",
         "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "content_base64": base64.b64encode(workbook).decode("ascii"),
+        "row_count": row_count,
+    }
+
+
+def _export_site_origin(event: dict[str, Any]) -> str:
+    headers = {str(key).lower(): str(value) for key, value in (event.get("headers") or {}).items() if value}
+    parsed = urlparse(headers.get("x-public-site-url", ""))
+    if (parsed.scheme not in {"https", "http"} or not parsed.netloc
+            or parsed.username or parsed.password or parsed.path not in {"", "/"}
+            or parsed.query or parsed.fragment):
+        raise ContractError("VALIDATION_ERROR", "A valid public site origin is required for this export")
+    if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"}:
+        raise ContractError("VALIDATION_ERROR", "The public site origin must use HTTPS")
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def export_available_medicines(event: dict[str, Any], query: dict[str, Any]) -> dict[str, Any]:
+    export_format = str(query.get("format") or "xlsx")
+    if export_format not in {"xlsx", "csv"}:
+        raise ContractError("VALIDATION_ERROR", "format must be xlsx or csv")
+    site_origin = _export_site_origin(event)
+    with transaction() as cur:
+        cur.execute("SELECT COUNT(*) AS count FROM medicines WHERE in_stock IS TRUE")
+        row_count = int(cur.fetchone()["count"])
+        if row_count > MAX_EXPORT_ROWS:
+            raise ContractError("EXPORT_TOO_LARGE", f"Export contains more than {MAX_EXPORT_ROWS} medicines", http_status=413)
+        cur.execute("""
+            SELECT id AS medicine_id, name AS medicine_name,
+                   vatan_selling_unit_price(price) AS selling_unit_price
+            FROM medicines
+            WHERE in_stock IS TRUE
+            ORDER BY lower(name) ASC, id ASC
+        """)
+        rows = [dict(row) for row in cur.fetchall()]
+    generated_at = datetime.now(timezone.utc)
+    if export_format == "csv":
+        content = build_available_medicines_csv(rows, site_origin)
+        content_type = "text/csv; charset=utf-8"
+    else:
+        content = build_available_medicines_workbook(rows, site_origin)
+        content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return {
+        "filename": f"vatan-available-medicines-{generated_at:%Y-%m-%d}.{export_format}",
+        "content_type": content_type,
+        "content_base64": base64.b64encode(content).decode("ascii"),
         "row_count": row_count,
     }
 
@@ -2629,6 +2678,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(list_medicines(query), request=current_request_id)
         if method == "GET" and tail == ["medicines", "out-of-stock-export"]:
             return success(export_out_of_stock_medicines(), request=current_request_id)
+        if method == "GET" and tail == ["medicines", "available-export"]:
+            return success(export_available_medicines(event, query), request=current_request_id)
         if method == "GET" and tail == ["medicine-duplicates"]:
             return success_document(list_medicine_duplicates(query), request=current_request_id)
         if method == "GET" and path.endswith("/admin/orders"):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import csv
 import zipfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -52,6 +53,74 @@ def _formatted_updated_at(value: Any) -> str:
         return "Нет данных"
     aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     return aware.astimezone(PHARMACY_TIME_ZONE).strftime("%d.%m.%Y %H:%M")
+
+
+def _safe_spreadsheet_text(value: Any) -> str:
+    """Keep catalogue data as text when Excel would otherwise evaluate a formula."""
+    text = "" if value is None else str(value)
+    return f"'{text}" if text[:1] in {"=", "+", "-", "@"} else text
+
+
+def _available_export_url(site_origin: str, medicine_id: Any) -> str:
+    return f"{site_origin.rstrip('/')}/medicine/{int(medicine_id)}"
+
+
+def build_available_medicines_csv(rows: Iterable[dict[str, Any]], site_origin: str) -> bytes:
+    """Build a UTF-8 CSV with public selling prices and direct medicine URLs."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\r\n")
+    writer.writerow(("Название", "Цена с наценкой (с.)", "Ссылка"))
+    for medicine in rows:
+        writer.writerow((
+            _safe_spreadsheet_text(medicine.get("medicine_name")),
+            Decimal(str(medicine.get("selling_unit_price") or 0)).quantize(Decimal("0.01")),
+            _available_export_url(site_origin, medicine["medicine_id"]),
+        ))
+    # The UTF-8 BOM makes Cyrillic headers open correctly in desktop Excel.
+    return ("\ufeff" + output.getvalue()).encode("utf-8")
+
+
+def build_available_medicines_workbook(rows: Iterable[dict[str, Any]], site_origin: str) -> bytes:
+    """Build a compact XLSX report without external spreadsheet dependencies."""
+    medicines = list(rows)
+    worksheet_rows = [
+        '<row r="1">' + ''.join((
+            _inline_cell("A1", "Название", 0),
+            _inline_cell("B1", "Цена с наценкой (с.)", 0),
+            _inline_cell("C1", "Ссылка", 0),
+        )) + "</row>",
+    ]
+    for number, medicine in enumerate(medicines, start=2):
+        worksheet_rows.append(
+            f'<row r="{number}">' + ''.join((
+                _inline_cell(f"A{number}", _safe_spreadsheet_text(medicine.get("medicine_name")), 0),
+                _number_cell(f"B{number}", medicine.get("selling_unit_price"), 0),
+                _inline_cell(f"C{number}", _available_export_url(site_origin, medicine["medicine_id"]), 0),
+            )) + "</row>"
+        )
+    last_row = max(1, len(medicines) + 1)
+    sheet = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:C{last_row}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" state="frozen"/></sheetView></sheetViews>
+  <cols><col min="1" max="1" width="52" customWidth="1"/><col min="2" max="2" width="24" customWidth="1"/><col min="3" max="3" width="62" customWidth="1"/></cols>
+  <sheetData>{''.join(worksheet_rows)}</sheetData><autoFilter ref="A1:C{last_row}"/>
+</worksheet>'''
+    files = {
+        "[Content_Types].xml": '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>''',
+        "_rels/.rels": '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>''',
+        "xl/workbook.xml": '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="В наличии" sheetId="1" r:id="rId1"/></sheets></workbook>''',
+        "xl/_rels/workbook.xml.rels": '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>''',
+        "xl/worksheets/sheet1.xml": sheet,
+    }
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        for path, content in files.items():
+            archive.writestr(path, content.encode("utf-8"))
+    return output.getvalue()
 
 
 def build_out_of_stock_workbook(rows: Iterable[dict[str, Any]], generated_at: datetime) -> bytes:
