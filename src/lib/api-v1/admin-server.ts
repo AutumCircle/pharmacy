@@ -183,10 +183,26 @@ export function updateAdminOrderStatus(
 export function updateAdminOrderItemPrice(
   orderId: string,
   orderItemId: number,
-  sellingUnitPrice: number,
-): Promise<ApiSuccessResponse<{ order_id: string; order_item_id: number; selling_unit_price: number | string; line_total: number | string; items_subtotal: number | string; order_total: number | string; currency: 'TJS' }>> {
+  prices: { sellingUnitPrice?: number; baseUnitPrice?: number },
+): Promise<ApiSuccessResponse<{ order_id: string; order_item_id: number; selling_unit_price: number | string; base_unit_price: number | string; line_total: number | string; items_subtotal: number | string; order_total: number | string; currency: 'TJS' }>> {
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/status`, {
-    method: 'PATCH', body: { order_item_id: orderItemId, selling_unit_price: sellingUnitPrice },
+    method: 'PATCH',
+    body: {
+      order_item_id: orderItemId,
+      ...(prices.sellingUnitPrice !== undefined ? { selling_unit_price: prices.sellingUnitPrice } : {}),
+      ...(prices.baseUnitPrice !== undefined ? { base_unit_price: prices.baseUnitPrice } : {}),
+    },
+  });
+}
+
+export function updateAdminOrderDelivery(
+  orderId: string,
+  courierAmount: number,
+  ownerAmount: number,
+): Promise<ApiSuccessResponse<{ order_id: string; delivery_courier_amount: number | string; delivery_owner_amount: number | string; delivery_fee: number | string; currency: 'TJS' }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/status`, {
+    method: 'PATCH',
+    body: { delivery_courier_amount: courierAmount, delivery_owner_amount: ownerAmount },
   });
 }
 

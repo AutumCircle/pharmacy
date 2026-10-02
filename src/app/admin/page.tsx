@@ -45,7 +45,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
 
   const summary = summaryResult.status === 'fulfilled' ? summaryResult.value.data : {
     period_days: days, order_counts: { pending: 0, confirmed: 0, delivering: 0, delivered: 0, cancelled: 0 },
-    new_orders: 0, active_orders: 0, sales_total: 0, pharmacy_total: 0, profit_total: 0,
+    new_orders: 0, active_orders: 0, sales_total: 0, pharmacy_total: 0, profit_total: 0, delivery_owner_total: 0, delivery_courier_total: 0,
     origin_counts: {
       total_orders: 0, client_orders: 0, pharmacy_orders: 0, courier_orders: 0, pharmacy_1_orders: 0,
       pharmacy_2_orders: 0, instagram_orders: 0, whatsapp_orders: 0,
@@ -176,6 +176,8 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
           <div style={{ padding: 16, borderRadius: 10, background: '#eef8f0' }}><div style={{ color: '#55705b', marginBottom: 6 }}>Вы заработали</div><strong style={{ fontSize: 24, color: '#1b7f35' }}>{Number(summary.profit_total).toFixed(2)} {summary.currency}</strong></div>
           <div style={{ padding: 16, borderRadius: 10, background: '#fff5e8' }}><div style={{ color: '#7a6546', marginBottom: 6 }}>Отдать аптеке</div><strong style={{ fontSize: 24, color: '#a45d00' }}>{Number(summary.pharmacy_total).toFixed(2)} {summary.currency}</strong></div>
           <div style={{ padding: 16, borderRadius: 10, background: '#f3f5f8' }}><div style={{ color: '#606873', marginBottom: 6 }}>Продано всего</div><strong style={{ fontSize: 24 }}>{Number(summary.sales_total).toFixed(2)} {summary.currency}</strong></div>
+          <div style={{ padding: 16, borderRadius: 10, background: '#eef8f0' }}><div style={{ color: '#55705b', marginBottom: 6 }}>Доставка: получил я</div><strong style={{ fontSize: 24, color: '#1b7f35' }}>{Number(summary.delivery_owner_total).toFixed(2)} {summary.currency}</strong></div>
+          <div style={{ padding: 16, borderRadius: 10, background: '#f3f5f8' }}><div style={{ color: '#606873', marginBottom: 6 }}>Доставка: получили курьеры</div><strong style={{ fontSize: 24 }}>{Number(summary.delivery_courier_total).toFixed(2)} {summary.currency}</strong></div>
         </div>
         <h2 style={{ fontSize: 19, margin: '26px 0 12px' }}>История заработка по доставленным заказам</h2>
         {summary.delivered_orders.length > 0 ? (

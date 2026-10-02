@@ -517,18 +517,23 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
             """
             SELECT
                 COALESCE(SUM(financial.sales_total), 0) AS sales_total,
-                COALESCE(SUM(financial.pharmacy_total), 0) AS pharmacy_total
+                COALESCE(SUM(financial.pharmacy_total), 0) AS pharmacy_total,
+                COALESCE(SUM(financial.delivery_owner_amount), 0) AS delivery_owner_total,
+                COALESCE(SUM(financial.delivery_courier_amount), 0) AS delivery_courier_total
             FROM (
                 SELECT
                     o.id,
                     COALESCE(SUM(oi.line_total), o.items_subtotal, o.total_price, 0) AS sales_total,
-                    COALESCE(SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity), 0) AS pharmacy_total
+                    COALESCE(SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity), 0) AS pharmacy_total,
+                    o.delivery_owner_amount,
+                    o.delivery_courier_amount
                 FROM orders o
                 LEFT JOIN order_items oi ON oi.order_id = o.id
                 WHERE o.deleted_at IS NULL
                   AND o.status = 'delivered'
                   AND o.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
-                GROUP BY o.id, o.items_subtotal, o.total_price
+                GROUP BY o.id, o.items_subtotal, o.total_price,
+                         o.delivery_owner_amount, o.delivery_courier_amount
             ) AS financial
             """,
             (days,),
@@ -552,6 +557,8 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
         "sales_total": sales_total,
         "pharmacy_total": pharmacy_total,
         "profit_total": sales_total - pharmacy_total,
+        "delivery_owner_total": financial_totals["delivery_owner_total"],
+        "delivery_courier_total": financial_totals["delivery_courier_total"],
         "origin_counts": origin_counts,
         "recent_orders": recent_orders,
         "delivered_orders": delivered_orders,
@@ -994,6 +1001,7 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
         cur.execute(
             f"""SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
                        o.address, o.landmark, o.notes, o.order_source, o.status, o.created_at,
+                       o.delivery_courier_amount,
                        COALESCE(o.fulfillment_pharmacy_id,
                            CASE WHEN o.created_by_staff_account_id IN (1, 2)
                                 THEN o.created_by_staff_account_id END) AS pharmacy_id
@@ -1096,6 +1104,8 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
                    o.payment_method, o.payment_status, o.notes, o.created_at,
                    o.order_source, o.landmark, o.created_by_staff_account_id,
                    o.fulfillment_pharmacy_id,
+                   o.delivery_courier_amount, o.delivery_owner_amount,
+                   o.delivery_courier_amount + o.delivery_owner_amount AS delivery_fee,
                    sa.username AS created_by_staff_username
             FROM orders o
             LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
@@ -1128,6 +1138,8 @@ def get_order(order_id: str) -> dict[str, Any]:
                    o.items_subtotal, o.order_total, o.currency, o.status, o.payment_method,
                    o.payment_status, o.notes, o.created_at, o.order_source, o.landmark,
                    o.created_by_staff_account_id, o.fulfillment_pharmacy_id,
+                   o.delivery_courier_amount, o.delivery_owner_amount,
+                   o.delivery_courier_amount + o.delivery_owner_amount AS delivery_fee,
                    sa.username AS created_by_staff_username
             FROM orders o
             LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
@@ -1199,8 +1211,9 @@ def update_order_item_price(
     actor_id: str,
     current_request_id: str,
 ) -> dict[str, Any]:
-    if set(payload) != {"order_item_id", "selling_unit_price"}:
-        raise ContractError("VALIDATION_ERROR", "order_item_id and selling_unit_price are required")
+    price_keys = {"selling_unit_price", "base_unit_price"}
+    if "order_item_id" not in payload or not set(payload) & price_keys or set(payload) - price_keys - {"order_item_id"}:
+        raise ContractError("VALIDATION_ERROR", "order_item_id and a price are required")
     raw_item_id = payload.get("order_item_id")
     if isinstance(raw_item_id, bool):
         raise ContractError("VALIDATION_ERROR", "order_item_id must be an integer")
@@ -1210,15 +1223,21 @@ def update_order_item_price(
         raise ContractError("VALIDATION_ERROR", "order_item_id must be an integer") from exc
     if order_item_id <= 0:
         raise ContractError("VALIDATION_ERROR", "order_item_id must be a positive integer")
-    raw_price = payload.get("selling_unit_price")
-    if isinstance(raw_price, bool):
-        raise ContractError("VALIDATION_ERROR", "selling_unit_price must be a positive number")
-    try:
-        new_price = Decimal(str(raw_price)).quantize(Decimal("0.01"))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ContractError("VALIDATION_ERROR", "selling_unit_price must be a positive number") from exc
-    if not new_price.is_finite() or new_price <= 0 or new_price > Decimal("10000000"):
-        raise ContractError("VALIDATION_ERROR", "selling_unit_price must be between 0.01 and 10000000")
+
+    def parse_price(field: str) -> Decimal:
+        raw = payload.get(field)
+        if isinstance(raw, bool):
+            raise ContractError("VALIDATION_ERROR", f"{field} must be a positive number")
+        try:
+            value = Decimal(str(raw)).quantize(Decimal("0.01"))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ContractError("VALIDATION_ERROR", f"{field} must be a positive number") from exc
+        if not value.is_finite() or value <= 0 or value > Decimal("10000000"):
+            raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.01 and 10000000")
+        return value
+
+    new_selling = parse_price("selling_unit_price") if "selling_unit_price" in payload else None
+    new_base = parse_price("base_unit_price") if "base_unit_price" in payload else None
 
     lookup, lookup_values = _order_lookup(order_id)
     with transaction() as cur:
@@ -1234,7 +1253,7 @@ def update_order_item_price(
             raise ContractError("ORDER_NOT_FOUND", "Order was not found", http_status=404)
         cur.execute(
             """
-            SELECT id, medicine_name, selling_unit_price, quantity
+            SELECT id, medicine_name, selling_unit_price, base_unit_price, quantity
             FROM order_items WHERE id = %s AND order_id = %s FOR UPDATE
             """,
             (order_item_id, order["id"]),
@@ -1242,10 +1261,12 @@ def update_order_item_price(
         item = cur.fetchone()
         if not item:
             raise ContractError("ORDER_ITEM_NOT_FOUND", "Order item was not found", http_status=404)
-        line_total = (new_price * item["quantity"]).quantize(Decimal("0.01"))
+        new_price = new_selling if new_selling is not None else item["selling_unit_price"]
+        base_price = new_base if new_base is not None else item["base_unit_price"]
+        line_total = (Decimal(str(new_price)) * item["quantity"]).quantize(Decimal("0.01"))
         cur.execute(
-            "UPDATE order_items SET selling_unit_price = %s, line_total = %s WHERE id = %s",
-            (new_price, line_total, item["id"]),
+            "UPDATE order_items SET selling_unit_price = %s, base_unit_price = %s, line_total = %s WHERE id = %s",
+            (new_price, base_price, line_total, item["id"]),
         )
         cur.execute(
             "SELECT COALESCE(SUM(line_total), 0) AS items_subtotal FROM order_items WHERE order_id = %s",
@@ -1268,6 +1289,8 @@ def update_order_item_price(
                 "medicine_name": str(item["medicine_name"]),
                 "previous_unit_price": str(item["selling_unit_price"]),
                 "new_unit_price": str(new_price),
+                "previous_base_unit_price": str(item["base_unit_price"]),
+                "new_base_unit_price": str(base_price),
                 "quantity": int(item["quantity"]),
                 "line_total": str(line_total),
                 "order_total": str(items_subtotal),
@@ -1275,9 +1298,76 @@ def update_order_item_price(
         )
     return {
         "order_id": order_id, "order_item_id": order_item_id,
-        "selling_unit_price": new_price, "line_total": line_total,
+        "selling_unit_price": new_price, "base_unit_price": base_price, "line_total": line_total,
         "items_subtotal": items_subtotal, "order_total": items_subtotal, "currency": "TJS",
     }
+
+
+def _delivery_amount(payload: dict[str, Any], field: str) -> Decimal:
+    raw = payload.get(field)
+    if isinstance(raw, bool):
+        raise ContractError("VALIDATION_ERROR", f"{field} must be a non-negative number")
+    try:
+        value = Decimal(str(raw)).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ContractError("VALIDATION_ERROR", f"{field} must be a non-negative number") from exc
+    if not value.is_finite() or value < 0 or value > Decimal("1000000"):
+        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0 and 1000000")
+    return value
+
+
+def update_order_delivery(
+    order_id: str,
+    payload: dict[str, Any],
+    actor_id: str,
+    current_request_id: str,
+    *,
+    courier: bool = False,
+) -> dict[str, Any]:
+    """Record who received the delivery fee. The courier may set only their own share."""
+
+    expected = {"delivery_courier_amount"} if courier else {"delivery_courier_amount", "delivery_owner_amount"}
+    if set(payload) != expected:
+        raise ContractError("VALIDATION_ERROR", "Invalid delivery fee request")
+    courier_amount = _delivery_amount(payload, "delivery_courier_amount")
+    owner_amount = None if courier else _delivery_amount(payload, "delivery_owner_amount")
+    lookup, lookup_values = _order_lookup(order_id)
+    with transaction() as cur:
+        cur.execute(
+            f"""SELECT id, status, delivery_courier_amount, delivery_owner_amount
+                FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""",
+            lookup_values,
+        )
+        order = cur.fetchone()
+        if not order:
+            raise ContractError("ORDER_NOT_FOUND", "Order was not found", http_status=404)
+        if courier and order["status"] == "cancelled":
+            raise ContractError("ORDER_STATUS_CONFLICT", "Cancelled order cannot be changed", http_status=409)
+        if owner_amount is None:
+            owner_amount = order["delivery_owner_amount"]
+        cur.execute(
+            """UPDATE orders SET delivery_courier_amount = %s, delivery_owner_amount = %s,
+                      delivery_updated_at = CURRENT_TIMESTAMP, delivery_updated_by = %s
+               WHERE id = %s""",
+            (courier_amount, owner_amount, actor_id, order["id"]),
+        )
+        _write_admin_audit(
+            cur, actor_id=actor_id, action="order.delivery_fee_updated",
+            resource_type="order", resource_id=order_id, request=current_request_id,
+            details={
+                "previous_courier_amount": str(order["delivery_courier_amount"]),
+                "previous_owner_amount": str(order["delivery_owner_amount"]),
+                "courier_amount": str(courier_amount), "owner_amount": str(owner_amount),
+            },
+        )
+    response = {
+        "order_id": order_id, "delivery_courier_amount": courier_amount,
+        "currency": "TJS",
+    }
+    if not courier:
+        response["delivery_owner_amount"] = owner_amount
+        response["delivery_fee"] = courier_amount + owner_amount
+    return response
 
 
 def delete_order(order_id: str, actor_id: str, current_request_id: str) -> dict[str, Any]:
@@ -2748,8 +2838,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             status_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/status", staff_path)
             if staff_method == "PATCH" and status_match:
                 staff_accounts.session_account(event, courier=True)
+                courier_payload = _body(event)
+                if set(courier_payload) == {"delivery_courier_amount"}:
+                    return success(update_order_delivery(
+                        status_match.group(1), courier_payload, "staff:3", current_request_id, courier=True,
+                    ), request=current_request_id)
                 return success(update_courier_order_status(
-                    status_match.group(1), _body(event), current_request_id,
+                    status_match.group(1), courier_payload, current_request_id,
                 ), request=current_request_id)
             raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
         actor_id = require_admin_identity(event)
@@ -2795,11 +2890,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(get_order(tail[1]), request=current_request_id)
         if method == "PATCH" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "status":
             payload = _body(event)
-            result = (
-                update_order_item_price(tail[1], payload, actor_id, current_request_id)
-                if set(payload) == {"order_item_id", "selling_unit_price"}
-                else update_order_status(tail[1], payload, actor_id)
-            )
+            if "order_item_id" in payload:
+                result = update_order_item_price(tail[1], payload, actor_id, current_request_id)
+            elif "delivery_courier_amount" in payload:
+                result = update_order_delivery(tail[1], payload, actor_id, current_request_id)
+            else:
+                result = update_order_status(tail[1], payload, actor_id)
             return success(result, request=current_request_id)
         if method == "DELETE" and len(tail) == 2 and tail[0] == "orders":
             return success(delete_order(tail[1], actor_id, current_request_id), request=current_request_id)

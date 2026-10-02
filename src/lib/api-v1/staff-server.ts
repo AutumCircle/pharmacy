@@ -92,3 +92,10 @@ export function updateCourierOrderStatus(token: string, orderId: string, body: {
     `orders/${encodeURIComponent(orderId)}/status`, { token, method: 'PATCH', body },
   );
 }
+
+export function updateCourierDeliveryAmount(token: string, orderId: string, amount: number) {
+  return request<ApiSuccessResponse<{ order_id: string; delivery_courier_amount: number | string; currency: 'TJS' }>>(
+    `orders/${encodeURIComponent(orderId)}/status`,
+    { token, method: 'PATCH', body: { delivery_courier_amount: amount } },
+  );
+}

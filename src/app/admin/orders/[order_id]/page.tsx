@@ -5,6 +5,7 @@ import { getAdminOrder } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import OrderStatusControl from './OrderStatusControl';
 import OrderItemPriceEditor from './OrderItemPriceEditor';
+import OrderDeliveryEditor from './OrderDeliveryEditor';
 import OrderDeleteButton from '../OrderDeleteButton';
 
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефонный звонок' } as const;
@@ -57,6 +58,14 @@ export default async function AdminOrderDetailPage({
         <p style={{ color: '#666' }}>Стоимость доставки в сумму заказа не включена.</p>
       </section>
 
+      <h2>Доставка</h2>
+      <OrderDeliveryEditor
+        orderId={order.order_id}
+        courierAmount={Number(order.delivery_courier_amount || 0)}
+        ownerAmount={Number(order.delivery_owner_amount || 0)}
+        currency={order.currency}
+      />
+
       <h2>Состав заказа</h2>
       {order.items.length === 0 && <p style={{ background: '#fff8e6', padding: 14, borderRadius: 8 }}>Товары уточняются по телефону.</p>}
       <div style={{ overflowX: 'auto', background: 'white', borderRadius: 12 }}>
@@ -68,7 +77,7 @@ export default async function AdminOrderDetailPage({
                 <td>{item.medicine_id ?? 'legacy'}</td>
                 <td>{item.medicine_name}</td>
                 <td>{item.quantity}</td>
-                <td>{Number(item.base_unit_price || 0).toFixed(2)}</td>
+                <td><OrderItemPriceEditor field="base" orderId={order.order_id} orderItemId={item.order_item_id} initialPrice={Number(item.base_unit_price || 0)} /></td>
                 <td><OrderItemPriceEditor orderId={order.order_id} orderItemId={item.order_item_id} initialPrice={Number(item.selling_unit_price || 0)} /></td>
                 <td>{Number(item.line_total || 0).toFixed(2)}</td>
               </tr>
