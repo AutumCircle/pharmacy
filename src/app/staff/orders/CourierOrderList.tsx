@@ -21,6 +21,25 @@ function OrderCard({ order }: { order: CourierOrder }) {
   const [status, setStatus] = useState(order.status);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [amount, setAmount] = useState(Number(order.delivery_courier_amount || 0).toFixed(2));
+  const [amountState, setAmountState] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  async function saveAmount() {
+    const value = Number(amount.replace(',', '.'));
+    if (!Number.isFinite(value) || value < 0 || value > 1_000_000) { setError('Введите корректную сумму'); return; }
+    setAmountState('saving'); setError('');
+    try {
+      const response = await fetch(`/api/staff/orders/${encodeURIComponent(order.order_id)}/delivery`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delivery_courier_amount: value }),
+      });
+      if (!response.ok) throw new Error('Не удалось сохранить сумму. Повторите попытку.');
+      setAmount(value.toFixed(2)); setAmountState('saved');
+    } catch (cause) {
+      setAmountState('idle');
+      setError(cause instanceof Error ? cause.message : 'Ошибка сети');
+    }
+  }
 
   async function changeStatus(next: CourierOrderStatus) {
     let reason: string | undefined;
@@ -60,6 +79,17 @@ function OrderCard({ order }: { order: CourierOrder }) {
       {order.notes && <p><b>Комментарий:</b> {order.notes}</p>}
       {order.order_source && <p><b>Источник:</b> {sourceLabels[order.order_source]}</p>}
     </div>
+    {status !== 'cancelled' && <div className="courier-order-details">
+      <label htmlFor={`fee-${order.order_id}`}><b>Получено за доставку:</b></label>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+        <input id={`fee-${order.order_id}`} type="number" inputMode="decimal" min="0" max="1000000" step="0.01"
+          value={amount} onChange={(event) => { setAmount(event.target.value); setAmountState('idle'); }}
+          style={{ width: 120, minHeight: 44, padding: '6px 10px', font: 'inherit', borderRadius: 8, border: '1px solid #d0d5dd' }} />
+        <span>с.</span>
+        <button type="button" disabled={amountState === 'saving'} onClick={saveAmount}>
+          {amountState === 'saving' ? '…' : amountState === 'saved' ? '✓ Сохранено' : 'Сохранить'}</button>
+      </div>
+    </div>}
     {transitions[status].length > 0 && <div className="courier-order-actions">
       {transitions[status].map((next) => <button key={next} type="button" disabled={busy}
         onClick={() => changeStatus(next)}>{next === 'cancelled' ? 'Отменить' : `→ ${labels[next]}`}</button>)}

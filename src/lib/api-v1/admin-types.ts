@@ -37,6 +37,8 @@ export type AdminDashboardSummary = {
   sales_total: number | string;
   pharmacy_total: number | string;
   profit_total: number | string;
+  delivery_owner_total: number | string;
+  delivery_courier_total: number | string;
   origin_counts: {
     total_orders: number;
     client_orders: number;
@@ -230,6 +232,9 @@ export type AdminOrderSummary = {
   created_by_staff_account_id: 1 | 2 | 3 | null;
   fulfillment_pharmacy_id: 1 | 2 | null;
   created_by_staff_username: string | null;
+  delivery_courier_amount: number | string;
+  delivery_owner_amount: number | string;
+  delivery_fee: number | string;
 };
 
 export type AdminOrderItem = {

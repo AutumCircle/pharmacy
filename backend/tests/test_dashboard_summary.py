@@ -17,7 +17,8 @@ class DashboardSummaryTests(unittest.TestCase):
                 "instagram_orders": 2, "whatsapp_orders": 2, "phone_orders": 1,
                 "unspecified_source_orders": 1,
             },
-            {"sales_total": Decimal("250.00"), "pharmacy_total": Decimal("200.00")},
+            {"sales_total": Decimal("250.00"), "pharmacy_total": Decimal("200.00"),
+             "delivery_owner_total": Decimal("15.00"), "delivery_courier_total": Decimal("25.00")},
         ]
         cursor.fetchall.side_effect = [
             [{

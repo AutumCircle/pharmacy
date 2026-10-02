@@ -317,6 +317,16 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
 - Повторное удаление возвращает `409 ORDER_ALREADY_DELETED`, запрещённый статус — `409 ORDER_DELETE_STATE_CONFLICT`.
 - Успешная операция записывается в `admin_audit_log` вместе с actor и request ID.
 
+### 8.1.1 Цены позиций и доставка
+
+Оба вызова идут через тот же `PATCH /v1/admin/orders/{order_id}/status` (маршрут в API Gateway не добавляется); Lambda различает их по составу тела.
+
+- Цены позиции: `{ "order_item_id": 12, "selling_unit_price": 30, "base_unit_price": 25 }`. Обязателен `order_item_id` и хотя бы одна из цен (0.01–10 000 000). `line_total` и итог заказа пересчитываются в Lambda, прежняя и новая цены пишутся в `admin_audit_log`.
+- Доставка (админ): `{ "delivery_courier_amount": 12, "delivery_owner_amount": 8.5 }`, оба значения 0–1 000 000. `delivery_fee = delivery_courier_amount + delivery_owner_amount` вычисляется и не хранится отдельно. Сумма доставки не входит в `order_total`.
+- Доставка (курьер): `PATCH /v1/staff/orders/{order_id}/status` с телом `{ "delivery_courier_amount": 20 }`. Курьер меняет только свою часть, не видит долю владельца и не может менять отменённый заказ (`409 ORDER_STATUS_CONFLICT`).
+- `GET /v1/admin/orders*` возвращает `delivery_courier_amount`, `delivery_owner_amount`, `delivery_fee`; dashboard — `delivery_owner_total` и `delivery_courier_total` по доставленным заказам за период.
+- Миграция: `db/migrations/0018_order_delivery_fee.sql` (аддитивная, существующие заказы получают 0/0).
+
 ### 8.2 Categories
 
 - Create fields: `slug`, `name`, optional `icon`, `color`.

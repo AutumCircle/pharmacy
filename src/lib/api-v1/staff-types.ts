@@ -55,6 +55,7 @@ export type CourierOrder = {
   status: CourierOrderStatus;
   created_at: string;
   pharmacy_id: 1 | 2 | null;
+  delivery_courier_amount: number | string;
 };
 
 export type CourierOrderList = {
