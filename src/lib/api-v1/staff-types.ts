@@ -1,6 +1,7 @@
 export type StaffAccount = {
-  account_id: 1 | 2;
+  account_id: 1 | 2 | 3;
   username: string;
+  role: 'pharmacy' | 'courier';
   catalog_access: boolean;
   credential_version: number;
   password_set: boolean;
@@ -15,6 +16,7 @@ export type CreateStaffOrderRequest = {
   landmark: string;
   source: StaffOrderSource;
   items: Array<{ medicine_id: number; quantity: number }>;
+  pharmacy_id?: 1 | 2;
 };
 
 export type StaffOrderMedicine = {
@@ -32,7 +34,30 @@ export type StaffOrderCreated = {
   order_reference: string;
   status: 'pending';
   created_at: string;
-  created_by_staff_account_id: 1 | 2;
+  created_by_staff_account_id: 1 | 2 | 3;
   created_by_staff_username: string;
+  fulfillment_pharmacy_id: 1 | 2;
   order_source: StaffOrderSource;
+};
+
+export type CourierOrderStatus = 'pending' | 'confirmed' | 'delivering' | 'delivered' | 'cancelled';
+
+export type CourierOrder = {
+  order_id: string;
+  order_reference: string | null;
+  customer_name: string;
+  phone: string;
+  address: string;
+  landmark: string | null;
+  notes: string | null;
+  order_source: StaffOrderSource | null;
+  status: CourierOrderStatus;
+  created_at: string;
+  pharmacy_id: 1 | 2 | null;
+};
+
+export type CourierOrderList = {
+  data: CourierOrder[];
+  page: { next_cursor: string | null; has_more: boolean };
+  request_id: string;
 };

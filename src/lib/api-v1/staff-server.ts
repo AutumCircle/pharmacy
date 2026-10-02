@@ -1,13 +1,13 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { CreateStaffOrderRequest, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
+import type { CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
 type StaffRequestOptions = {
   token?: string;
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PATCH';
   body?: unknown;
   idempotencyKey?: string;
 };
@@ -51,7 +51,8 @@ export async function loginStaff(credentials: { username: string; password: stri
 
 export async function getStaffSession(token: string): Promise<StaffAccount> {
   const { data } = await request<ApiSuccessResponse<StaffAccount>>('session', { token });
-  if (!data || ![1, 2].includes(data.account_id) || typeof data.catalog_access !== 'boolean'
+  if (!data || ![1, 2, 3].includes(data.account_id) || typeof data.catalog_access !== 'boolean'
+    || data.role !== (data.account_id === 3 ? 'courier' : 'pharmacy')
     || typeof data.username !== 'string' || !Number.isInteger(data.credential_version)) throw new Error('UPSTREAM_INVALID_RESPONSE');
   return data;
 }
@@ -74,4 +75,20 @@ export function createStaffOrder(token: string, body: CreateStaffOrderRequest, i
 export function searchStaffOrderMedicines(token: string, query: string) {
   const params = new URLSearchParams({ q: query });
   return request<AdminNumberedListResponse<StaffOrderMedicine>>(`order-medicines?${params}`, { token });
+}
+
+export function listCourierOrders(token: string, values: { status?: CourierOrderStatus; cursor?: string; limit?: number }) {
+  const params = new URLSearchParams();
+  if (values.status) params.set('status', values.status);
+  if (values.cursor) params.set('cursor', values.cursor);
+  params.set('limit', String(values.limit ?? 20));
+  return request<CourierOrderList>(`orders?${params}`, { token });
+}
+
+export function updateCourierOrderStatus(token: string, orderId: string, body: {
+  status: CourierOrderStatus; expected_current_status: CourierOrderStatus; reason?: string;
+}) {
+  return request<ApiSuccessResponse<{ order_id: string; status: CourierOrderStatus; changed_at: string }>>(
+    `orders/${encodeURIComponent(orderId)}/status`, { token, method: 'PATCH', body },
+  );
 }

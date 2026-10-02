@@ -31,7 +31,7 @@ class ContractError(ValueError):
 
 ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items"}
 ORDER_ITEM_FIELDS = {"medicine_id", "quantity"}
-STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items"}
+STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "pharmacy_id"}
 STAFF_ORDER_SOURCES = frozenset({"instagram", "whatsapp", "phone"})
 STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"confirmed", "cancelled"}),
@@ -292,7 +292,7 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
             raise ContractError("DUPLICATE_ORDER_ITEM", "Order contains a duplicate medicine", http_status=400)
         seen.add(medicine_id)
         items.append({"medicine_id": medicine_id, "quantity": quantity})
-    return {
+    result = {
         "customer_name": customer_name,
         "phone": f"+992{phone_value}",
         "address": address,
@@ -300,6 +300,13 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
         "source": source,
         "items": items,
     }
+    if "pharmacy_id" in payload:
+        pharmacy_id = payload["pharmacy_id"]
+        if not _is_integer(pharmacy_id) or pharmacy_id not in (1, 2):
+            raise ContractError("VALIDATION_ERROR", "Request validation failed",
+                                fields={"pharmacy_id": "must be 1 or 2"})
+        result["pharmacy_id"] = pharmacy_id
+    return result
 
 
 def validate_status_transition(

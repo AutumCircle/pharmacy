@@ -41,6 +41,7 @@ export type AdminDashboardSummary = {
     total_orders: number;
     client_orders: number;
     pharmacy_orders: number;
+    courier_orders: number;
     pharmacy_1_orders: number;
     pharmacy_2_orders: number;
     instagram_orders: number;
@@ -55,7 +56,8 @@ export type AdminDashboardSummary = {
     created_at: string;
     order_total: number | string;
     status: OrderStatus;
-    created_by_staff_account_id: 1 | 2 | null;
+    created_by_staff_account_id: 1 | 2 | 3 | null;
+    fulfillment_pharmacy_id: 1 | 2 | null;
     order_source: 'instagram' | 'whatsapp' | 'phone' | null;
   }>;
   delivered_orders: Array<{
@@ -225,7 +227,8 @@ export type AdminOrderSummary = {
   created_at: string;
   order_source: 'instagram' | 'whatsapp' | 'phone' | null;
   landmark: string | null;
-  created_by_staff_account_id: 1 | 2 | null;
+  created_by_staff_account_id: 1 | 2 | 3 | null;
+  fulfillment_pharmacy_id: 1 | 2 | null;
   created_by_staff_username: string | null;
 };
 

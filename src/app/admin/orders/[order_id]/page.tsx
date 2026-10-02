@@ -32,7 +32,9 @@ export default async function AdminOrderDetailPage({
       <Link href="/admin/orders">← Назад к заказам</Link>
       <h1 style={{ margin: '24px 0' }}>Заказ {order.order_reference || order.order_id}</h1>
       <section style={{ background: 'white', padding: 20, borderRadius: 12, marginBottom: 20 }}>
-        {order.created_by_staff_account_id && <p><strong>Принял заказ:</strong> Аптека {order.created_by_staff_account_id} · {order.created_by_staff_username}</p>}
+        {order.created_by_staff_account_id && <p><strong>Ввёл заказ:</strong> {order.created_by_staff_account_id === 3
+          ? `Доставщик ${order.created_by_staff_username} · аптека ${order.fulfillment_pharmacy_id}`
+          : `Аптека ${order.created_by_staff_account_id} · ${order.created_by_staff_username}`}</p>}
         {order.order_source && <p><strong>Источник:</strong> {sourceLabels[order.order_source]}</p>}
         <p><strong>Клиент:</strong> {order.customer_name || 'Не указан'}</p>
         <p><strong>Телефон:</strong> {order.phone}</p>

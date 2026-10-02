@@ -472,9 +472,10 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
             SELECT
                 COUNT(*) AS total_orders,
                 COUNT(*) FILTER (WHERE created_by_staff_account_id IS NULL) AS client_orders,
-                COUNT(*) FILTER (WHERE created_by_staff_account_id IS NOT NULL) AS pharmacy_orders,
-                COUNT(*) FILTER (WHERE created_by_staff_account_id = 1) AS pharmacy_1_orders,
-                COUNT(*) FILTER (WHERE created_by_staff_account_id = 2) AS pharmacy_2_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id IN (1, 2)) AS pharmacy_orders,
+                COUNT(*) FILTER (WHERE created_by_staff_account_id = 3) AS courier_orders,
+                COUNT(*) FILTER (WHERE COALESCE(fulfillment_pharmacy_id, created_by_staff_account_id) = 1) AS pharmacy_1_orders,
+                COUNT(*) FILTER (WHERE COALESCE(fulfillment_pharmacy_id, created_by_staff_account_id) = 2) AS pharmacy_2_orders,
                 COUNT(*) FILTER (WHERE created_by_staff_account_id IS NOT NULL
                                   AND order_source = 'instagram') AS instagram_orders,
                 COUNT(*) FILTER (WHERE created_by_staff_account_id IS NOT NULL
@@ -501,6 +502,7 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
                 COALESCE(o.order_total, o.items_subtotal, o.total_price, 0) AS order_total,
                 o.status,
                 o.created_by_staff_account_id,
+                o.fulfillment_pharmacy_id,
                 o.order_source
             FROM orders o
             WHERE o.deleted_at IS NULL
@@ -807,6 +809,16 @@ def create_staff_order(
     current_request_id: str,
 ) -> tuple[dict[str, Any], int, dict[str, Any] | None]:
     request = validate_staff_order_request(payload)
+    courier = account["account_id"] == 3
+    if courier:
+        if request.get("pharmacy_id") not in (1, 2) or request["items"]:
+            raise ContractError("VALIDATION_ERROR", "Доставщик выбирает аптеку и заполняет заказ без лекарств")
+    elif account["account_id"] in (1, 2):
+        if "pharmacy_id" in request:
+            raise ContractError("VALIDATION_ERROR", "Аптека определяется учётной записью")
+    else:
+        raise ContractError("FORBIDDEN", "Аккаунт не может создавать заказы", http_status=403)
+    pharmacy_id = request["pharmacy_id"] if courier else account["account_id"]
     normalized_key = validate_idempotency_key(idempotency_key)
     request_hash = hashlib.sha256(
         json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -878,16 +890,16 @@ def create_staff_order(
                 user_id, customer_name, phone, phone_normalized, address, notes,
                 total_price, items_subtotal, order_total, public_id, status,
                 payment_method, payment_status, currency,
-                created_by_staff_account_id, order_source, landmark
+                created_by_staff_account_id, order_source, landmark, fulfillment_pharmacy_id
             )
             VALUES (NULL, %s, %s, %s, %s, NULL, %s, %s, %s, %s, 'pending',
-                    'cash_on_delivery', 'unpaid', 'TJS', %s, %s, %s)
+                    'cash_on_delivery', 'unpaid', 'TJS', %s, %s, %s, %s)
             RETURNING id, public_id, status, created_at
             """,
             (
                 request["customer_name"], request["phone"], request["phone"], request["address"],
                 selling_total, selling_total, selling_total, public_id,
-                account["account_id"], request["source"], request["landmark"],
+                account["account_id"], request["source"], request["landmark"], pharmacy_id,
             ),
         )
         order = dict(cur.fetchone())
@@ -922,6 +934,7 @@ def create_staff_order(
             "status": order["status"], "created_at": order["created_at"],
             "created_by_staff_account_id": account["account_id"],
             "created_by_staff_username": account["username"], "order_source": request["source"],
+            "fulfillment_pharmacy_id": pharmacy_id,
             "items": order_items, "pharmacy_total": str(base_total), "order_total": str(selling_total),
         }
         cur.execute(
@@ -936,18 +949,98 @@ def create_staff_order(
         _write_admin_audit(
             cur, actor_id=f"staff:{account['account_id']}", action="staff.order.created",
             resource_type="order", resource_id=order["public_id"], request=current_request_id,
-            details={"staff_account_id": account["account_id"], "source": request["source"]},
+            details={"staff_account_id": account["account_id"], "pharmacy_id": pharmacy_id,
+                     "source": request["source"]},
         )
         notification = {
             "notification_kind": "staff_manual_order", "admin_order_id": int(order["id"]),
             "order_reference": order_reference, "customer_name": request["customer_name"],
             "phone": request["phone"], "address": request["address"], "landmark": request["landmark"],
             "order_source": request["source"], "created_by_staff_account_id": account["account_id"],
-            "created_by_staff_username": account["username"], "items": order_items,
+            "created_by_staff_username": account["username"],
+            "fulfillment_pharmacy_id": pharmacy_id, "items": order_items,
             "base_total": str(base_total), "order_total": str(selling_total),
             "profit": str(selling_total - base_total),
         }
         return response, 201, notification
+
+
+def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
+    """Delivery-only projection: no catalogue prices, payment or admin fields."""
+    if set(query) - {"limit", "cursor", "status"}:
+        raise ContractError("VALIDATION_ERROR", "Unknown order filter")
+    limit = min(_limit(query), 50)
+    clauses = ["o.deleted_at IS NULL"]
+    params: list[Any] = []
+    status = query.get("status")
+    if status:
+        if status not in STATUS_TRANSITIONS:
+            raise ContractError("VALIDATION_ERROR", "status is invalid")
+        clauses.append("o.status = %s")
+        params.append(status)
+    cursor = _decode_cursor(query.get("cursor"))
+    if cursor:
+        try:
+            created_at = datetime.fromisoformat(cursor["created_at"])
+            order_id = int(cursor["id"])
+            if order_id <= 0:
+                raise ValueError()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractError("VALIDATION_ERROR", "cursor is invalid") from exc
+        clauses.append("(o.created_at, o.id) < (%s, %s)")
+        params.extend([created_at, order_id])
+    params.append(limit + 1)
+    with transaction() as cur:
+        cur.execute(
+            f"""SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
+                       o.address, o.landmark, o.notes, o.order_source, o.status, o.created_at,
+                       COALESCE(o.fulfillment_pharmacy_id,
+                           CASE WHEN o.created_by_staff_account_id IN (1, 2)
+                                THEN o.created_by_staff_account_id END) AS pharmacy_id
+                FROM orders o
+                WHERE {' AND '.join(clauses)}
+                ORDER BY o.created_at DESC, o.id DESC LIMIT %s""",
+            tuple(params),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        next_cursor = _encode_cursor({"created_at": last["created_at"].isoformat(), "id": last["id"]})
+    for row in rows:
+        row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
+        row.pop("id")
+    return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
+
+
+def update_courier_order_status(order_id: str, payload: dict[str, Any], current_request_id: str) -> dict[str, Any]:
+    if set(payload) - {"status", "expected_current_status", "reason"} or not {
+        "status", "expected_current_status"
+    } <= set(payload):
+        raise ContractError("VALIDATION_ERROR", "Invalid status update request")
+    lookup, lookup_values = _order_lookup(order_id)
+    with transaction() as cur:
+        cur.execute(f"SELECT id, status FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE", lookup_values)
+        order = cur.fetchone()
+        if not order:
+            raise ContractError("ORDER_NOT_FOUND", "Order was not found", http_status=404)
+        if order["status"] != payload["expected_current_status"]:
+            raise ContractError("ORDER_STATUS_CONFLICT", "Order status changed", http_status=409)
+        current, new, reason = validate_status_transition(
+            order["status"], payload["status"], reason=payload.get("reason")
+        )
+        cur.execute("UPDATE orders SET status = %s WHERE id = %s", (new, order["id"]))
+        cur.execute("""INSERT INTO order_status_history
+            (order_id, from_status, to_status, actor_type, actor_id, reason)
+            VALUES (%s, %s, %s, 'staff', 'courier:3', %s) RETURNING created_at""",
+            (order["id"], current, new, reason))
+        changed_at = cur.fetchone()["created_at"]
+        _write_admin_audit(cur, actor_id="staff:3", action="courier.order.status_changed",
+                           resource_type="order", resource_id=order_id, request=current_request_id,
+                           details={"from_status": current, "to_status": new})
+    return {"order_id": order_id, "status": new, "changed_at": changed_at}
 
 
 def list_orders(query: dict[str, Any]) -> dict[str, Any]:
@@ -1002,6 +1095,7 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
                    o.address, o.items_subtotal, o.order_total, o.currency, o.status,
                    o.payment_method, o.payment_status, o.notes, o.created_at,
                    o.order_source, o.landmark, o.created_by_staff_account_id,
+                   o.fulfillment_pharmacy_id,
                    sa.username AS created_by_staff_username
             FROM orders o
             LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
@@ -1033,7 +1127,8 @@ def get_order(order_id: str) -> dict[str, Any]:
             SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone, o.address,
                    o.items_subtotal, o.order_total, o.currency, o.status, o.payment_method,
                    o.payment_status, o.notes, o.created_at, o.order_source, o.landmark,
-                   o.created_by_staff_account_id, sa.username AS created_by_staff_username
+                   o.created_by_staff_account_id, o.fulfillment_pharmacy_id,
+                   sa.username AS created_by_staff_username
             FROM orders o
             LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
             WHERE {qualified_lookup} AND o.deleted_at IS NULL
@@ -2631,9 +2726,15 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     return success_document(list_medicines(event.get("queryStringParameters") or {}), request=current_request_id)
                 return success(catalog_stats(), request=current_request_id)
             if staff_method == "GET" and staff_path == "/v1/staff/order-medicines":
-                staff_accounts.session_account(event)
+                staff_accounts.session_account(event, pharmacy=True)
                 return success_document(
                     search_staff_order_medicines(event.get("queryStringParameters") or {}),
+                    request=current_request_id,
+                )
+            if staff_method == "GET" and staff_path == "/v1/staff/orders":
+                staff_accounts.session_account(event, courier=True)
+                return success_document(
+                    list_courier_orders(event.get("queryStringParameters") or {}),
                     request=current_request_id,
                 )
             if staff_method == "POST" and staff_path == "/v1/staff/orders":
@@ -2644,6 +2745,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 )
                 payload = {**result, "_notification": notification} if notification else result
                 return success(payload, status_code=status_code, request=current_request_id)
+            status_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/status", staff_path)
+            if staff_method == "PATCH" and status_match:
+                staff_accounts.session_account(event, courier=True)
+                return success(update_courier_order_status(
+                    status_match.group(1), _body(event), current_request_id,
+                ), request=current_request_id)
             raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
         actor_id = require_admin_identity(event)
         method = str(event.get("httpMethod") or "").upper()

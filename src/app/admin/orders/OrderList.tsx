@@ -86,7 +86,9 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
                 <div>{new Date(order.created_at).toLocaleString('ru-RU')} · {order.customer_name || 'Имя не указано'}</div>
                 <div style={{ color: '#666', marginTop: 4 }}>{order.phone} · {order.address}</div>
                 {order.created_by_staff_account_id && <div style={{ color: '#a4141b', marginTop: 6, fontWeight: 650 }}>
-                  Аптека {order.created_by_staff_account_id} · {order.created_by_staff_username}
+                  {order.created_by_staff_account_id === 3
+                    ? `Доставщик ${order.created_by_staff_username} · аптека ${order.fulfillment_pharmacy_id}`
+                    : `Аптека ${order.created_by_staff_account_id} · ${order.created_by_staff_username}`}
                   {order.order_source ? ` · ${sourceLabels[order.order_source]}` : ''}
                 </div>}
                 <div style={{ marginTop: 8, fontWeight: 700 }}>

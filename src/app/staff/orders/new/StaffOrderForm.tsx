@@ -9,7 +9,8 @@ const sources: Array<{ value: StaffOrderSource; label: string }> = [
   { value: 'phone', label: 'Телефонный звонок' },
 ];
 
-export default function StaffOrderForm({ accountId, username }: { accountId: 1 | 2; username: string }) {
+export default function StaffOrderForm({ accountId, username }: { accountId: 1 | 2 | 3; username: string }) {
+  const isCourier = accountId === 3;
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [created, setCreated] = useState('');
@@ -52,7 +53,8 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       address: String(data.get('address') || '').trim(),
       landmark: String(data.get('landmark') || '').trim(),
       source: String(data.get('source') || ''),
-      items: items.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })),
+      items: isCourier ? [] : items.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })),
+      ...(isCourier ? { pharmacy_id: Number(data.get('pharmacy_id')) } : {}),
     };
     try {
       const response = await fetch('/api/staff/orders', {
@@ -73,14 +75,21 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
   return (
     <section className="staff-order-page">
       <div className="staff-title-row">
-        <div><h1>Новый заказ</h1><p>Аптека {accountId} · {username}</p></div>
+        <div><h1>Новый заказ</h1><p>{isCourier ? `Доставщик · ${username}` : `Аптека ${accountId} · ${username}`}</p></div>
       </div>
       {created && <div className={notificationSent ? 'staff-order-success' : 'staff-order-warning'}>
         Заказ {created} сохранён. {notificationSent ? 'Владелец получил уведомление.' : 'Уведомление не отправлено — сообщите администратору.'}
       </div>}
       {error && <div className="staff-login-error">{error}</div>}
       <form key={formKey} className="staff-order-form" onSubmit={submit}>
-        {accountId === 2 ? (
+        {isCourier && <label>Аптека
+          <select name="pharmacy_id" required defaultValue="">
+            <option value="" disabled>Выберите аптеку</option>
+            <option value="1">Аптека 1</option>
+            <option value="2">Аптека 2</option>
+          </select>
+        </label>}
+        {isCourier ? null : accountId === 2 ? (
           <fieldset className="staff-medicine-picker">
             <legend>Лекарства</legend>
             <p>Добавление лекарств в заказ пока недоступно.</p>

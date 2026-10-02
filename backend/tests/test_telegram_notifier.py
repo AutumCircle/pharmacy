@@ -104,6 +104,14 @@ class TelegramDispatchTests(unittest.TestCase):
         self.assertEqual(send_message.call_count, 1)
         self.assertEqual(json.loads(response["body"])["data"]["messages_sent"], 1)
 
+    def test_courier_notification_uses_selected_pharmacy(self):
+        event = {"notification_kind": "staff_manual_order", "created_by_staff_account_id": 3,
+                 "created_by_staff_username": "courier", "fulfillment_pharmacy_id": 2}
+        text = format_owner_message(event)
+        self.assertIn("аптеки 2", text)
+        self.assertIn("Доставщик: courier", text)
+        self.assertNotIn("аптеки 3", text)
+
     @patch("backend.v1.telegram_notifier.lambda_function._send_message")
     def test_staff_order_sends_separate_courier_message_when_configured(self, send_message):
         event = {

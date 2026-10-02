@@ -169,6 +169,13 @@ def build() -> Path:
         "file": contact_destination.name, "handler": "lambda_function.lambda_handler",
         "sha256": hashlib.sha256(contact_payload).hexdigest(), "size_bytes": len(contact_payload),
     })
+    courier_destination = OUTPUT / "migration-0017-courier-once.zip"
+    _write_deterministic_zip(courier_destination, [("lambda_function.py", ROOT / "backend" / "operations" / "courier_migration_once" / "lambda_function.py")])
+    courier_payload = courier_destination.read_bytes()
+    manifest_packages.append({
+        "file": courier_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(courier_payload).hexdigest(), "size_bytes": len(courier_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

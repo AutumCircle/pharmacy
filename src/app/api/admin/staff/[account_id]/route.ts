@@ -12,7 +12,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ accou
     const { account_id: rawAccountId } = await context.params;
     const accountId = Number(rawAccountId);
     const body: unknown = await request.json();
-    if (![1, 2].includes(accountId) || !body || typeof body !== 'object' || Array.isArray(body)) {
+    if (![1, 2, 3].includes(accountId) || !body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json({ error: { message: 'Некорректные данные' } }, { status: 400 });
     }
     const fields = body as Record<string, unknown>;

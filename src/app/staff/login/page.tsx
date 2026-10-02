@@ -41,7 +41,7 @@ export default function StaffLoginPage() {
         <div className="staff-login-heading">
           <div className="staff-logo">V</div>
           <h1>Vatan Pharmacy</h1>
-          <p>Каталог для работников аптеки</p>
+          <p>Вход для сотрудников и доставщика</p>
         </div>
         <form onSubmit={handleSubmit}>
           <label>Логин<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label>

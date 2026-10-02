@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { STAFF_SESSION_COOKIE } from '@/lib/admin-session';
-import { createStaffOrder } from '@/lib/api-v1/staff-server';
+import { createStaffOrder, listCourierOrders } from '@/lib/api-v1/staff-server';
 import { sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 import type { CreateStaffOrderRequest } from '@/lib/api-v1/staff-types';
@@ -9,12 +9,13 @@ import type { CreateStaffOrderRequest } from '@/lib/api-v1/staff-types';
 function isRequest(value: unknown): value is CreateStaffOrderRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const body = value as Record<string, unknown>;
-  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'source', 'items']);
+  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'source', 'items', 'pharmacy_id']);
   return Object.keys(body).every((key) => allowed.has(key))
     && (body.customer_name === undefined || typeof body.customer_name === 'string')
     && typeof body.phone === 'string' && /^\d{9}$/.test(body.phone)
     && typeof body.address === 'string' && typeof body.landmark === 'string'
     && ['instagram', 'whatsapp', 'phone'].includes(String(body.source))
+    && (body.pharmacy_id === undefined || body.pharmacy_id === 1 || body.pharmacy_id === 2)
     && Array.isArray(body.items) && body.items.length <= 50
     && body.items.every((item) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
@@ -23,6 +24,27 @@ function isRequest(value: unknown): value is CreateStaffOrderRequest {
         && Number.isInteger(fields.medicine_id) && Number(fields.medicine_id) > 0
         && Number.isInteger(fields.quantity) && Number(fields.quantity) >= 1 && Number(fields.quantity) <= 99;
     });
+}
+
+export async function GET(request: Request) {
+  try {
+    const token = (await cookies()).get(STAFF_SESSION_COOKIE)?.value;
+    if (!token) return NextResponse.json({ error: { message: 'Требуется вход' } }, { status: 401 });
+    const params = new URL(request.url).searchParams;
+    if ([...params.keys()].some((key) => !['status', 'cursor'].includes(key))) {
+      return NextResponse.json({ error: { message: 'Неверный фильтр' } }, { status: 400 });
+    }
+    const status = params.get('status') || undefined;
+    if (status && !['pending', 'confirmed', 'delivering', 'delivered', 'cancelled'].includes(status)) {
+      return NextResponse.json({ error: { message: 'Неверный статус' } }, { status: 400 });
+    }
+    const cursor = params.get('cursor') || undefined;
+    if (cursor && cursor.length > 500) return NextResponse.json({ error: { message: 'Неверная страница' } }, { status: 400 });
+    const response = await listCourierOrders(token, { status: status as Parameters<typeof listCourierOrders>[1]['status'], cursor });
+    return NextResponse.json(response, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    return apiRouteError(error);
+  }
 }
 
 export async function POST(request: Request) {

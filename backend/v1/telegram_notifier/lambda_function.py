@@ -66,15 +66,16 @@ def _item_lines(event: dict[str, Any], price_key: str) -> list[str]:
 def format_owner_message(event: dict[str, Any]) -> str:
     if event.get("notification_kind") == "staff_manual_order":
         reference, customer, phone, address = _identity(event)
-        account_id = html.escape(str(event.get("created_by_staff_account_id") or "—"))
+        account_id = html.escape(str(event.get("fulfillment_pharmacy_id") or event.get("created_by_staff_account_id") or "—"))
         username = html.escape(str(event.get("created_by_staff_username") or "—"))
+        actor_label = "Доставщик" if event.get("created_by_staff_account_id") == 3 else "Сотрудник"
         source_labels = {"instagram": "Instagram", "whatsapp": "WhatsApp", "phone": "Телефонный звонок"}
         source = source_labels.get(str(event.get("order_source")), "—")
         landmark = html.escape(str(event.get("landmark") or "—"))
         lines = [
             f"🏥 <b>Новый заказ из аптеки {account_id}</b>",
             f"🧾 Заказ: {reference}",
-            f"👤 Сотрудник: {username}",
+            f"👤 {actor_label}: {username}",
             f"📨 Источник: {source}",
             "",
             f"Клиент: {customer}",
@@ -144,7 +145,8 @@ def format_delivery_message(event: dict[str, Any]) -> str:
     ]
     if event.get("notification_kind") == "staff_manual_order":
         landmark = html.escape(str(event.get("landmark") or "—"))
-        lines.insert(1, f"🏥 Аптека {html.escape(str(event.get('created_by_staff_account_id') or '—'))}")
+        pharmacy_id = event.get("fulfillment_pharmacy_id") or event.get("created_by_staff_account_id")
+        lines.insert(1, f"🏥 Аптека {html.escape(str(pharmacy_id or '—'))}")
         lines.append(f"🧭 Ориентир: {landmark}")
         items = event.get("items") if isinstance(event.get("items"), list) else []
         if items:

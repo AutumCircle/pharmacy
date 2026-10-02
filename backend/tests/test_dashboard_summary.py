@@ -12,7 +12,7 @@ class DashboardSummaryTests(unittest.TestCase):
         cursor.fetchone.side_effect = [
             {"pending": 3, "confirmed": 2, "delivering": 1, "delivered": 4, "cancelled": 1},
             {
-                "total_orders": 10, "client_orders": 4, "pharmacy_orders": 6,
+                "total_orders": 10, "client_orders": 4, "pharmacy_orders": 6, "courier_orders": 0,
                 "pharmacy_1_orders": 2, "pharmacy_2_orders": 4,
                 "instagram_orders": 2, "whatsapp_orders": 2, "phone_orders": 1,
                 "unspecified_source_orders": 1,

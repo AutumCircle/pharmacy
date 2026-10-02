@@ -111,6 +111,38 @@ class StaffTests(unittest.TestCase):
         self.assertIn('jsonb_to_recordset', sql_calls)
         self.assertIn('staff.order.created', str(order_cursor.execute.call_args_list))
 
+    def test_courier_creates_attributed_order_without_medicines(self):
+        courier = {**self.account, 'account_id': 3, 'username': 'courier',
+                   'catalog_access': False, 'role': 'courier'}
+        order_cursor = Mock()
+        order_cursor.fetchone.side_effect = [
+            {'id': 1},
+            {'id': 12, 'public_id': 'ord_test', 'status': 'pending', 'created_at': '2026-10-02T10:00:00Z'},
+        ]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            response, status, notification = create_staff_order({
+                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone', 'items': [], 'pharmacy_id': 2,
+            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+        self.assertEqual(status, 201)
+        self.assertEqual(response['created_by_staff_account_id'], 3)
+        self.assertEqual(response['fulfillment_pharmacy_id'], 2)
+        self.assertEqual(notification['fulfillment_pharmacy_id'], 2)
+        self.assertNotIn('jsonb_to_recordset', ' '.join(call.args[0] for call in order_cursor.execute.call_args_list))
+
+    def test_courier_cannot_add_medicines_or_skip_pharmacy(self):
+        courier = {**self.account, 'account_id': 3}
+        base = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone', 'items': []}
+        for payload in (base, {**base, 'pharmacy_id': 1, 'items': [{'medicine_id': 44, 'quantity': 1}]}):
+            with self.assertRaises(ContractError):
+                create_staff_order(payload, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+
     def test_employee_without_catalog_cannot_read_catalog(self):
         without_catalog = {**self.account, 'account_id': 1, 'catalog_access': False}
         self.cursor.fetchone.return_value = without_catalog
@@ -119,6 +151,30 @@ class StaffTests(unittest.TestCase):
                 response = lambda_handler(self.event(path, token=staff.create_session(without_catalog)), None)
                 self.assertEqual(response['statusCode'], 403)
                 medicines.assert_not_called()
+
+    def test_courier_cannot_read_catalog_or_medicine_picker(self):
+        courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
+        self.cursor.fetchone.return_value = courier
+        token = staff.create_session(courier)
+        for path in ('/v1/staff/medicines', '/v1/staff/catalog/stats', '/v1/staff/order-medicines'):
+            response = lambda_handler(self.event(path, token=token), None)
+            self.assertEqual(response['statusCode'], 403)
+
+    def test_only_courier_can_list_and_change_order_status(self):
+        courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
+        self.cursor.fetchone.return_value = self.account
+        response = lambda_handler(self.event('/v1/staff/orders', token=staff.create_session(self.account)), None)
+        self.assertEqual(response['statusCode'], 403)
+        self.cursor.fetchone.return_value = courier
+        with patch('backend.v1.admin_api.lambda_function.list_courier_orders',
+                   return_value={'data': [], 'page': {'has_more': False, 'next_cursor': None}}):
+            response = lambda_handler(self.event('/v1/staff/orders', token=staff.create_session(courier)), None)
+            self.assertEqual(response['statusCode'], 200)
+        path = '/v1/staff/orders/ord_' + 'a' * 32 + '/status'
+        self.cursor.fetchone.return_value = self.account
+        response = lambda_handler(self.event(path, 'PATCH', token=staff.create_session(self.account),
+                                           body={'status': 'confirmed', 'expected_current_status': 'pending'}), None)
+        self.assertEqual(response['statusCode'], 403)
 
     def test_employee_with_catalog_can_read_catalog(self):
         with_catalog = {**self.account, 'account_id': 2, 'catalog_access': True}
@@ -157,7 +213,7 @@ class StaffTests(unittest.TestCase):
         self.cursor.fetchall.return_value = [self.account]
         response = lambda_handler(self.event('/v1/admin/staff', admin=True), None)
         self.assertEqual(response['statusCode'], 200)
-        self.assertNotIn('password_hash', self.cursor.execute.call_args.args[0])
+        self.assertIn('password_hash IS NOT NULL AS password_set', self.cursor.execute.call_args.args[0])
         self.assertNotIn('password_hash', response['body'])
 
     def test_update_increments_version_and_audits_no_secrets(self):
@@ -176,8 +232,8 @@ class StaffTests(unittest.TestCase):
         staff.update_account(1, {'username': 'after'}, 'admin', 'request', Mock())
         self.assertIsNone(self.cursor.execute.call_args.args[1][1])
 
-    def test_reject_permission_changes_and_third_account(self):
-        for account_id, payload in ((3, {'username': 'third'}), (2, {'catalog_access': True}), (1, {'password': ''})):
+    def test_reject_permission_changes_and_unknown_account(self):
+        for account_id, payload in ((4, {'username': 'fourth'}), (2, {'catalog_access': True}), (1, {'password': ''})):
             with self.assertRaises(ContractError):
                 staff.update_account(account_id, payload, 'admin', 'request', Mock())
         self.cursor.execute.assert_not_called()

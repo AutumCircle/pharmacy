@@ -47,7 +47,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
     period_days: days, order_counts: { pending: 0, confirmed: 0, delivering: 0, delivered: 0, cancelled: 0 },
     new_orders: 0, active_orders: 0, sales_total: 0, pharmacy_total: 0, profit_total: 0,
     origin_counts: {
-      total_orders: 0, client_orders: 0, pharmacy_orders: 0, pharmacy_1_orders: 0,
+      total_orders: 0, client_orders: 0, pharmacy_orders: 0, courier_orders: 0, pharmacy_1_orders: 0,
       pharmacy_2_orders: 0, instagram_orders: 0, whatsapp_orders: 0,
       phone_orders: 0, unspecified_source_orders: 0,
     },
@@ -77,8 +77,9 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
     { label: 'Все заказы', value: summary.origin_counts.total_orders, color: '#37474f' },
     { label: 'Клиенты сайта', value: summary.origin_counts.client_orders, color: '#1565c0' },
     { label: 'Из аптек', value: summary.origin_counts.pharmacy_orders, color: '#6a1b9a' },
-    { label: 'Аптека 1', value: summary.origin_counts.pharmacy_1_orders, color: '#00838f' },
-    { label: 'Аптека 2', value: summary.origin_counts.pharmacy_2_orders, color: '#ad4d00' },
+    { label: 'Ввёл доставщик', value: summary.origin_counts.courier_orders, color: '#455a64' },
+    { label: 'Для аптеки 1', value: summary.origin_counts.pharmacy_1_orders, color: '#00838f' },
+    { label: 'Для аптеки 2', value: summary.origin_counts.pharmacy_2_orders, color: '#ad4d00' },
   ];
   const channelCards = [
     { label: 'Instagram', value: summary.origin_counts.instagram_orders },
@@ -128,7 +129,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
             </div>
           ))}
         </div>
-        <h3 style={{ fontSize: 17, margin: '22px 0 10px' }}>Как поступили заказы из аптек</h3>
+        <h3 style={{ fontSize: 17, margin: '22px 0 10px' }}>Каналы заказов, введённых сотрудниками</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
           {channelCards.map((card) => (
             <div key={card.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: 13, borderRadius: 9, background: '#faf2f3' }}>
@@ -146,7 +147,9 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
                   <tr key={order.order_id}>
                     <td><Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`}>#{order.order_reference}</Link></td>
                     <td>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE })}</td>
-                    <td>{order.created_by_staff_account_id ? `Аптека ${order.created_by_staff_account_id}` : 'Клиент сайта'}</td>
+                    <td>{order.created_by_staff_account_id === 3
+                      ? `Доставщик · аптека ${order.fulfillment_pharmacy_id}`
+                      : order.created_by_staff_account_id ? `Аптека ${order.created_by_staff_account_id}` : 'Клиент сайта'}</td>
                     <td>{order.order_source ? SOURCE_LABELS[order.order_source] : order.created_by_staff_account_id ? 'Не указан' : 'Сайт'}</td>
                     <td>{order.customer_name || 'Не указано'}</td>
                     <td>{Number(order.order_total).toFixed(2)} {summary.currency}</td>

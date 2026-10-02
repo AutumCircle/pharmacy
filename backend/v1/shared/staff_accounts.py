@@ -1,4 +1,4 @@
-"""Two fixed employee accounts; passwords and session authority stay in Lambda."""
+"""Fixed pharmacy and courier accounts; passwords and sessions stay in Lambda."""
 from __future__ import annotations
 
 import base64
@@ -15,7 +15,9 @@ from .database import transaction
 
 ITERATIONS = 600_000
 SESSION_SECONDS = 8 * 60 * 60
-PUBLIC_COLUMNS = "account_id, username, catalog_access, credential_version, true AS password_set"
+PUBLIC_COLUMNS = ("account_id, username, catalog_access, credential_version, "
+                  "password_hash IS NOT NULL AS password_set, "
+                  "CASE WHEN account_id = 3 THEN 'courier' ELSE 'pharmacy' END AS role")
 SERVICE_TOKEN_CONTEXT = b"pharmacy-vatan:staff-api:v1"
 
 
@@ -85,7 +87,7 @@ def require_service(event):
         raise ContractError("FORBIDDEN", "Staff service authorization is required", http_status=403)
 
 
-def session_account(event, *, catalog=False):
+def session_account(event, *, catalog=False, courier=False, pharmacy=False):
     headers = {str(k).lower(): v for k, v in (event.get("headers") or {}).items()}
     token = headers.get("x-staff-session", "")
     try:
@@ -98,7 +100,7 @@ def session_account(event, *, catalog=False):
         claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         if (claims.get("role") != "staff" or type(claims.get("expiresAt")) is not int
                 or claims["expiresAt"] <= time.time() or type(claims.get("accountId")) is not int
-                or claims["accountId"] not in (1, 2) or type(claims.get("credentialVersion")) is not int):
+                or claims["accountId"] not in (1, 2, 3) or type(claims.get("credentialVersion")) is not int):
             raise ValueError()
     except (ValueError, TypeError, KeyError, AttributeError):
         raise ContractError("SESSION_REQUIRED", "Войдите снова", http_status=401) from None
@@ -110,6 +112,10 @@ def session_account(event, *, catalog=False):
         raise ContractError("SESSION_REQUIRED", "Войдите снова", http_status=401)
     if catalog and not account["catalog_access"]:
         raise ContractError("FORBIDDEN", "Доступ пока не предоставлен", http_status=403)
+    if courier and account["account_id"] != 3:
+        raise ContractError("FORBIDDEN", "Доступ только для доставщика", http_status=403)
+    if pharmacy and account["account_id"] not in (1, 2):
+        raise ContractError("FORBIDDEN", "Доступ только для аптеки", http_status=403)
     return dict(account)
 
 
@@ -147,8 +153,8 @@ def list_accounts():
 
 
 def update_account(account_id, payload, actor_id, request_id, audit):
-    if account_id not in (1, 2) or not payload or set(payload) - {"username", "password"}:
-        raise ContractError("VALIDATION_ERROR", "Можно изменить только логин и пароль двух сотрудников")
+    if account_id not in (1, 2, 3) or not payload or set(payload) - {"username", "password"}:
+        raise ContractError("VALIDATION_ERROR", "Можно изменить только логин и пароль сотрудника")
     new_username = username(payload["username"]) if "username" in payload else None
     new_hash = hash_password(validate_password(payload["password"])) if "password" in payload else None
     with transaction() as cur:
