@@ -27,7 +27,7 @@ const colors: Record<OrderStatus, string> = {
 const transitions: Record<OrderStatus, OrderStatus[]> = {
   pending: ['confirmed', 'cancelled'],
   confirmed: ['delivering', 'cancelled'],
-  delivering: ['delivered'],
+  delivering: ['delivered', 'cancelled'],
   delivered: [],
   cancelled: [],
 };

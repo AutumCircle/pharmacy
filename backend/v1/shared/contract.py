@@ -31,12 +31,12 @@ class ContractError(ValueError):
 
 ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items"}
 ORDER_ITEM_FIELDS = {"medicine_id", "quantity"}
-STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "pharmacy_id"}
+STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "pharmacy_id", "comment"}
 STAFF_ORDER_SOURCES = frozenset({"instagram", "whatsapp", "phone"})
 STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"confirmed", "cancelled"}),
     "confirmed": frozenset({"delivering", "cancelled"}),
-    "delivering": frozenset({"delivered"}),
+    "delivering": frozenset({"delivered", "cancelled"}),
     "delivered": frozenset(),
     "cancelled": frozenset(),
 }
@@ -230,7 +230,7 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
 
 
 def validate_staff_order_request(payload: Any) -> dict[str, Any]:
-    """Validate a manual order lead entered by either pharmacy employee."""
+    """Validate a manual order lead entered by pharmacy staff or courier."""
 
     if not isinstance(payload, dict):
         raise ContractError("VALIDATION_ERROR", "Request body must be a JSON object")
@@ -261,6 +261,13 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
         )
     address = _required_text(payload.get("address"), "address", minimum=3, maximum=500)
     landmark = _required_text(payload.get("landmark"), "landmark", minimum=2, maximum=300)
+    comment_value = payload.get("comment")
+    if comment_value is not None and not isinstance(comment_value, str):
+        raise ContractError("VALIDATION_ERROR", "Request validation failed",
+                            fields={"comment": "must be a string with at most 500 characters"})
+    if isinstance(comment_value, str) and len(comment_value.strip()) > 500:
+        raise ContractError("VALIDATION_ERROR", "Request validation failed",
+                            fields={"comment": "must be a string with at most 500 characters"})
     source = payload.get("source")
     if source not in STAFF_ORDER_SOURCES:
         raise ContractError(
@@ -300,6 +307,8 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
         "source": source,
         "items": items,
     }
+    if isinstance(comment_value, str) and comment_value.strip():
+        result["comment"] = comment_value.strip()
     if "pharmacy_id" in payload:
         pharmacy_id = payload["pharmacy_id"]
         if not _is_integer(pharmacy_id) or pharmacy_id not in (1, 2):

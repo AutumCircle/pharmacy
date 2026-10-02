@@ -52,6 +52,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       phone: String(data.get('phone') || '').trim(),
       address: String(data.get('address') || '').trim(),
       landmark: String(data.get('landmark') || '').trim(),
+      comment: String(data.get('comment') || '').trim(),
       source: String(data.get('source') || ''),
       items: isCourier ? [] : items.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })),
       ...(isCourier ? { pharmacy_id: Number(data.get('pharmacy_id')) } : {}),
@@ -127,6 +128,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
         <label>Телефон <span>ровно 9 цифр</span><div className="staff-phone"><b>+992</b><input name="phone" required inputMode="numeric" pattern="[0-9]{9}" minLength={9} maxLength={9} placeholder="917123456" autoComplete="tel-national" /></div></label>
         <label>Адрес<input name="address" required minLength={3} maxLength={500} autoComplete="street-address" /></label>
         <label>Ориентир<textarea name="landmark" required minLength={2} maxLength={300} rows={3} placeholder="Например: рядом со школой №…" /></label>
+        <label>Комментарий к заказу<textarea name="comment" maxLength={500} rows={3} placeholder="Что важно знать о заказе или доставке" /></label>
         <fieldset><legend>Откуда поступил заказ</legend><div className="staff-source-options">{sources.map((source) => <label key={source.value}><input type="radio" name="source" value={source.value} required /> <span>{source.label}</span></label>)}</div></fieldset>
         <button className="staff-submit" disabled={submitting} type="submit">{submitting ? 'Сохраняем…' : 'Создать заказ'}</button>
       </form>

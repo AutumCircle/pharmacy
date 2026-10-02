@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from unittest.mock import Mock, patch
 
 from backend.v1.shared import staff_accounts as staff
-from backend.v1.shared.contract import ContractError
+from backend.v1.shared.contract import ContractError, validate_staff_order_request
 from backend.v1.admin_api.lambda_function import create_staff_order, lambda_handler
 
 
@@ -128,12 +128,27 @@ class StaffTests(unittest.TestCase):
             response, status, notification = create_staff_order({
                 'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
                 'landmark': 'напротив школы', 'source': 'phone', 'items': [], 'pharmacy_id': 2,
+                'comment': 'Позвонить перед выездом',
             }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
         self.assertEqual(status, 201)
         self.assertEqual(response['created_by_staff_account_id'], 3)
         self.assertEqual(response['fulfillment_pharmacy_id'], 2)
         self.assertEqual(notification['fulfillment_pharmacy_id'], 2)
+        self.assertEqual(notification['comment'], 'Позвонить перед выездом')
+        order_insert = next(call for call in order_cursor.execute.call_args_list
+                            if 'INSERT INTO orders (' in call.args[0])
+        self.assertEqual(order_insert.args[1][4], 'Позвонить перед выездом')
         self.assertNotIn('jsonb_to_recordset', ' '.join(call.args[0] for call in order_cursor.execute.call_args_list))
+
+    def test_manual_order_comment_is_optional_and_bounded(self):
+        payload = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                   'landmark': 'напротив школы', 'source': 'phone', 'items': []}
+        self.assertNotIn('comment', validate_staff_order_request(payload))
+        self.assertNotIn('comment', validate_staff_order_request({**payload, 'comment': '  '}))
+        self.assertEqual(validate_staff_order_request({**payload, 'comment': '  Вход со двора  '})['comment'],
+                         'Вход со двора')
+        with self.assertRaises(ContractError):
+            validate_staff_order_request({**payload, 'comment': 'x' * 501})
 
     def test_courier_cannot_add_medicines_or_skip_pharmacy(self):
         courier = {**self.account, 'account_id': 3}

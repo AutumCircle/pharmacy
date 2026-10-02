@@ -83,6 +83,9 @@ def format_owner_message(event: dict[str, Any]) -> str:
             f"📍 Адрес: {address}",
             f"🧭 Ориентир: {landmark}",
         ]
+        comment = str(event.get("comment") or "").strip()
+        if comment:
+            lines.append(f"💬 Комментарий: {html.escape(comment[:500])}")
         items = event.get("items") if isinstance(event.get("items"), list) else []
         if items:
             lines.extend(["", "<b>Товары — аптека / клиент:</b>"])

@@ -892,12 +892,13 @@ def create_staff_order(
                 payment_method, payment_status, currency,
                 created_by_staff_account_id, order_source, landmark, fulfillment_pharmacy_id
             )
-            VALUES (NULL, %s, %s, %s, %s, NULL, %s, %s, %s, %s, 'pending',
+            VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending',
                     'cash_on_delivery', 'unpaid', 'TJS', %s, %s, %s, %s)
             RETURNING id, public_id, status, created_at
             """,
             (
                 request["customer_name"], request["phone"], request["phone"], request["address"],
+                request.get("comment"),
                 selling_total, selling_total, selling_total, public_id,
                 account["account_id"], request["source"], request["landmark"], pharmacy_id,
             ),
@@ -956,6 +957,7 @@ def create_staff_order(
             "notification_kind": "staff_manual_order", "admin_order_id": int(order["id"]),
             "order_reference": order_reference, "customer_name": request["customer_name"],
             "phone": request["phone"], "address": request["address"], "landmark": request["landmark"],
+            "comment": request.get("comment"),
             "order_source": request["source"], "created_by_staff_account_id": account["account_id"],
             "created_by_staff_username": account["username"],
             "fulfillment_pharmacy_id": pharmacy_id, "items": order_items,
@@ -970,11 +972,11 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
     if set(query) - {"limit", "cursor", "status"}:
         raise ContractError("VALIDATION_ERROR", "Unknown order filter")
     limit = min(_limit(query), 50)
-    clauses = ["o.deleted_at IS NULL"]
+    clauses = ["o.deleted_at IS NULL", "o.status IN ('pending', 'confirmed', 'delivering')"]
     params: list[Any] = []
     status = query.get("status")
     if status:
-        if status not in STATUS_TRANSITIONS:
+        if status not in {"pending", "confirmed", "delivering"}:
             raise ContractError("VALIDATION_ERROR", "status is invalid")
         clauses.append("o.status = %s")
         params.append(status)

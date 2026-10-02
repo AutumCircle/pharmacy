@@ -9,11 +9,12 @@ import type { CreateStaffOrderRequest } from '@/lib/api-v1/staff-types';
 function isRequest(value: unknown): value is CreateStaffOrderRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const body = value as Record<string, unknown>;
-  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'source', 'items', 'pharmacy_id']);
+  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'source', 'items', 'pharmacy_id', 'comment']);
   return Object.keys(body).every((key) => allowed.has(key))
     && (body.customer_name === undefined || typeof body.customer_name === 'string')
     && typeof body.phone === 'string' && /^\d{9}$/.test(body.phone)
     && typeof body.address === 'string' && typeof body.landmark === 'string'
+    && (body.comment === undefined || typeof body.comment === 'string' && body.comment.trim().length <= 500)
     && ['instagram', 'whatsapp', 'phone'].includes(String(body.source))
     && (body.pharmacy_id === undefined || body.pharmacy_id === 1 || body.pharmacy_id === 2)
     && Array.isArray(body.items) && body.items.length <= 50
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: { message: 'Неверный фильтр' } }, { status: 400 });
     }
     const status = params.get('status') || undefined;
-    if (status && !['pending', 'confirmed', 'delivering', 'delivered', 'cancelled'].includes(status)) {
+    if (status && !['pending', 'confirmed', 'delivering'].includes(status)) {
       return NextResponse.json({ error: { message: 'Неверный статус' } }, { status: 400 });
     }
     const cursor = params.get('cursor') || undefined;

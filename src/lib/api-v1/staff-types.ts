@@ -14,6 +14,7 @@ export type CreateStaffOrderRequest = {
   phone: string;
   address: string;
   landmark: string;
+  comment?: string;
   source: StaffOrderSource;
   items: Array<{ medicine_id: number; quantity: number }>;
   pharmacy_id?: 1 | 2;

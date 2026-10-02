@@ -5,13 +5,13 @@ import { useState } from 'react';
 import type { CourierOrder, CourierOrderStatus } from '@/lib/api-v1/staff-types';
 
 const labels: Record<CourierOrderStatus, string> = {
-  pending: 'Новый', confirmed: 'Подтверждён', delivering: 'В пути',
+  pending: 'Новый', confirmed: 'Собирается', delivering: 'В пути',
   delivered: 'Доставлен', cancelled: 'Отменён',
 };
 const transitions: Record<CourierOrderStatus, CourierOrderStatus[]> = {
   pending: ['confirmed', 'cancelled'],
   confirmed: ['delivering', 'cancelled'],
-  delivering: ['delivered'],
+  delivering: ['delivered', 'cancelled'],
   delivered: [], cancelled: [],
 };
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Звонок' };

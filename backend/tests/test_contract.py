@@ -138,6 +138,10 @@ class StatusTransitionTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_status_transition("pending", "cancelled")
 
+    def test_in_transit_order_can_be_cancelled_with_reason(self):
+        self.assertEqual(validate_status_transition("delivering", "cancelled", reason="Адрес неверный"),
+                         ("delivering", "cancelled", "Адрес неверный"))
+
     def test_rejects_transition_from_final_status(self):
         with self.assertRaises(ContractError) as context:
             validate_status_transition("delivered", "pending")

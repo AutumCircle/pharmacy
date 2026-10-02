@@ -29,8 +29,14 @@ class CourierOrderTests(unittest.TestCase):
         self.assertNotIn('order_total', result['data'][0])
         sql, args = cursor.execute.call_args.args
         self.assertIn('ORDER BY o.created_at DESC, o.id DESC LIMIT %s', sql)
+        self.assertIn("o.status IN ('pending', 'confirmed', 'delivering')", sql)
         self.assertNotIn('selling_unit_price', sql)
         self.assertEqual(args, ('pending', 21))
+
+    def test_terminal_orders_cannot_be_requested(self):
+        for status in ('delivered', 'cancelled'):
+            with self.assertRaises(ContractError):
+                list_courier_orders({'status': status})
 
     def test_status_change_checks_current_value_and_audits(self):
         cursor = Mock()

@@ -10,10 +10,8 @@ export const dynamic = 'force-dynamic';
 const filters: Array<{ value: CourierOrderStatus | ''; label: string }> = [
   { value: '', label: 'Все' },
   { value: 'pending', label: 'Новые' },
-  { value: 'confirmed', label: 'Подтверждены' },
+  { value: 'confirmed', label: 'Собираются' },
   { value: 'delivering', label: 'В пути' },
-  { value: 'delivered', label: 'Доставлены' },
-  { value: 'cancelled', label: 'Отменены' },
 ];
 
 export default async function CourierOrdersPage({ searchParams }: {

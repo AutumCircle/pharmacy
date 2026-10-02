@@ -106,10 +106,12 @@ class TelegramDispatchTests(unittest.TestCase):
 
     def test_courier_notification_uses_selected_pharmacy(self):
         event = {"notification_kind": "staff_manual_order", "created_by_staff_account_id": 3,
-                 "created_by_staff_username": "courier", "fulfillment_pharmacy_id": 2}
+                 "created_by_staff_username": "courier", "fulfillment_pharmacy_id": 2,
+                 "comment": "Вход <со двора>"}
         text = format_owner_message(event)
         self.assertIn("аптеки 2", text)
         self.assertIn("Доставщик: courier", text)
+        self.assertIn("Вход &lt;со двора&gt;", text)
         self.assertNotIn("аптеки 3", text)
 
     @patch("backend.v1.telegram_notifier.lambda_function._send_message")
