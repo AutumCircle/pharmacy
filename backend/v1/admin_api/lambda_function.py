@@ -518,6 +518,8 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
             SELECT
                 COALESCE(SUM(financial.sales_total), 0) AS sales_total,
                 COALESCE(SUM(financial.pharmacy_total), 0) AS pharmacy_total,
+                COALESCE(SUM(financial.sales_total - financial.pharmacy_total)
+                    FILTER (WHERE financial.created_by_staff_account_id IS NULL), 0) AS online_profit_total,
                 COALESCE(SUM(financial.delivery_owner_amount), 0) AS delivery_owner_total,
                 COALESCE(SUM(financial.delivery_courier_amount), 0) AS delivery_courier_total
             FROM (
@@ -525,6 +527,7 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
                     o.id,
                     COALESCE(SUM(oi.line_total), o.items_subtotal, o.total_price, 0) AS sales_total,
                     COALESCE(SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity), 0) AS pharmacy_total,
+                    o.created_by_staff_account_id,
                     o.delivery_owner_amount,
                     o.delivery_courier_amount
                 FROM orders o
@@ -533,7 +536,7 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
                   AND o.status = 'delivered'
                   AND o.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
                 GROUP BY o.id, o.items_subtotal, o.total_price,
-                         o.delivery_owner_amount, o.delivery_courier_amount
+                         o.created_by_staff_account_id, o.delivery_owner_amount, o.delivery_courier_amount
             ) AS financial
             """,
             (days,),
@@ -557,6 +560,7 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
         "sales_total": sales_total,
         "pharmacy_total": pharmacy_total,
         "profit_total": sales_total - pharmacy_total,
+        "online_profit_total": financial_totals["online_profit_total"],
         "delivery_owner_total": financial_totals["delivery_owner_total"],
         "delivery_courier_total": financial_totals["delivery_courier_total"],
         "origin_counts": origin_counts,

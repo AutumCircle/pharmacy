@@ -12,7 +12,7 @@ function money(value: number, currency: string) {
 }
 
 export default function OrderEarningsPanel({ summary, days, compact = false }: Props) {
-  const orderProfit = Number(summary.profit_total) || 0;
+  const orderProfit = Number(summary.online_profit_total ?? summary.profit_total) || 0;
   const ownerDelivery = Number(summary.delivery_owner_total) || 0;
   const courierDelivery = Number(summary.delivery_courier_total) || 0;
   const ownerTotal = orderProfit + ownerDelivery;

@@ -18,6 +18,7 @@ class DashboardSummaryTests(unittest.TestCase):
                 "unspecified_source_orders": 1,
             },
             {"sales_total": Decimal("250.00"), "pharmacy_total": Decimal("200.00"),
+             "online_profit_total": Decimal("35.00"),
              "delivery_owner_total": Decimal("15.00"), "delivery_courier_total": Decimal("25.00")},
         ]
         cursor.fetchall.side_effect = [
@@ -47,6 +48,9 @@ class DashboardSummaryTests(unittest.TestCase):
         self.assertEqual(result["recent_orders"][0]["order_id"], "ord_recent")
         self.assertNotIn("id", result["recent_orders"][0])
         self.assertEqual(result["profit_total"], Decimal("50.00"))
+        self.assertEqual(result["online_profit_total"], Decimal("35.00"))
+        financial_sql = cursor.execute.call_args_list[-1].args[0]
+        self.assertIn("created_by_staff_account_id IS NULL", financial_sql)
         self.assertTrue(all(call.args[1] == (30,) for call in cursor.execute.call_args_list[1:]))
 
 

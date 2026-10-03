@@ -38,7 +38,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
 
   const summary = summaryResult.status === 'fulfilled' ? summaryResult.value.data : {
     period_days: days, order_counts: { pending: 0, confirmed: 0, delivering: 0, delivered: 0, cancelled: 0 },
-    new_orders: 0, active_orders: 0, sales_total: 0, pharmacy_total: 0, profit_total: 0, delivery_owner_total: 0, delivery_courier_total: 0,
+    new_orders: 0, active_orders: 0, sales_total: 0, pharmacy_total: 0, profit_total: 0, online_profit_total: 0, delivery_owner_total: 0, delivery_courier_total: 0,
     origin_counts: {
       total_orders: 0, client_orders: 0, pharmacy_orders: 0, courier_orders: 0, pharmacy_1_orders: 0,
       pharmacy_2_orders: 0, instagram_orders: 0, whatsapp_orders: 0,

@@ -37,6 +37,7 @@ export type AdminDashboardSummary = {
   sales_total: number | string;
   pharmacy_total: number | string;
   profit_total: number | string;
+  online_profit_total?: number | string;
   delivery_owner_total: number | string;
   delivery_courier_total: number | string;
   origin_counts: {
