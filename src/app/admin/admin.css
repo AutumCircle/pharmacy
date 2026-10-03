@@ -686,12 +686,116 @@
 .admin-image-controls { display: grid; gap: 6px; min-width: 0; }
 .admin-image-controls input[type="file"] { padding: 5px; font-size: 11px; }
 
+.order-earnings-panel {
+  margin: 24px 0;
+  padding: 24px;
+  border: 1px solid #eadfe0;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #fff 0%, #fff9f9 100%);
+  box-shadow: 0 10px 28px rgb(83 25 29 / 7%);
+}
+
+.order-earnings-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+}
+
+.order-earnings-heading span { color: #7b6769; font-size: 14px; }
+.order-earnings-heading h2 { margin: 5px 0 0; font-size: clamp(21px, 2vw, 28px); }
+.order-earnings-periods { display: flex; gap: 6px; flex-wrap: wrap; }
+.order-earnings-periods a {
+  padding: 8px 12px;
+  border: 1px solid #e3d7d8;
+  border-radius: 999px;
+  background: white;
+  color: #54484a;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 650;
+}
+.order-earnings-periods a.active { border-color: #b5121b; background: #b5121b; color: white; }
+
+.order-earnings-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.order-earnings-cards article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 17px;
+  border-radius: 13px;
+  background: white;
+  border: 1px solid #eee7e8;
+}
+.order-earnings-cards span { color: #6f6264; font-size: 13px; }
+.order-earnings-cards strong { color: #301d1f; font-size: clamp(19px, 2vw, 25px); overflow-wrap: anywhere; }
+.order-earnings-cards .total { background: #b5121b; border-color: #b5121b; }
+.order-earnings-cards .total span, .order-earnings-cards .total strong { color: white; }
+.order-earnings-cards .courier { background: #f2f4f5; }
+
+.order-earnings-chart-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, .8fr) minmax(300px, 1.4fr);
+  gap: clamp(28px, 5vw, 70px);
+  align-items: center;
+  margin-top: 28px;
+  padding: 24px clamp(0px, 3vw, 36px) 6px;
+}
+
+.order-earnings-pie {
+  display: grid;
+  place-items: center;
+  width: min(100%, 300px);
+  aspect-ratio: 1;
+  margin-inline: auto;
+  border-radius: 50%;
+  box-shadow: 0 14px 35px rgb(53 22 25 / 14%);
+}
+.order-earnings-pie > div {
+  display: grid;
+  place-items: center;
+  width: 61%;
+  aspect-ratio: 1;
+  padding: 12px;
+  border-radius: 50%;
+  background: white;
+  text-align: center;
+  box-shadow: inset 0 0 0 1px #f0e8e9;
+}
+.order-earnings-pie strong { font-size: clamp(17px, 2vw, 23px); }
+.order-earnings-pie span { color: #796c6e; font-size: 12px; }
+.order-earnings-legend { display: grid; gap: 9px; }
+.order-earnings-legend > div {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto 52px;
+  gap: 10px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #eee7e8;
+  border-radius: 11px;
+  background: white;
+}
+.order-earnings-legend i { width: 12px; height: 12px; border-radius: 50%; }
+.order-earnings-legend i.orders { background: #b5121b; }
+.order-earnings-legend i.owner-delivery { background: #ef8f3c; }
+.order-earnings-legend i.courier-delivery { background: #586674; }
+.order-earnings-legend small { color: #7a6e70; text-align: right; }
+.order-earnings-details { display: inline-block; margin-top: 18px; color: #a00f18; font-weight: 700; }
+.admin-orders-list-title { margin: 30px 0 12px; font-size: 21px; }
+
 @media (max-width: 1100px) {
   .admin-master-detail { grid-template-columns: 1fr; }
   .admin-entity-list-panel { position: static; max-height: none; }
   .admin-compact-list { max-height: 330px; }
   .admin-carousel-compact-row { grid-template-columns: auto 50px 54px minmax(0, 1fr); }
   .admin-carousel-compact-row .admin-image-controls { grid-column: 2 / -1; }
+  .order-earnings-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 700px) {
@@ -705,4 +809,11 @@
   .admin-carousel-compact-row .admin-product-name { grid-column: 3; }
   .admin-carousel-compact-row .admin-image-controls { grid-column: 2 / -1; }
   .admin-carousel-compact-row > button:last-child { grid-column: 2 / -1; }
+  .order-earnings-panel { padding: 17px; border-radius: 14px; }
+  .order-earnings-heading { align-items: flex-start; flex-direction: column; }
+  .order-earnings-cards { grid-template-columns: 1fr; }
+  .order-earnings-chart-layout { grid-template-columns: 1fr; padding: 10px 0 0; }
+  .order-earnings-pie { width: min(78vw, 270px); }
+  .order-earnings-legend > div { grid-template-columns: 12px minmax(0, 1fr) auto; }
+  .order-earnings-legend small { grid-column: 2 / -1; text-align: left; }
 }

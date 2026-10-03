@@ -6,17 +6,10 @@ import {
   listAdminCategories,
   listCatalogSyncs,
 } from '@/lib/api-v1/admin-server';
+import OrderEarningsPanel from './orders/OrderEarningsPanel';
 
 export const dynamic = 'force-dynamic';
 const PHARMACY_TIME_ZONE = 'Asia/Dushanbe';
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Новый', confirmed: 'Подтверждён', delivering: 'Доставляется',
-  delivered: 'Доставлен', cancelled: 'Отменён',
-};
-const SOURCE_LABELS: Record<string, string> = {
-  instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефонный звонок',
-};
-
 function timeAgo(value: string | null): string {
   if (!value) return 'нет данных';
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
@@ -137,77 +130,12 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
             </div>
           ))}
         </div>
-        <h3 style={{ fontSize: 19, margin: '26px 0 12px' }}>Последние заказы</h3>
-        {summary.recent_orders.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="admin-table">
-              <thead><tr><th>Заказ</th><th>Дата</th><th>Откуда</th><th>Канал</th><th>Клиент</th><th>Сумма</th><th>Статус</th></tr></thead>
-              <tbody>
-                {summary.recent_orders.map((order) => (
-                  <tr key={order.order_id}>
-                    <td><Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`}>#{order.order_reference}</Link></td>
-                    <td>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE })}</td>
-                    <td>{order.created_by_staff_account_id === 3
-                      ? `Доставщик · аптека ${order.fulfillment_pharmacy_id}`
-                      : order.created_by_staff_account_id ? `Аптека ${order.created_by_staff_account_id}` : 'Клиент сайта'}</td>
-                    <td>{order.order_source ? SOURCE_LABELS[order.order_source] : order.created_by_staff_account_id ? 'Не указан' : 'Сайт'}</td>
-                    <td>{order.customer_name || 'Не указано'}</td>
-                    <td>{Number(order.order_total).toFixed(2)} {summary.currency}</td>
-                    <td>{STATUS_LABELS[order.status] || order.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : <p style={{ color: '#777' }}>За выбранный период заказов пока нет.</p>}
       </section>
       <div style={{ background: 'white', padding: 20, borderRadius: 12, marginTop: 24 }}>
         Последняя v1-синхронизация: <strong>{lastSync?.status || 'нет данных'}</strong>
         {lastSync && ` · ${new Date(lastSync.created_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE })}`}
       </div>
-      <div style={{ background: 'white', padding: 20, borderRadius: 12, marginTop: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ color: '#666', marginBottom: 6 }}>Финансы доставленных заказов</div>
-            <strong style={{ fontSize: 28 }}>Ваш заработок: {Number(summary.profit_total).toFixed(2)} {summary.currency}</strong>
-          </div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginTop: 20 }}>
-          <div style={{ padding: 16, borderRadius: 10, background: '#eef8f0' }}><div style={{ color: '#55705b', marginBottom: 6 }}>Вы заработали</div><strong style={{ fontSize: 24, color: '#1b7f35' }}>{Number(summary.profit_total).toFixed(2)} {summary.currency}</strong></div>
-          <div style={{ padding: 16, borderRadius: 10, background: '#fff5e8' }}><div style={{ color: '#7a6546', marginBottom: 6 }}>Отдать аптеке</div><strong style={{ fontSize: 24, color: '#a45d00' }}>{Number(summary.pharmacy_total).toFixed(2)} {summary.currency}</strong></div>
-          <div style={{ padding: 16, borderRadius: 10, background: '#f3f5f8' }}><div style={{ color: '#606873', marginBottom: 6 }}>Продано всего</div><strong style={{ fontSize: 24 }}>{Number(summary.sales_total).toFixed(2)} {summary.currency}</strong></div>
-          <div style={{ padding: 16, borderRadius: 10, background: '#eef8f0' }}><div style={{ color: '#55705b', marginBottom: 6 }}>Доставка: получил я</div><strong style={{ fontSize: 24, color: '#1b7f35' }}>{Number(summary.delivery_owner_total).toFixed(2)} {summary.currency}</strong></div>
-          <div style={{ padding: 16, borderRadius: 10, background: '#f3f5f8' }}><div style={{ color: '#606873', marginBottom: 6 }}>Доставка: получили курьеры</div><strong style={{ fontSize: 24 }}>{Number(summary.delivery_courier_total).toFixed(2)} {summary.currency}</strong></div>
-        </div>
-        <h2 style={{ fontSize: 19, margin: '26px 0 12px' }}>История заработка по доставленным заказам</h2>
-        {summary.delivered_orders.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="admin-table">
-              <thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>Продано</th><th>Отдать аптеке</th><th>Ваш заработок</th></tr></thead>
-              <tbody>
-                {summary.delivered_orders.map((order) => (
-                  <tr key={order.order_id}>
-                    <td><Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`}>#{order.order_reference}</Link></td>
-                    <td>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE })}</td>
-                    <td>{order.customer_name}</td>
-                    <td>{Number(order.sales_total).toFixed(2)} {summary.currency}</td>
-                    <td>{Number(order.pharmacy_total).toFixed(2)} {summary.currency}</td>
-                    <td><strong style={{ color: '#1b7f35' }}>{Number(order.profit).toFixed(2)} {summary.currency}</strong></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : <p style={{ color: '#777' }}>За выбранный период доставленных заказов пока нет.</p>}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginTop: 20 }}>
-          {Object.entries(summary.order_counts).map(([status, count]) => (
-            <Link key={status} href={`/admin/orders?status=${status}`} style={{ padding: 12, borderRadius: 8, background: '#f7f7f7', color: 'inherit', textDecoration: 'none' }}>
-              <div style={{ color: '#666', fontSize: 13 }}>{status}</div>
-              <strong style={{ fontSize: 22 }}>{count}</strong>
-            </Link>
-          ))}
-        </div>
-      </div>
+      <OrderEarningsPanel summary={summary} days={days} compact />
       {warnings.length > 0 && (
         <div style={{ background: '#fff8e1', color: '#7a4f00', padding: 20, borderRadius: 12, marginTop: 16 }}>
           <strong>Системные предупреждения</strong>
