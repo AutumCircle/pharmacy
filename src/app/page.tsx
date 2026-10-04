@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import CategoryIcon from '@/components/CategoryIcon';
 import { Suspense } from 'react';
@@ -71,6 +72,25 @@ function SearchLoading() {
   );
 }
 
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; page?: string }>;
+}): Promise<Metadata> {
+  const params = await searchParams;
+  const q = typeof params.q === 'string' ? params.q.trim() : '';
+  if (q.length >= 2) {
+    // Internal search result pages are thin duplicates of product pages; keep
+    // them out of the index but let crawlers follow links to products.
+    return {
+      title: `Поиск: ${q.slice(0, 80)}`,
+      robots: { index: false, follow: true },
+      alternates: { canonical: '/' },
+    };
+  }
+  return { alternates: { canonical: '/' } };
+}
+
 export default async function Home({
   searchParams,
 }: {
@@ -129,6 +149,21 @@ export default async function Home({
             </Link>
           ))}
         </div>
+      </section>
+      <section className="seo-about" style={{ paddingBottom: '50px', color: '#444', lineHeight: 1.6 }}>
+        <h1 className="section-title" style={{ fontSize: '22px' }}>Аптека Ватан — заказ лекарств с доставкой в Душанбе</h1>
+        <p style={{ marginBottom: '12px' }}>
+          Аптека «Ватан» в Душанбе: тысячи лекарств, витаминов и товаров для здоровья с актуальными ценами в сомони.
+          Найдите нужный препарат через поиск или в <Link href="/catalog" style={{ color: 'var(--primary)' }}>каталоге</Link>,
+          добавьте в корзину и оформите заказ — мы доставим его по Душанбе, оплата наличными при получении.
+        </p>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, margin: '16px 0 8px' }}>Как заказать лекарство в Душанбе</h2>
+        <ol style={{ paddingLeft: '20px' }}>
+          <li>Введите название лекарства в поиск, например «кальций» или «парацетамол».</li>
+          <li>Откройте карточку товара: там указаны цена, производитель и наличие.</li>
+          <li>Нажмите «В корзину», затем оформите заказ: имя, телефон и адрес доставки.</li>
+          <li>Аптека подтвердит заказ и доставит его. Статус можно проверить на странице <Link href="/tracking" style={{ color: 'var(--primary)' }}>отслеживания заказа</Link>.</li>
+        </ol>
       </section>
     </div>
   );

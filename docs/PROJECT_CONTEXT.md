@@ -84,6 +84,7 @@ database credentials или Telegram token. Next.js вызывает API Gateway
 - `API_V1_BASE_URL`, `API_KEY`, `ADMIN_API_BEARER_TOKEN`
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`
 - `STAFF_USERNAME`, `STAFF_PASSWORD` when staff access is enabled
+- `SITE_URL` (canonical public origin) and optional SEO variables — see [`SEO.md`](SEO.md)
 
 Файл `.env.local` локальный и никогда не коммитится.
 
