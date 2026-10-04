@@ -208,7 +208,7 @@ export default function CartPage() {
               {items.map((item) => (
                 <div className="cart-line-item" key={item.medicine_id} style={{ display: 'flex', gap: '20px', padding: '25px 0', borderBottom: '1px solid #F0F0F0' }}>
                   <div className="cart-line-image" style={{ width: '80px', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #E8E8E8', borderRadius: '8px' }}>
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="1.5"><rect x="7" y="7" width="10" height="14" rx="2" ry="2"></rect><path d="M5 7h14"></path><path d="M12 11v4"></path><path d="M10 13h4"></path><path d="M9 3h6v4H9z"></path></svg>
+                    <CartMedicineImage url={item.image_url} name={item.medicine_name} />
                   </div>
                   <div className="cart-line-body" style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div className="cart-line-info">
@@ -559,4 +559,14 @@ export default function CartPage() {
 
     </div>
   );
+}
+function CartMedicineImage({ url, name }: { url: string | null; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (url && !failed) return (
+    // Admin-managed product images are served from the configured HTTPS media domain.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={url} alt={name} width={80} height={80} referrerPolicy="no-referrer"
+      onError={() => setFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 5 }} />
+  );
+  return <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="1.5"><rect x="7" y="7" width="10" height="14" rx="2" ry="2"></rect><path d="M5 7h14"></path><path d="M12 11v4"></path><path d="M10 13h4"></path><path d="M9 3h6v4H9z"></path></svg>;
 }

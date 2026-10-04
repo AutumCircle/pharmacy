@@ -11,6 +11,7 @@ export interface CartItem {
   country: string | null;
   vendor: string | null;
   in_stock: boolean;
+  image_url: string | null;
   quantity: number;
 }
 
@@ -29,6 +30,7 @@ async function refreshCatalogItems(items: CartItem[]): Promise<CartItem[]> {
         country: medicine.country,
         vendor: medicine.vendor,
         in_stock: medicine.in_stock,
+        image_url: medicine.image_url,
       } : { ...item, in_stock: false };
     });
   } catch {
@@ -68,6 +70,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             const normalized = (parsed as CartItem[]).map((item) => ({
               ...item,
               in_stock: item.in_stock !== false,
+              image_url: typeof item.image_url === 'string' ? item.image_url : null,
             }));
             setItems(normalized);
             void refreshCatalogItems(normalized).then(setItems);

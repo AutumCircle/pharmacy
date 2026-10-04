@@ -365,6 +365,12 @@ export function listAdminMedicines(values: {
   })}`);
 }
 
+export function updateAdminMedicineImage(medicineId: number, imageUrl: string | null) {
+  return request<ApiSuccessResponse<Pick<AdminMedicine, 'medicine_id' | 'medicine_name' | 'image_url' | 'updated_at'>>>(
+    `/v1/admin/medicines/${medicineId}/image`, { method: 'PATCH', body: { image_url: imageUrl } },
+  );
+}
+
 export function exportAdminOutOfStockMedicines(): Promise<ApiSuccessResponse<AdminMedicineExport>> {
   return request('/v1/admin/medicines/out-of-stock-export', { timeoutMs: 30_000 });
 }

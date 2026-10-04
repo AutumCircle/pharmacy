@@ -31,6 +31,7 @@ export default function ProductDetailsClient({ product }: { product: PublicMedic
       country: product.country,
       vendor: product.vendor,
       in_stock: product.in_stock,
+      image_url: product.image_url,
     });
   };
 

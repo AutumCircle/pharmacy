@@ -1110,6 +1110,31 @@ def courier_earnings(query: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def update_medicine_image(
+    medicine_id: int, payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    if set(payload) != {"image_url"}:
+        raise ContractError("VALIDATION_ERROR", "image_url is required")
+    image_url = _image_url(payload.get("image_url"))
+    with transaction() as cur:
+        cur.execute(
+            """UPDATE medicines
+               SET image_url = %s, updated_at = CURRENT_TIMESTAMP
+               WHERE id = %s
+               RETURNING id AS medicine_id, name AS medicine_name, image_url, updated_at""",
+            (image_url, medicine_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ContractError("MEDICINE_NOT_FOUND", "Medicine was not found", http_status=404)
+        _write_admin_audit(
+            cur, actor_id=actor_id, action="medicine.image.updated",
+            resource_type="medicine", resource_id=str(medicine_id), request=current_request_id,
+            details={"has_image": image_url is not None},
+        )
+    return dict(row)
+
+
 def update_courier_order_status(order_id: str, payload: dict[str, Any], current_request_id: str) -> dict[str, Any]:
     if set(payload) - {"status", "expected_current_status", "reason"} or not {
         "status", "expected_current_status"
@@ -2971,6 +2996,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(catalog_stats(), request=current_request_id)
         if method == "GET" and tail == ["medicines"]:
             return success_document(list_medicines(query), request=current_request_id)
+        if method == "PATCH" and len(tail) == 3 and tail[0] == "medicines" and tail[2] == "image":
+            return success(
+                update_medicine_image(
+                    _positive_int(tail[1], "medicine_id"), _body(event), actor_id, current_request_id,
+                ),
+                request=current_request_id,
+            )
         if method == "GET" and tail == ["medicines", "out-of-stock-export"]:
             return success(export_out_of_stock_medicines(), request=current_request_id)
         if method == "GET" and tail == ["medicines", "available-export"]:

@@ -71,10 +71,10 @@ export default function OrderEarningsPanel({ summary, days, compact = false }: P
                 return <tr key={order.order_id}>
                   <td><Link href={`/admin/orders/${order.order_id}`}>№ {order.order_reference}</Link></td>
                   <td>{new Date(order.created_at).toLocaleDateString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</td>
-                  <td>{money(profit, summary.currency)}</td>
-                  <td>{money(ownerDeliveryForOrder, summary.currency)}</td>
-                  <td>{money(courierForOrder, summary.currency)}</td>
-                  <td><strong>{money(total, summary.currency)}</strong></td>
+                  <td className={profit > 0 ? 'positive-earning' : ''}>{money(profit, summary.currency)}</td>
+                  <td className={ownerDeliveryForOrder > 0 ? 'positive-earning' : ''}>{money(ownerDeliveryForOrder, summary.currency)}</td>
+                  <td className={courierForOrder > 0 ? 'positive-earning' : ''}>{money(courierForOrder, summary.currency)}</td>
+                  <td className={total > 0 ? 'positive-earning' : ''}><strong>{money(total, summary.currency)}</strong></td>
                 </tr>;
               })}</tbody>
             </table></div>}

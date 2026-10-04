@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { requireAdminSession } from '@/lib/admin-auth';
 import { listAdminMedicines } from '@/lib/api-v1/admin-server';
+import MedicineImageEditor from './MedicineImageEditor';
 
 export const dynamic = 'force-dynamic';
 const PHARMACY_TIME_ZONE = 'Asia/Dushanbe';
@@ -84,10 +85,11 @@ export default async function AdminMedicinesPage({ searchParams }: {
 
       <div style={{ overflowX: 'auto' }}>
         <table className="admin-table">
-          <thead><tr><th>ID / SKU</th><th>Название</th><th>Базовая цена</th><th>Цена продажи</th><th>Страна / производитель</th><th>Наличие</th><th>Обновлено</th></tr></thead>
+          <thead><tr><th>Изображение</th><th>ID / SKU</th><th>Название</th><th>Базовая цена</th><th>Цена продажи</th><th>Страна / производитель</th><th>Наличие</th><th>Обновлено</th></tr></thead>
           <tbody>
             {response.data.map((medicine) => (
               <tr key={medicine.medicine_id}>
+                <td><MedicineImageEditor medicineId={medicine.medicine_id} medicineName={medicine.medicine_name} initialUrl={medicine.image_url} /></td>
                 <td>{medicine.medicine_id}<div className="admin-country">{medicine.source_sku || 'SKU отсутствует'}</div></td>
                 <td><strong>{medicine.medicine_name}</strong></td>
                 <td>{Number(medicine.base_unit_price).toFixed(2)} TJS</td>
@@ -97,7 +99,7 @@ export default async function AdminMedicinesPage({ searchParams }: {
                 <td>{medicine.updated_at ? new Date(medicine.updated_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE }) : '—'}</td>
               </tr>
             ))}
-            {response.data.length === 0 && <tr><td colSpan={7}>Лекарства не найдены.</td></tr>}
+            {response.data.length === 0 && <tr><td colSpan={8}>Лекарства не найдены.</td></tr>}
           </tbody>
         </table>
       </div>

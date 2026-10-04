@@ -39,6 +39,7 @@ export default function ProductCard({
       country: item.country,
       vendor: item.vendor,
       in_stock: item.in_stock,
+      image_url: resolvedImageUrl,
     });
   };
 
