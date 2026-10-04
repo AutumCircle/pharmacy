@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
+import type { CourierEarnings, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
@@ -83,6 +83,12 @@ export function listCourierOrders(token: string, values: { status?: CourierOrder
   if (values.cursor) params.set('cursor', values.cursor);
   params.set('limit', String(values.limit ?? 20));
   return request<CourierOrderList>(`orders?${params}`, { token });
+}
+
+export function getCourierEarnings(token: string, values: { cursor?: string; limit?: number } = {}) {
+  const params = new URLSearchParams({ limit: String(values.limit ?? 31) });
+  if (values.cursor) params.set('cursor', values.cursor);
+  return request<ApiSuccessResponse<CourierEarnings>>(`earnings?${params}`, { token });
 }
 
 export function updateCourierOrderStatus(token: string, orderId: string, body: {

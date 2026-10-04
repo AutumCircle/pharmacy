@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 from decimal import Decimal
 
 from backend.v1.admin_api.lambda_function import (
-    list_courier_orders, update_courier_order_status, update_order_delivery, update_order_item_price,
+    courier_earnings, list_courier_orders, update_courier_order_status, update_order_delivery, update_order_item_price,
 )
 from backend.v1.shared.contract import ContractError
 
@@ -33,14 +33,37 @@ class CourierOrderTests(unittest.TestCase):
         self.assertNotIn('order_total', result['data'][0])
         sql, args = cursor.execute.call_args.args
         self.assertIn('ORDER BY o.created_at DESC, o.id DESC LIMIT %s', sql)
-        self.assertIn("o.status IN ('pending', 'confirmed', 'delivering')", sql)
+        self.assertIn("o.status <> 'cancelled'", sql)
         self.assertNotIn('selling_unit_price', sql)
         self.assertEqual(args, ('pending', 21))
 
-    def test_terminal_orders_cannot_be_requested(self):
-        for status in ('delivered', 'cancelled'):
-            with self.assertRaises(ContractError):
-                list_courier_orders({'status': status})
+    def test_delivered_orders_are_visible_but_cancelled_filter_is_rejected(self):
+        cursor = Mock()
+        cursor.fetchall.return_value = []
+        with self._tx(cursor):
+            list_courier_orders({'status': 'delivered'})
+        self.assertIn("o.status = %s", cursor.execute.call_args.args[0])
+        self.assertEqual(cursor.execute.call_args.args[1], ('delivered', 21))
+        with self.assertRaises(ContractError):
+            list_courier_orders({'status': 'cancelled'})
+
+    def test_courier_earnings_are_grouped_by_delivery_day(self):
+        cursor = Mock()
+        cursor.fetchone.return_value = {
+            'total': Decimal('75.00'), 'today': Decimal('20.00'), 'yesterday': Decimal('15.00'),
+        }
+        from datetime import date
+        cursor.fetchall.return_value = [
+            {'date': date(2026, 10, 4), 'orders_count': 2, 'amount': Decimal('20.00')},
+            {'date': date(2026, 10, 3), 'orders_count': 1, 'amount': Decimal('15.00')},
+        ]
+        with self._tx(cursor):
+            result = courier_earnings({'limit': '31'})
+        self.assertEqual(result['today'], Decimal('20.00'))
+        self.assertEqual(result['daily'][0]['orders_count'], 2)
+        statements = ' '.join(call.args[0] for call in cursor.execute.call_args_list)
+        self.assertIn("o.status = 'delivered'", statements)
+        self.assertIn("Asia/Dushanbe", statements)
 
     def test_status_change_checks_current_value_and_audits(self):
         cursor = Mock()

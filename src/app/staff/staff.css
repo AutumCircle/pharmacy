@@ -90,6 +90,9 @@
 .courier-order-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .courier-order-heading>div { display: grid; gap: 4px; }
 .courier-order-heading small { color: #687269; }
+.courier-order-pay { display: grid!important; justify-items: end; gap: 3px!important; text-align: right; }
+.courier-order-pay>strong { color: #17632e; font-size: 19px; }
+.courier-order-pay .courier-order-status { margin-top: 4px; }
 .courier-order-status { flex: none; padding: 6px 10px; border-radius: 999px; background: #eff2f0; font-size: 12px; font-weight: 750; }
 .courier-order-status.pending { color: #a4141b; background: #fff0f0; }
 .courier-order-status.delivering { color: #165887; background: #e7f3fb; }
@@ -102,5 +105,15 @@
 .courier-order-actions button:first-child { background: #b71920; color: #fff; }
 .courier-order-actions button:disabled { opacity: .5; cursor: wait; }
 .courier-order-error { margin: 12px 0 0; color: #a4141b; }
+.courier-fee-editor { margin: 15px 0; padding: 13px 15px; border-radius: 11px; background: #f6f8f6; }
+.courier-earnings-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) auto; align-items: stretch; gap: 10px; margin-bottom: 20px; }
+.courier-earnings-summary article { display: grid; gap: 5px; padding: 15px 17px; border: 1px solid #dfe6e1; border-radius: 12px; background: #fff; }
+.courier-earnings-summary span { color: #687269; font-size: 12px; }
+.courier-earnings-summary strong { font-size: 20px; color: #17632e; }
+.courier-earnings-summary>a { display: grid; place-items: center; padding: 12px 16px; border-radius: 12px; background: #17211b; color: #fff; text-align: center; text-decoration: none; font-weight: 700; }
+.courier-earnings-page { max-width: 1000px; margin: 0 auto; }
+.courier-daily-table td:first-child { display: table-cell; }
 @media(max-width:700px){.courier-order-details{grid-template-columns:1fr}.courier-order-card{padding:16px}.courier-order-heading{align-items:flex-start}.courier-new-order{white-space:nowrap}}
+@media(max-width:850px){.courier-earnings-summary{grid-template-columns:1fr 1fr}.courier-earnings-summary>a{grid-column:1/-1}.courier-daily-table td:first-child{display:block}}
+@media(max-width:520px){.courier-earnings-summary{grid-template-columns:1fr}.courier-earnings-summary>a{grid-column:auto}.courier-order-heading{align-items:flex-start}.courier-order-pay>strong{font-size:16px}}
 @media(max-width:700px){.staff-header{align-items:flex-start;flex-wrap:wrap}.staff-nav{order:3;width:100%}.staff-nav a{flex:1;text-align:center}.staff-main{padding-top:22px}.staff-title-row{display:grid}.staff-sync-status{min-width:0}.staff-search{grid-template-columns:1fr}.staff-search button{width:100%}.staff-login-card{padding:26px 20px}.staff-table{min-width:0}.staff-table thead{display:none}.staff-table,.staff-table tbody,.staff-table tr,.staff-table td{display:block}.staff-table tr{padding:13px 15px;border-bottom:1px solid #edf0ee}.staff-table td{padding:5px 0;border:0}.staff-table td:first-child{margin-bottom:5px}.staff-table td:nth-child(2)::before{content:'Цена: ';font-weight:400;color:#687269}.staff-table td:nth-child(3){margin-top:5px}.staff-source-options{grid-template-columns:1fr}.staff-source-options label{justify-content:flex-start}.staff-order-form{padding:20px 16px}.staff-selected-items>div:not(.staff-pharmacy-total){grid-template-columns:minmax(0,1fr) 62px}.staff-selected-items>div:not(.staff-pharmacy-total) button{grid-column:1/-1}.staff-picker-results>div{align-items:start}}

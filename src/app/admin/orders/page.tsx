@@ -7,14 +7,20 @@ import OrderEarningsPanel from './OrderEarningsPanel';
 
 export const dynamic = 'force-dynamic';
 
-const allowedStatuses: OrderStatus[] = ['pending', 'confirmed', 'delivering', 'delivered', 'cancelled'];
+type OrderFilter = OrderStatus | 'active';
+const statusFilters: Array<{ value: OrderFilter | ''; label: string }> = [
+  { value: '', label: 'Все' }, { value: 'active', label: 'Не доставлены' },
+  { value: 'pending', label: 'Новые' }, { value: 'confirmed', label: 'Собираются' },
+  { value: 'delivering', label: 'В пути' }, { value: 'delivered', label: 'Доставлены' },
+  { value: 'cancelled', label: 'Отменены' },
+];
 
 export default async function AdminOrdersPage({ searchParams }: {
   searchParams: Promise<{ q?: string; status?: string; created_from?: string; created_to?: string; cursor?: string; days?: string }>;
 }) {
   await requireAdminSession();
   const params = await searchParams;
-  const status = allowedStatuses.includes(params.status as OrderStatus) ? params.status as OrderStatus : undefined;
+  const status = statusFilters.some((filter) => filter.value === params.status) ? params.status as OrderFilter : undefined;
   const q = (params.q || '').trim();
   const createdFrom = params.created_from || '';
   const createdTo = params.created_to || '';
@@ -45,11 +51,24 @@ export default async function AdminOrdersPage({ searchParams }: {
 
       <h2 className="admin-orders-list-title">Рабочие заказы</h2>
 
+      <nav className="admin-order-status-filters" aria-label="Статус заказов">
+        {statusFilters.map((filter) => {
+          const linkParams = new URLSearchParams({ days: String(days) });
+          if (filter.value) linkParams.set('status', filter.value);
+          if (q) linkParams.set('q', q);
+          if (createdFrom) linkParams.set('created_from', createdFrom);
+          if (createdTo) linkParams.set('created_to', createdTo);
+          return <Link key={filter.value} className={(status || '') === filter.value ? 'active' : ''}
+            href={`/admin/orders?${linkParams}`}>{filter.label}</Link>;
+        })}
+      </nav>
+
       <form method="get" className="admin-search-section" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto', gap: 10 }}>
         <input type="hidden" name="days" value={days} />
         <input className="admin-search-input" name="q" defaultValue={q} placeholder="Номер заказа, телефон или имя" />
         <select name="status" defaultValue={status || ''}>
           <option value="">Все статусы</option>
+          <option value="active">Не доставлены</option>
           <option value="pending">Новый</option>
           <option value="confirmed">Подтверждён</option>
           <option value="delivering">Доставляется</option>

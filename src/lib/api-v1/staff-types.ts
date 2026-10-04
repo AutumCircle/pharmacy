@@ -63,3 +63,12 @@ export type CourierOrderList = {
   page: { next_cursor: string | null; has_more: boolean };
   request_id: string;
 };
+
+export type CourierEarnings = {
+  total: number | string;
+  today: number | string;
+  yesterday: number | string;
+  daily: Array<{ date: string; orders_count: number; amount: number | string }>;
+  currency: 'TJS';
+  page: { next_cursor: string | null; has_more: boolean };
+};

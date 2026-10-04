@@ -151,7 +151,7 @@ function queryString(values: Record<string, string | number | undefined>): strin
 }
 
 export function listAdminOrders(values: {
-  status?: OrderStatus;
+  status?: OrderStatus | 'active';
   limit?: number;
   cursor?: string;
   createdFrom?: string;

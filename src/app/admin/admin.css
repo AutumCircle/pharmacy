@@ -788,6 +788,19 @@
 .order-earnings-legend small { color: #7a6e70; text-align: right; }
 .order-earnings-details { display: inline-block; margin-top: 18px; color: #a00f18; font-weight: 700; }
 .admin-orders-list-title { margin: 30px 0 12px; font-size: 21px; }
+.admin-order-status-filters { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+.admin-order-status-filters a { padding: 8px 13px; border: 1px solid #ded5d6; border-radius: 999px; color: #493b3d; text-decoration: none; font-size: 14px; background: #fff; }
+.admin-order-status-filters a.active { color: #fff; border-color: #b5121b; background: #b5121b; }
+.order-earnings-history { margin-top: 24px; }
+.order-earnings-history h3 { margin: 0 0 11px; font-size: 17px; }
+.order-earnings-history>p { color: #74686a; }
+.order-earnings-table-wrap { overflow-x: auto; border: 1px solid #eadfe0; border-radius: 12px; }
+.order-earnings-table-wrap table { width: 100%; min-width: 820px; border-collapse: collapse; background: #fff; }
+.order-earnings-table-wrap th,.order-earnings-table-wrap td { padding: 11px 13px; border-bottom: 1px solid #f0e8e9; text-align: right; white-space: nowrap; }
+.order-earnings-table-wrap th { background: #faf7f7; color: #74686a; font-size: 12px; }
+.order-earnings-table-wrap th:first-child,.order-earnings-table-wrap td:first-child,.order-earnings-table-wrap th:nth-child(2),.order-earnings-table-wrap td:nth-child(2) { text-align: left; }
+.order-earnings-table-wrap tbody tr:last-child td { border-bottom: 0; }
+.order-earnings-table-wrap a { color: #a00f18; font-weight: 700; text-decoration: none; }
 
 @media (max-width: 1100px) {
   .admin-master-detail { grid-template-columns: 1fr; }

@@ -453,14 +453,17 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
                 o.customer_name,
                 o.created_at,
                 COALESCE(SUM(oi.line_total), o.items_subtotal, o.total_price, 0) AS sales_total,
-                COALESCE(SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity), 0) AS pharmacy_total
+                COALESCE(SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity), 0) AS pharmacy_total,
+                o.delivery_owner_amount,
+                o.delivery_courier_amount
             FROM orders o
             LEFT JOIN order_items oi ON oi.order_id = o.id
             WHERE o.deleted_at IS NULL
               AND o.status = 'delivered'
               AND o.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')
             GROUP BY o.id, o.public_id, o.order_reference, o.customer_name, o.created_at,
-                     o.items_subtotal, o.total_price
+                     o.items_subtotal, o.total_price, o.delivery_owner_amount,
+                     o.delivery_courier_amount
             ORDER BY o.created_at DESC, o.id DESC
             LIMIT 100
             """,
@@ -545,6 +548,7 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
     for item in delivered_orders:
         item["order_id"] = item.pop("public_id") or str(item["order_reference"])
         item["profit"] = item["sales_total"] - item["pharmacy_total"]
+        item["owner_total"] = item["profit"] + item["delivery_owner_amount"]
     for item in recent_orders:
         internal_id = item.pop("id")
         item["order_id"] = item.pop("public_id") or f"legacy_{internal_id}"
@@ -983,11 +987,11 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
     if set(query) - {"limit", "cursor", "status"}:
         raise ContractError("VALIDATION_ERROR", "Unknown order filter")
     limit = min(_limit(query), 50)
-    clauses = ["o.deleted_at IS NULL", "o.status IN ('pending', 'confirmed', 'delivering')"]
+    clauses = ["o.deleted_at IS NULL", "o.status <> 'cancelled'"]
     params: list[Any] = []
     status = query.get("status")
     if status:
-        if status not in {"pending", "confirmed", "delivering"}:
+        if status not in {"pending", "confirmed", "delivering", "delivered"}:
             raise ContractError("VALIDATION_ERROR", "status is invalid")
         clauses.append("o.status = %s")
         params.append(status)
@@ -1029,6 +1033,83 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
     return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
+def courier_earnings(query: dict[str, Any]) -> dict[str, Any]:
+    """Courier earnings from delivered orders, grouped by Dushanbe calendar day."""
+    if set(query) - {"limit", "cursor"}:
+        raise ContractError("VALIDATION_ERROR", "Unknown earnings filter")
+    limit = min(_limit(query), 60)
+    cursor_date = None
+    raw_cursor = query.get("cursor")
+    if raw_cursor:
+        try:
+            cursor_date = datetime.strptime(str(raw_cursor), "%Y-%m-%d").date()
+        except (TypeError, ValueError) as exc:
+            raise ContractError("VALIDATION_ERROR", "cursor is invalid") from exc
+    with transaction() as cur:
+        cur.execute(
+            """
+            WITH earned AS (
+                SELECT o.delivery_courier_amount,
+                       COALESCE(
+                           (SELECT MAX(h.created_at) FROM order_status_history h
+                            WHERE h.order_id = o.id AND h.to_status = 'delivered'),
+                           o.delivery_updated_at,
+                           o.created_at
+                       ) AS earned_at
+                FROM orders o
+                WHERE o.deleted_at IS NULL AND o.status = 'delivered'
+            ), today AS (
+                SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Dushanbe')::date AS day
+            )
+            SELECT COALESCE(SUM(delivery_courier_amount), 0) AS total,
+                   COALESCE(SUM(delivery_courier_amount) FILTER (
+                       WHERE (earned_at AT TIME ZONE 'Asia/Dushanbe')::date = today.day), 0) AS today,
+                   COALESCE(SUM(delivery_courier_amount) FILTER (
+                       WHERE (earned_at AT TIME ZONE 'Asia/Dushanbe')::date = today.day - 1), 0) AS yesterday
+            FROM earned CROSS JOIN today
+            """
+        )
+        totals = dict(cur.fetchone())
+        params: list[Any] = []
+        cursor_clause = ""
+        if cursor_date:
+            cursor_clause = "WHERE earned_day < %s"
+            params.append(cursor_date)
+        params.append(limit + 1)
+        cur.execute(
+            f"""
+            WITH earned AS (
+                SELECT (COALESCE(
+                           (SELECT MAX(h.created_at) FROM order_status_history h
+                            WHERE h.order_id = o.id AND h.to_status = 'delivered'),
+                           o.delivery_updated_at,
+                           o.created_at
+                       ) AT TIME ZONE 'Asia/Dushanbe')::date AS earned_day,
+                       o.delivery_courier_amount
+                FROM orders o
+                WHERE o.deleted_at IS NULL AND o.status = 'delivered'
+            )
+            SELECT earned_day AS date, COUNT(*) AS orders_count,
+                   COALESCE(SUM(delivery_courier_amount), 0) AS amount
+            FROM earned
+            {cursor_clause}
+            GROUP BY earned_day
+            ORDER BY earned_day DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "total": totals["total"], "today": totals["today"], "yesterday": totals["yesterday"],
+        "daily": rows, "currency": "TJS",
+        "page": {"next_cursor": rows[-1]["date"].isoformat() if has_more and rows else None,
+                 "has_more": has_more},
+    }
+
+
 def update_courier_order_status(order_id: str, payload: dict[str, Any], current_request_id: str) -> dict[str, Any]:
     if set(payload) - {"status", "expected_current_status", "reason"} or not {
         "status", "expected_current_status"
@@ -1063,10 +1144,13 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
     params: list[Any] = []
     status = query.get("status")
     if status:
-        if status not in STATUS_TRANSITIONS:
+        if status == "active":
+            clauses.append("o.status IN ('pending', 'confirmed', 'delivering')")
+        elif status not in STATUS_TRANSITIONS:
             raise ContractError("VALIDATION_ERROR", "status is invalid")
-        clauses.append("o.status = %s")
-        params.append(status)
+        else:
+            clauses.append("o.status = %s")
+            params.append(status)
     search = str(query.get("q") or "").strip()
     if search:
         if len(search) > 120:
@@ -2833,6 +2917,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     list_courier_orders(event.get("queryStringParameters") or {}),
                     request=current_request_id,
                 )
+            if staff_method == "GET" and staff_path == "/v1/staff/earnings":
+                staff_accounts.session_account(event, courier=True)
+                return success(courier_earnings(event.get("queryStringParameters") or {}), request=current_request_id)
             if staff_method == "POST" and staff_path == "/v1/staff/orders":
                 account = staff_accounts.session_account(event)
                 headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}

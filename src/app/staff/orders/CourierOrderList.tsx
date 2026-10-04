@@ -68,7 +68,8 @@ function OrderCard({ order }: { order: CourierOrder }) {
     <div className="courier-order-heading">
       <div><strong>Заказ {order.order_reference || order.order_id}</strong>
         <small>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</small></div>
-      <span className={`courier-order-status ${status}`}>{labels[status]}</span>
+      <div className="courier-order-pay"><strong>{Number(amount || 0).toLocaleString('ru-RU')} с.</strong>
+        <small>заработок курьера</small><span className={`courier-order-status ${status}`}>{labels[status]}</span></div>
     </div>
     <div className="courier-order-details">
       <p><b>Аптека:</b> {order.pharmacy_id ? `Аптека ${order.pharmacy_id}` : 'Не указана'}</p>
@@ -79,7 +80,7 @@ function OrderCard({ order }: { order: CourierOrder }) {
       {order.notes && <p><b>Комментарий:</b> {order.notes}</p>}
       {order.order_source && <p><b>Источник:</b> {sourceLabels[order.order_source]}</p>}
     </div>
-    {status !== 'cancelled' && <div className="courier-order-details">
+    {status !== 'cancelled' && <div className="courier-fee-editor">
       <label htmlFor={`fee-${order.order_id}`}><b>Получено за доставку:</b></label>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
         <input id={`fee-${order.order_id}`} type="number" inputMode="decimal" min="0" max="1000000" step="0.01"

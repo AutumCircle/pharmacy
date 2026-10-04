@@ -71,6 +71,9 @@ export type AdminDashboardSummary = {
     sales_total: number | string;
     pharmacy_total: number | string;
     profit: number | string;
+    delivery_owner_amount?: number | string;
+    delivery_courier_amount?: number | string;
+    owner_total?: number | string;
   }>;
   currency: 'TJS';
 };

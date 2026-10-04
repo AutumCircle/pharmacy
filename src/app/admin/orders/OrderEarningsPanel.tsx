@@ -47,7 +47,7 @@ export default function OrderEarningsPanel({ summary, days, compact = false }: P
       </div>
 
       {!compact && (
-        <div className="order-earnings-chart-layout">
+        <><div className="order-earnings-chart-layout">
           <div className="order-earnings-pie" style={pieStyle} role="img"
             aria-label={`С онлайн-заказов ${money(orderProfit, summary.currency)}, ваша часть доставки ${money(ownerDelivery, summary.currency)}, курьер получил ${money(courierDelivery, summary.currency)}`}>
             <div><strong>{money(ownerTotal, summary.currency)}</strong><span>ваш итог</span></div>
@@ -58,6 +58,27 @@ export default function OrderEarningsPanel({ summary, days, compact = false }: P
             <div><i className="courier-delivery" /><span>Заработал курьер</span><strong>{money(courierDelivery, summary.currency)}</strong><small>{courierPercent.toFixed(1)}%</small></div>
           </div>
         </div>
+        <div className="order-earnings-history">
+          <h3>Заработок по каждому доставленному заказу</h3>
+          {summary.delivered_orders.length === 0 ? <p>За выбранный период доставленных заказов нет.</p> :
+            <div className="order-earnings-table-wrap"><table>
+              <thead><tr><th>Заказ</th><th>Дата</th><th>С заказа</th><th>Ваша доставка</th><th>Курьер</th><th>Ваш итог</th></tr></thead>
+              <tbody>{summary.delivered_orders.map((order) => {
+                const profit = Number(order.profit) || 0;
+                const ownerDeliveryForOrder = Number(order.delivery_owner_amount ?? 0) || 0;
+                const courierForOrder = Number(order.delivery_courier_amount ?? 0) || 0;
+                const total = Number(order.owner_total ?? profit + ownerDeliveryForOrder) || 0;
+                return <tr key={order.order_id}>
+                  <td><Link href={`/admin/orders/${order.order_id}`}>№ {order.order_reference}</Link></td>
+                  <td>{new Date(order.created_at).toLocaleDateString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</td>
+                  <td>{money(profit, summary.currency)}</td>
+                  <td>{money(ownerDeliveryForOrder, summary.currency)}</td>
+                  <td>{money(courierForOrder, summary.currency)}</td>
+                  <td><strong>{money(total, summary.currency)}</strong></td>
+                </tr>;
+              })}</tbody>
+            </table></div>}
+        </div></>
       )}
       {compact && <Link className="order-earnings-details" href={`/admin/orders?days=${days}`}>Открыть диаграмму в заказах →</Link>}
     </section>
