@@ -2,8 +2,8 @@
 
 import { useRef, useState } from 'react';
 
-export default function MedicineImageEditor({ medicineId, medicineName, initialUrl }: {
-  medicineId: number; medicineName: string; initialUrl: string | null;
+export default function MedicineImageEditor({ medicineId, medicineName, initialUrl, enabled = true }: {
+  medicineId: number; medicineName: string; initialUrl: string | null; enabled?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [imageUrl, setImageUrl] = useState(initialUrl);
@@ -41,13 +41,18 @@ export default function MedicineImageEditor({ medicineId, medicineName, initialU
 
   return <div className="admin-medicine-image-editor">
     <div className="admin-medicine-thumb">
-      {imageUrl ? <>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={imageUrl} alt={medicineName} referrerPolicy="no-referrer" /></> : <span>Нет фото</span>}
+      {imageUrl ? (
+        // Admin-validated HTTPS media may use different CDN hosts.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={imageUrl} alt={medicineName} referrerPolicy="no-referrer" />
+      ) : <span>Нет фото</span>}
     </div>
     <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden
       onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} />
-    <div><button type="button" disabled={busy} onClick={() => inputRef.current?.click()}>
+    <div><button type="button" disabled={busy || !enabled} onClick={() => inputRef.current?.click()}>
       {busy ? 'Подождите…' : imageUrl ? 'Заменить' : 'Добавить фото'}</button>
-      {imageUrl && <button type="button" className="remove" disabled={busy} onClick={() => void remove()}>Удалить</button>}</div>
+      {imageUrl && <button type="button" className="remove" disabled={busy || !enabled} onClick={() => void remove()}>Удалить</button>}</div>
+    {!enabled && <small>Доступно после утверждения backend</small>}
     {message && <small role="status">{message}</small>}
   </div>;
 }

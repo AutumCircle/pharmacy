@@ -89,7 +89,8 @@ export default async function AdminMedicinesPage({ searchParams }: {
           <tbody>
             {response.data.map((medicine) => (
               <tr key={medicine.medicine_id}>
-                <td><MedicineImageEditor medicineId={medicine.medicine_id} medicineName={medicine.medicine_name} initialUrl={medicine.image_url} /></td>
+                <td><MedicineImageEditor medicineId={medicine.medicine_id} medicineName={medicine.medicine_name}
+                  initialUrl={medicine.image_url} enabled={process.env.VERCEL_ENV !== 'preview'} /></td>
                 <td>{medicine.medicine_id}<div className="admin-country">{medicine.source_sku || 'SKU отсутствует'}</div></td>
                 <td><strong>{medicine.medicine_name}</strong></td>
                 <td>{Number(medicine.base_unit_price).toFixed(2)} TJS</td>
