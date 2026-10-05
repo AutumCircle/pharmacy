@@ -175,17 +175,18 @@ export function getPublicProductCarousels(): Promise<ProductCarouselsResponse> {
   return request('/v1/public/product-carousels', { cacheSeconds: 60 });
 }
 
-export function getPublicCategories(limit = 20, cursor?: string): Promise<CategoriesResponse> {
-  return request(`/v1/public/categories${queryString({ limit, cursor })}`, { cacheSeconds: 60 });
+export function getPublicCategories(limit = 20, cursor?: string, cacheSeconds = 60): Promise<CategoriesResponse> {
+  return request(`/v1/public/categories${queryString({ limit, cursor })}`, { cacheSeconds });
 }
 
 export function getPublicCategoryMedicines(
   slug: string,
   page = 1,
   limit = 24,
+  cacheSeconds = 30,
 ): Promise<CategoryMedicinesResponse> {
   return request(`/v1/public/categories/${encodeURIComponent(slug)}/medicines${queryString({ page, limit })}`, {
-    cacheSeconds: 30,
+    cacheSeconds,
   });
 }
 
