@@ -6,6 +6,7 @@ import type {
   ApiSuccessResponse,
   CategoriesResponse,
   CategoryMedicinesResponse,
+  CollectionResponse,
   CreateOrderRequest,
   CreateOrderResponse,
   MedicineResponse,
@@ -219,6 +220,18 @@ export function sendOrderNotification(body: Record<string, unknown>): Promise<Ap
 
 export function trackPublicOrders(phone: string): Promise<TrackOrdersResponse> {
   return request('/v1/public/orders/track', { method: 'POST', body: { phone }, readOnly: true });
+}
+
+export function getPublicCollection(slug: string): Promise<CollectionResponse> {
+  // Same short cache as the other catalogue reads, so prices match the rest of the site.
+  return request(`/v1/public/collections/${encodeURIComponent(slug)}`, { cacheSeconds: 30 });
+}
+
+export function recordPublicCollectionEvent(
+  body: Record<string, unknown>,
+): Promise<ApiSuccessResponse<{ recorded: boolean }>> {
+  // Not retried: a duplicate click event would inflate statistics.
+  return request('/v1/public/collection-events', { method: 'POST', body, timeoutMs: 4_000 });
 }
 
 export function getPublicSiteSettings(): Promise<ApiSuccessResponse<SiteContactSettings>> {

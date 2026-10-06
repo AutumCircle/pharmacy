@@ -1,7 +1,9 @@
+import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { createPublicOrder, sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
-import type { CreateOrderRequest } from '@/lib/api-v1/types';
+import type { CreateOrderRequest, OrderAttribution } from '@/lib/api-v1/types';
+import { SOURCE_COOKIE, attributionForOrder, parseSource } from '@/lib/collections';
 
 function isCreateOrderRequest(value: unknown): value is CreateOrderRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -36,7 +38,12 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const response = await createPublicOrder(body, idempotencyKey);
+    // Attribution is taken from the first-touch cookie on the server; the browser body cannot set it.
+    const attribution = attributionForOrder(parseSource((await cookies()).get(SOURCE_COOKIE)?.value));
+    const response = await createPublicOrder(
+      attribution ? { ...body, attribution: attribution as OrderAttribution } : body,
+      idempotencyKey,
+    );
     const order = response.data as typeof response.data & { _notification?: Record<string, unknown> };
     const notification = order._notification;
     if (notification) {

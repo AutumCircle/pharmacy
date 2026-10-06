@@ -425,3 +425,23 @@ Migration order:
 Для production должны быть утверждены PII retention и окончательная admin/service authentication scheme; рекомендуются короткоживущая identity и API Gateway authorizer/IAM, не общий static key.
 
 Перед release contract tests обязаны доказать: запрет клиентских цен/totals/statuses; корректную decimal-наценку; lookup по `medicine_id`; unavailable/minimum/idempotency cases; все status transitions; exact phone match; отсутствие delivery fee в order total; отсутствие доступа public principal к admin/internal routes; отсутствие production routes для wipe и массового удаления.
+
+## Marketing collections and attribution
+
+Public (API key only):
+
+- `GET /v1/public/collections/{slug}` — active collection with live prices/stock in configured
+  order; `404 COLLECTION_NOT_FOUND` for unknown or disabled slugs.
+- `POST /v1/public/collection-events` — `collection_slug`, `event_type` (`view` | `product_open` |
+  `add_to_cart`), `product_id` (required except for `view`, must belong to the collection),
+  `visitor_id`, `referrer`, `utm_*`, `user_agent`. Bot/preview user agents are dropped
+  (`{recorded:false}`). Next.js `/api/collections/events` forwards browser events only.
+- `POST /v1/public/orders` additionally accepts an optional `attribution`
+  (`source_collection`, `utm_source|medium|campaign|content`). It is added by the Next.js
+  `/api/checkout` route from the first-touch `vatan_src` cookie (7 days); the browser body may not
+  set it. It is not part of the idempotency hash.
+
+Admin (bearer): `GET/POST /v1/admin/collections`, `PATCH/DELETE /v1/admin/collections/{id}`,
+`POST /v1/admin/collections/resolve-products`, `GET /v1/admin/collection-stats?from&to&slug`.
+Saving validates that every product ID exists (`422 PRODUCTS_NOT_FOUND`). Order list/detail include
+the attribution fields. Cookies: `vatan_vid` (random visitor id, 30 days), `vatan_src` (7 days).

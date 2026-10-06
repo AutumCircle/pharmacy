@@ -23,6 +23,7 @@ from backend.v1.shared.contract import (
     validate_idempotency_key,
 )
 from backend.v1.shared.database import transaction
+from backend.v1.shared.marketing import is_bot_user_agent, validate_collection_event, validate_collection_slug
 from backend.v1.shared.responses import error_response, request_id, success, success_document
 from backend.v1.shared.search_ranking import did_you_mean, query_variants, rank_candidates, retrieval_terms
 
@@ -384,6 +385,8 @@ def _order_response(order: dict[str, Any], items: list[dict[str, Any]]) -> dict[
 def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[str, Any], int, dict[str, Any] | None]:
     request = validate_create_order_request(payload)
     normalized_key = validate_idempotency_key(idempotency_key)
+    attribution = request.pop("attribution", None) or {}
+    # Attribution comes from a cookie and is not part of the order identity: a retry must stay idempotent.
     request_hash = hashlib.sha256(
         json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
@@ -467,15 +470,18 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             INSERT INTO orders (
                 user_id, customer_name, phone, phone_normalized, address, notes,
                 total_price, items_subtotal, order_total, public_id, status,
-                payment_method, payment_status, currency
+                payment_method, payment_status, currency,
+                source_collection, utm_source, utm_medium, utm_campaign, utm_content
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending',
-                    'cash_on_delivery', 'unpaid', 'TJS')
+                    'cash_on_delivery', 'unpaid', 'TJS', %s, %s, %s, %s, %s)
             RETURNING id, public_id, status, items_subtotal, order_total, created_at
             """,
             (
                 None, request["customer_name"], request["phone"], request["phone"], request["address"], request["comment"],
                 subtotal, subtotal, subtotal, public_id,
+                attribution.get("source_collection"), attribution.get("utm_source"), attribution.get("utm_medium"),
+                attribution.get("utm_campaign"), attribution.get("utm_content"),
             ),
         )
         order = dict(cur.fetchone())
@@ -682,6 +688,68 @@ def get_site_settings() -> dict[str, Any]:
     return {"delivery_contact_phone": row["delivery_contact_phone"] if row else None}
 
 
+def get_collection(slug: str) -> dict[str, Any]:
+    """Public marketing collection with live prices and stock, in the configured order."""
+
+    clean_slug = validate_collection_slug(slug)
+    with transaction() as cur:
+        cur.execute(
+            "SELECT slug, title, description, product_ids FROM collections WHERE slug = %s AND is_active IS TRUE",
+            (clean_slug,),
+        )
+        collection = cur.fetchone()
+        if not collection:
+            raise ContractError("COLLECTION_NOT_FOUND", "Collection was not found", http_status=404)
+        product_ids = list(collection["product_ids"] or [])
+        rows: dict[int, dict[str, Any]] = {}
+        if product_ids:
+            cur.execute(
+                """
+                SELECT id, name, price, country, vendor, in_stock, updated_at, image_url,
+                       vatan_selling_unit_price(price) AS selling_unit_price
+                FROM medicines
+                WHERE id = ANY(%s)
+                """,
+                (product_ids,),
+            )
+            rows = {row["id"]: dict(row) for row in cur.fetchall()}
+    return {
+        "slug": collection["slug"],
+        "title": collection["title"],
+        "description": collection["description"] or "",
+        "medicines": [_medicine_response(rows[medicine_id]) for medicine_id in product_ids if medicine_id in rows],
+    }
+
+
+def record_collection_event(payload: dict[str, Any]) -> dict[str, Any]:
+    event = validate_collection_event(payload)
+    if is_bot_user_agent(event["user_agent"]):
+        return {"recorded": False, "reason": "bot"}
+    with transaction() as cur:
+        # Only active collections and, for product events, only their own products are recorded.
+        cur.execute(
+            """
+            INSERT INTO collection_events (
+                collection_slug, event_type, product_id, visitor_id,
+                utm_source, utm_medium, utm_campaign, utm_content, referrer, user_agent
+            )
+            SELECT c.slug, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            FROM collections c
+            WHERE c.slug = %s AND c.is_active IS TRUE
+              AND (%s::int IS NULL OR %s::int = ANY(c.product_ids))
+            RETURNING id
+            """,
+            (
+                event["event_type"], event["product_id"], event["visitor_id"],
+                event["utm_source"], event["utm_medium"], event["utm_campaign"], event["utm_content"],
+                event["referrer"], event["user_agent"][:300],
+                event["collection_slug"], event["product_id"], event["product_id"],
+            ),
+        )
+        recorded = cur.fetchone() is not None
+    return {"recorded": recorded}
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     current_request_id = request_id()
     method = event.get("httpMethod", "").upper()
@@ -701,6 +769,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(list_featured_products(), request=current_request_id)
         if method == "GET" and path.endswith("/public/product-carousels"):
             return success(list_product_carousels(), request=current_request_id)
+        if method == "GET" and len(tail) == 2 and tail[0] == "collections":
+            return success(get_collection(tail[1]), request=current_request_id)
+        if method == "POST" and path.endswith("/public/collection-events"):
+            return success(record_collection_event(_body(event)), request=current_request_id)
         if method == "GET" and path.endswith("/public/site-settings"):
             return success(get_site_settings(), request=current_request_id)
         if method == "GET" and path.endswith("/public/categories"):

@@ -35,7 +35,7 @@ from backend.v1.shared.xlsx_export import (
     build_available_medicines_workbook,
     build_out_of_stock_workbook,
 )
-from backend.v1.shared import staff_accounts
+from backend.v1.shared import collection_admin, staff_accounts
 
 
 DEFAULT_LIMIT = 20
@@ -1221,6 +1221,7 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
                    o.fulfillment_pharmacy_id,
                    o.delivery_courier_amount, o.delivery_owner_amount,
                    o.delivery_courier_amount + o.delivery_owner_amount AS delivery_fee,
+                   o.source_collection, o.utm_source, o.utm_medium, o.utm_campaign, o.utm_content,
                    sa.username AS created_by_staff_username
             FROM orders o
             LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
@@ -1255,6 +1256,7 @@ def get_order(order_id: str) -> dict[str, Any]:
                    o.created_by_staff_account_id, o.fulfillment_pharmacy_id,
                    o.delivery_courier_amount, o.delivery_owner_amount,
                    o.delivery_courier_amount + o.delivery_owner_amount AS delivery_fee,
+                   o.source_collection, o.utm_source, o.utm_medium, o.utm_campaign, o.utm_content,
                    sa.username AS created_by_staff_username
             FROM orders o
             LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
@@ -3090,6 +3092,25 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if method in {"PATCH", "DELETE"} and len(tail) == 2 and tail[0] == "featured-products":
             medicine_id = _positive_int(tail[1], "medicine_id")
             result = update_featured_product(medicine_id, _body(event)) if method == "PATCH" else delete_featured_product(medicine_id)
+            return success(result, request=current_request_id)
+        if method == "GET" and tail == ["collections"]:
+            return success(collection_admin.list_collections(), request=current_request_id)
+        if method == "POST" and tail == ["collections"]:
+            return success(
+                collection_admin.create_collection(_body(event), actor_id, current_request_id, _write_admin_audit),
+                status_code=201, request=current_request_id,
+            )
+        if method == "POST" and tail == ["collections", "resolve-products"]:
+            return success(collection_admin.resolve_products(_body(event)), request=current_request_id)
+        if method == "GET" and tail == ["collection-stats"]:
+            return success(collection_admin.collection_stats(query), request=current_request_id)
+        if method in {"PATCH", "DELETE"} and len(tail) == 2 and tail[0] == "collections":
+            collection_id = _positive_int(tail[1], "collection_id")
+            result = (
+                collection_admin.update_collection(collection_id, _body(event), actor_id, current_request_id, _write_admin_audit)
+                if method == "PATCH"
+                else collection_admin.delete_collection(collection_id, actor_id, current_request_id, _write_admin_audit)
+            )
             return success(result, request=current_request_id)
         if method == "GET" and tail == ["product-carousels"]:
             return success_document(list_product_carousels(), request=current_request_id)

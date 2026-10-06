@@ -3,6 +3,7 @@ import './globals.css';
 import { CartProvider } from '../context/CartContext';
 import { FavoritesProvider } from '../context/FavoritesContext';
 import LayoutWrapper from '../components/LayoutWrapper';
+import AttributionTracker from '../components/AttributionTracker';
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_KEYWORDS,
@@ -120,6 +121,7 @@ export default function RootLayout({
         />
         <FavoritesProvider>
           <CartProvider>
+            <AttributionTracker />
             <LayoutWrapper>
               {children}
             </LayoutWrapper>

@@ -38,3 +38,12 @@ reusable ordered carousel sections, and ordered unique products inside each
 section. It seeds `items-of-the-day` and `best-sellers`, then copies the existing
 `featured_products` configuration into `items-of-the-day`. The legacy table is
 kept for rollback compatibility and is not used by the new storefront endpoint.
+
+## Migration 0019: marketing collections and order attribution
+
+`migrations/0019_collections_and_attribution.sql` adds `collections` (ordered
+`product_ids`), `collection_events` (`view`, `product_open`, `add_to_cart`) and the
+`source_collection` / `utm_*` columns on `orders`. It seeds `oct-6` (active) and `oct-5`
+(inactive until the SMM specialist adds the third product; only IDs that exist in the
+catalogue are linked). Additive and re-runnable. Apply after an RDS snapshot and before
+deploying the Public/Admin Lambda packages. Never add prescription medicines to collections.

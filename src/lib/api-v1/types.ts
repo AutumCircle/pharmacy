@@ -170,12 +170,22 @@ export interface CreateOrderItemRequest {
   quantity: number;
 }
 
+export interface OrderAttribution {
+  source_collection?: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+}
+
 export interface CreateOrderRequest {
   customer_name: string;
   phone: string;
   address: string;
   comment?: string | null;
   items: CreateOrderItemRequest[];
+  /** Added by the Next.js server from the first-touch cookie; never accepted from the browser. */
+  attribution?: OrderAttribution;
 }
 
 export interface PublicOrderItem {
@@ -209,6 +219,13 @@ export type MedicineResponse = ApiSuccessResponse<PublicMedicine>;
 export type ResolveMedicinesResponse = ApiSuccessResponse<ResolvedMedicines>;
 export type HomepageBannersResponse = ApiSuccessResponse<{ banners: HomepageBanner[] }>;
 export type FeaturedProductsResponse = ApiSuccessResponse<{ products: FeaturedProduct[] }>;
+export interface PublicCollection {
+  slug: string;
+  title: string;
+  description: string;
+  medicines: PublicMedicine[];
+}
+export type CollectionResponse = ApiSuccessResponse<PublicCollection>;
 export type ProductCarouselsResponse = ApiSuccessResponse<{ carousels: ProductCarousel[] }>;
 export interface MedicineSearchResponse extends ApiListResponse<PublicMedicine> {
   page: CursorPage & Partial<NumberedPage>;

@@ -29,7 +29,7 @@ class ContractError(ValueError):
         self.fields = fields or {}
 
 
-ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items"}
+ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items", "attribution"}
 ORDER_ITEM_FIELDS = {"medicine_id", "quantity"}
 STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "pharmacy_id", "comment"}
 STAFF_ORDER_SOURCES = frozenset({"instagram", "whatsapp", "phone"})
@@ -220,12 +220,15 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
         seen_medicine_ids.add(medicine_id)
         normalized_items.append({"medicine_id": medicine_id, "quantity": quantity})
 
+    from .marketing import normalize_attribution
+
     return {
         "customer_name": customer_name,
         "phone": phone,
         "address": address,
         "comment": comment,
         "items": normalized_items,
+        "attribution": normalize_attribution(payload.get("attribution")),
     }
 
 

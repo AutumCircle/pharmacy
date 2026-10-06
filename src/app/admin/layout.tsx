@@ -17,6 +17,8 @@ const menu = [
   { name: 'Сотрудники', path: '/admin/staff', icon: '♙' },
   { name: 'Баннеры', path: '/admin/banners', icon: '▧' },
   { name: 'Карусели', path: '/admin/carousels', icon: '★' },
+  { name: 'Подборки', path: '/admin/collections', icon: '❖' },
+  { name: 'Статистика подборок', path: '/admin/collection-stats', icon: '▤' },
   { name: 'Синхронизации', path: '/admin/history', icon: '↻' },
 ];
 

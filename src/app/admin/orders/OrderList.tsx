@@ -7,6 +7,7 @@ import { updateOrderStatus } from './actions';
 import OrderDeleteButton from './OrderDeleteButton';
 import type { AdminOrderSummary } from '@/lib/api-v1/admin-types';
 import type { OrderStatus } from '@/lib/api-v1/types';
+import { formatOrderSource } from '@/lib/collections';
 
 const labels: Record<OrderStatus, string> = {
   pending: 'Новый',
@@ -91,6 +92,7 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
                     : `Аптека ${order.created_by_staff_account_id} · ${order.created_by_staff_username}`}
                   {order.order_source ? ` · ${sourceLabels[order.order_source]}` : ''}
                 </div>}
+                {formatOrderSource(order) && <div style={{ color: '#1565c0', marginTop: 6, fontWeight: 600 }}>{formatOrderSource(order)}</div>}
                 <div style={{ marginTop: 8, fontWeight: 700 }}>
                   {Number(order.order_total || 0).toFixed(2)} {order.currency}
                 </div>

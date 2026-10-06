@@ -239,6 +239,11 @@ export type AdminOrderSummary = {
   delivery_courier_amount: number | string;
   delivery_owner_amount: number | string;
   delivery_fee: number | string;
+  source_collection: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
 };
 
 export type AdminOrderItem = {
@@ -286,4 +291,73 @@ export type CatalogSyncSummary = {
 export type AdminHomepageBanner = HomepageBanner & {
   is_active: boolean;
   updated_at: string;
+};
+
+export type AdminCollectionProduct = { id: number; name: string | null; in_stock: boolean };
+
+export type AdminCollection = {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  product_ids: number[];
+  products: AdminCollectionProduct[];
+  is_active: boolean;
+  created_at: string;
+};
+
+export type AdminCollectionInput = {
+  slug: string;
+  title: string;
+  description: string;
+  product_ids: number[];
+  is_active: boolean;
+};
+
+export type AdminResolvedProducts = { products: AdminCollectionProduct[]; missing_ids: number[] };
+
+export type CollectionStatsTotals = {
+  views: number;
+  unique_visitors: number;
+  product_opens: number;
+  add_to_carts: number;
+  orders: number;
+  orders_total: number;
+};
+
+export type CollectionStatsRow = CollectionStatsTotals & {
+  slug: string;
+  title: string;
+  is_active: boolean;
+  deleted: boolean;
+  by_medium: (CollectionStatsTotals & { medium: string | null })[];
+};
+
+export type CollectionProductStats = {
+  product_id: number;
+  name: string | null;
+  in_collection: boolean;
+  product_opens: number;
+  add_to_carts: number;
+  orders: number;
+  orders_total: number;
+};
+
+export type CollectionUtmOrders = {
+  utm_content: string;
+  utm_source: string;
+  utm_medium: string;
+  utm_campaign: string;
+  orders: number;
+  orders_total: number;
+};
+
+export type CollectionStats = {
+  from: string | null;
+  to: string | null;
+  time_zone: string;
+  collections: CollectionStatsRow[];
+  utm_orders: CollectionUtmOrders[];
+  slug?: string;
+  products?: CollectionProductStats[];
 };

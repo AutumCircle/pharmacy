@@ -8,9 +8,17 @@ import type { PublicMedicine } from '@/lib/api-v1/types';
 export default function ProductCard({
   item,
   imageUrl,
+  onAddToCart,
+  onOpen,
+  outOfStockPhone,
 }: {
   item: PublicMedicine;
   imageUrl?: string | null;
+  /** Optional hooks used by marketing collections for click statistics. */
+  onAddToCart?: (item: PublicMedicine) => void;
+  onOpen?: (item: PublicMedicine) => void;
+  /** When set, an unavailable product shows this phone number to call the pharmacy. */
+  outOfStockPhone?: string | null;
 }) {
   const resolvedImageUrl = imageUrl === undefined ? item.image_url : imageUrl;
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
@@ -41,6 +49,7 @@ export default function ProductCard({
       in_stock: item.in_stock,
       image_url: resolvedImageUrl,
     });
+    onAddToCart?.(item);
   };
 
   return (
@@ -59,7 +68,7 @@ export default function ProductCard({
         <button type="button" aria-label={favorite ? 'Удалить из избранного' : 'Добавить в избранное'} className={`card-icon-btn ${favorite ? 'active-fav' : ''}`} onClick={(e) => { e.preventDefault(); toggleFavorite(); }} style={{ color: favorite ? 'var(--primary)' : '#ccc' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill={favorite ? 'var(--primary)' : 'none'} stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
         </button>
-        <a href={`/medicine/${item.medicine_id}`} className="card-image" aria-label={`Открыть ${item.medicine_name}`}>
+        <a href={`/medicine/${item.medicine_id}`} className="card-image" aria-label={`Открыть ${item.medicine_name}`} onClick={() => onOpen?.(item)}>
           {resolvedImageUrl && failedImageUrl !== resolvedImageUrl ? (
             // Admin API accepts only HTTPS image URLs.
             // eslint-disable-next-line @next/next/no-img-element
@@ -76,7 +85,7 @@ export default function ProductCard({
         </a>
       </div>
 
-      <a href={`/medicine/${item.medicine_id}`} className="card-details-link">
+      <a href={`/medicine/${item.medicine_id}`} className="card-details-link" onClick={() => onOpen?.(item)}>
         <div>
           <h3 className="card-name" title={item.medicine_name} style={{ fontSize: '14px', fontWeight: 500, lineHeight: 1.4, color: '#333', margin: 0 }}>
             {item.medicine_name}
@@ -89,13 +98,23 @@ export default function ProductCard({
       </div>
       
       {!inStock ? (
-        <button 
-          className="add-to-cart-btn" 
-          style={{ width: '100%', padding: '12px', border: 'none', borderRadius: '24px', fontWeight: 600, background: '#ccc', cursor: 'not-allowed', color: '#666' }}
-          disabled
-        >
-          Нет в наличии
-        </button>
+        <>
+          <button 
+            className="add-to-cart-btn" 
+            style={{ width: '100%', padding: '12px', border: 'none', borderRadius: '24px', fontWeight: 600, background: '#ccc', cursor: 'not-allowed', color: '#666' }}
+            disabled
+          >
+            Нет в наличии
+          </button>
+          {outOfStockPhone && (
+            <a
+              href={`tel:${outOfStockPhone.replace(/[^+\d]/g, '')}`}
+              style={{ display: 'block', marginTop: '8px', textAlign: 'center', fontSize: '13px', fontWeight: 600, color: '#B71C1C' }}
+            >
+              Уточнить: {outOfStockPhone}
+            </a>
+          )}
+        </>
       ) : qtyInCart > 0 ? (
         <div className="card-quantity-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
           <div className="card-quantity-control" style={{ display: 'flex', alignItems: 'center', background: '#F5F5F7', borderRadius: '24px', padding: '5px' }}>

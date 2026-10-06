@@ -7,6 +7,7 @@ import OrderStatusControl from './OrderStatusControl';
 import OrderItemPriceEditor from './OrderItemPriceEditor';
 import OrderDeliveryEditor from './OrderDeliveryEditor';
 import OrderDeleteButton from '../OrderDeleteButton';
+import { formatOrderSource } from '@/lib/collections';
 
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефонный звонок' } as const;
 
@@ -37,6 +38,7 @@ export default async function AdminOrderDetailPage({
           ? `Доставщик ${order.created_by_staff_username} · аптека ${order.fulfillment_pharmacy_id}`
           : `Аптека ${order.created_by_staff_account_id} · ${order.created_by_staff_username}`}</p>}
         {order.order_source && <p><strong>Источник:</strong> {sourceLabels[order.order_source]}</p>}
+        {formatOrderSource(order) && <p><strong>Источник перехода:</strong> {formatOrderSource(order)}{(order.utm_campaign || order.utm_content) ? ` (кампания: ${order.utm_campaign || '—'}, контент: ${order.utm_content || '—'})` : ''}</p>}
         <p><strong>Клиент:</strong> {order.customer_name || 'Не указан'}</p>
         <p><strong>Телефон:</strong> {order.phone}</p>
         <p><strong>Адрес:</strong> {order.address}</p>

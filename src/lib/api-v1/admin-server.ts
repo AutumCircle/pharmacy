@@ -19,6 +19,10 @@ import type {
   AdminBatchAddResult,
   AdminBatchRemoveResult,
   AdminCarouselProduct,
+  AdminCollection,
+  AdminCollectionInput,
+  AdminResolvedProducts,
+  CollectionStats,
   AdminFeaturedProduct,
   AdminHomepageBanner,
   AdminNumberedListResponse,
@@ -544,4 +548,35 @@ export function reorderAdminProductCarouselItems(carouselId: number, medicineIds
     `/v1/admin/product-carousels/${carouselId}/products/reorder`,
     { method: 'PATCH', body: { medicine_ids: medicineIds } },
   );
+}
+
+export function listAdminCollections(): Promise<ApiSuccessResponse<AdminCollection[]>> {
+  return request('/v1/admin/collections');
+}
+
+export function createAdminCollection(body: AdminCollectionInput): Promise<ApiSuccessResponse<AdminCollection>> {
+  return request('/v1/admin/collections', { method: 'POST', body });
+}
+
+export function updateAdminCollection(
+  collectionId: number,
+  body: Partial<AdminCollectionInput>,
+): Promise<ApiSuccessResponse<AdminCollection>> {
+  return request(`/v1/admin/collections/${collectionId}`, { method: 'PATCH', body });
+}
+
+export function deleteAdminCollection(collectionId: number) {
+  return request<ApiSuccessResponse<{ collection_id: number; deleted: boolean }>>(
+    `/v1/admin/collections/${collectionId}`, { method: 'DELETE' },
+  );
+}
+
+export function resolveAdminCollectionProducts(productIds: number[]): Promise<ApiSuccessResponse<AdminResolvedProducts>> {
+  return request('/v1/admin/collections/resolve-products', { method: 'POST', body: { product_ids: productIds } });
+}
+
+export function getAdminCollectionStats(
+  values: { from?: string; to?: string; slug?: string } = {},
+): Promise<ApiSuccessResponse<CollectionStats>> {
+  return request(`/v1/admin/collection-stats${queryString(values)}`);
 }
