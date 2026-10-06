@@ -20,9 +20,11 @@ EXPECTED_INDEXES = (
 
 def _migration_sql() -> str:
     text = Path(__file__).with_name("migration.sql").read_text(encoding="utf-8").strip()
-    if not text.startswith("BEGIN;") or not text.endswith("COMMIT;"):
+    begin_at = text.find("BEGIN;")
+    commit_at = text.rfind("COMMIT;")
+    if begin_at < 0 or commit_at <= begin_at:
         raise RuntimeError("migration.sql transaction wrapper is missing")
-    return text[len("BEGIN;"): -len("COMMIT;")].strip()
+    return text[begin_at + len("BEGIN;"):commit_at].strip()
 
 
 def _inspect(cursor):
