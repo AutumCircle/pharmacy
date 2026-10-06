@@ -1264,6 +1264,78 @@ a {
   .footer-compact-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Public collection checkout guide */
+.collection-order-guide {
+  margin-top: 36px;
+  padding: clamp(20px, 3vw, 32px);
+  overflow: hidden;
+  border: 1px solid #f0e4e5;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #fff 0%, #fff8f8 100%);
+  box-shadow: 0 10px 30px rgba(96, 20, 26, .06);
+}
+.collection-order-guide__heading span {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.collection-order-guide__heading h2 { margin: 4px 0 20px; font-size: clamp(22px, 3vw, 28px); }
+.collection-order-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+.collection-order-step {
+  position: relative;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid #efe4e5;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .92);
+}
+.collection-order-step__number {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff0f1;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+.collection-order-step__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 15px;
+  border-radius: 14px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 23px;
+  font-weight: 700;
+}
+.collection-order-step strong { display: block; margin-bottom: 7px; font-size: 17px; color: #241b1c; }
+.collection-order-step p { margin: 0; color: #665a5c; font-size: 14px; line-height: 1.5; }
+.collection-order-guide__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+
+@media (max-width: 700px) {
+  .collection-order-steps { grid-template-columns: 1fr; }
+  .collection-order-step { padding: 17px 58px 17px 72px; min-height: 74px; }
+  .collection-order-step__icon { position: absolute; top: 14px; left: 14px; width: 42px; height: 42px; margin: 0; }
+  .collection-order-guide__actions a { flex: 1 1 160px; text-align: center; }
+}
+
 @media (max-width: 480px) {
   .container { width: min(calc(100% - 20px), var(--site-content-max)); }
   .bottom-nav .nav-item { padding: 8px 1px; font-size: 9px; }

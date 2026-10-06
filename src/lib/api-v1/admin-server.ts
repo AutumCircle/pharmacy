@@ -580,3 +580,13 @@ export function getAdminCollectionStats(
 ): Promise<ApiSuccessResponse<CollectionStats>> {
   return request(`/v1/admin/collection-stats${queryString(values)}`);
 }
+
+export function resetAdminCollectionStats(confirmation: string): Promise<ApiSuccessResponse<{
+  events_deleted: number;
+  orders_attribution_cleared: number;
+}>> {
+  return request('/v1/admin/collection-stats/reset', {
+    method: 'POST',
+    body: { confirmation },
+  });
+}

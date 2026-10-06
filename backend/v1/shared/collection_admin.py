@@ -12,6 +12,7 @@ from .marketing import clean_text, parse_product_ids, validate_collection_slug
 AuditWriter = Callable[..., None]
 STATS_TIME_ZONE = "Asia/Dushanbe"
 NO_MEDIUM = ""
+RESET_STATS_CONFIRMATION = "СБРОСИТЬ"
 
 
 def _product_directory(cur: Any, product_ids: list[int]) -> dict[int, dict[str, Any]]:
@@ -372,3 +373,63 @@ def collection_stats(query: dict[str, Any]) -> dict[str, Any]:
         response["slug"] = slug_filter
         response["products"] = products
     return response
+
+
+def reset_collection_stats(
+    payload: dict[str, Any], actor_id: str, current_request_id: str, audit: AuditWriter,
+) -> dict[str, int]:
+    """Remove collection analytics without deleting orders, products, or collections."""
+
+    allowed = {"confirmation"}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ContractError(
+            "VALIDATION_ERROR", "Request validation failed",
+            fields={field: "field is not allowed" for field in unknown},
+        )
+    if payload.get("confirmation") != RESET_STATS_CONFIRMATION:
+        raise ContractError(
+            "CONFIRMATION_REQUIRED",
+            f"Введите {RESET_STATS_CONFIRMATION} для подтверждения",
+            fields={"confirmation": f"must equal {RESET_STATS_CONFIRMATION}"},
+        )
+
+    with transaction() as cur:
+        cur.execute(
+            """
+            WITH deleted_events AS (
+                DELETE FROM collection_events RETURNING 1
+            ), cleared_orders AS (
+                UPDATE orders
+                SET source_collection = NULL,
+                    utm_source = NULL,
+                    utm_medium = NULL,
+                    utm_campaign = NULL,
+                    utm_content = NULL
+                WHERE source_collection IS NOT NULL
+                   OR utm_source IS NOT NULL
+                   OR utm_medium IS NOT NULL
+                   OR utm_campaign IS NOT NULL
+                   OR utm_content IS NOT NULL
+                RETURNING 1
+            )
+            SELECT
+                (SELECT COUNT(*) FROM deleted_events) AS events_deleted,
+                (SELECT COUNT(*) FROM cleared_orders) AS orders_attribution_cleared
+            """
+        )
+        row = cur.fetchone()
+        result = {
+            "events_deleted": int(row["events_deleted"]),
+            "orders_attribution_cleared": int(row["orders_attribution_cleared"]),
+        }
+        audit(
+            cur,
+            actor_id=actor_id,
+            action="collection_stats.reset",
+            resource_type="collection_stats",
+            resource_id="all",
+            request=current_request_id,
+            details=result,
+        )
+    return result

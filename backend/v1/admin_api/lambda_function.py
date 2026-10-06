@@ -3104,6 +3104,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(collection_admin.resolve_products(_body(event)), request=current_request_id)
         if method == "GET" and tail == ["collection-stats"]:
             return success(collection_admin.collection_stats(query), request=current_request_id)
+        if method == "POST" and tail == ["collection-stats", "reset"]:
+            return success(
+                collection_admin.reset_collection_stats(
+                    _body(event), actor_id, current_request_id, _write_admin_audit,
+                ),
+                request=current_request_id,
+            )
         if method in {"PATCH", "DELETE"} and len(tail) == 2 and tail[0] == "collections":
             collection_id = _positive_int(tail[1], "collection_id")
             result = (

@@ -3,6 +3,7 @@ import { Fragment } from 'react';
 import { requireAdminSession } from '@/lib/admin-auth';
 import { getAdminCollectionStats } from '@/lib/api-v1/admin-server';
 import type { CollectionStats, CollectionStatsTotals } from '@/lib/api-v1/admin-types';
+import ResetCollectionStats from './ResetCollectionStats';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +64,8 @@ export default async function CollectionStatsPage({ searchParams }: { searchPara
         В заказы входят неудалённые и неотменённые заказы.
       </p>
       {error && <div style={{ background: '#fdecea', color: '#b71c1c', padding: 14, borderRadius: 8 }}>{error}. Проверьте, что миграция 0019 применена, а Admin Lambda обновлена.</div>}
+
+      <ResetCollectionStats />
 
       {stats && (
         <>

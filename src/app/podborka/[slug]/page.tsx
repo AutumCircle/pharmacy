@@ -68,14 +68,32 @@ export default async function CollectionPage({ params }: Params) {
         <div className="empty-state" style={{ padding: '60px', textAlign: 'center' }}>В этой подборке пока нет товаров</div>
       )}
 
-      <section aria-labelledby="how-to-order" style={{ marginTop: '36px', background: 'white', border: '1px solid #F0F0F0', borderRadius: '16px', padding: '20px' }}>
-        <h2 id="how-to-order" style={{ margin: '0 0 12px', fontSize: '20px' }}>Как заказать</h2>
-        <ol style={{ margin: 0, paddingLeft: '20px', lineHeight: 1.7, color: '#444' }}>
-          <li>Нажмите «В корзину» у нужных товаров.</li>
-          <li>Откройте корзину и укажите имя, телефон и адрес доставки.</li>
-          <li>Оператор аптеки свяжется с вами и подтвердит заказ. Оплата при получении.</li>
+      <section className="collection-order-guide" aria-labelledby="how-to-order">
+        <div className="collection-order-guide__heading">
+          <span>Заказ за несколько минут</span>
+          <h2 id="how-to-order">Как заказать</h2>
+        </div>
+        <ol className="collection-order-steps">
+          <li className="collection-order-step">
+            <span className="collection-order-step__number">1</span>
+            <span className="collection-order-step__icon" aria-hidden="true">＋</span>
+            <strong>Добавьте в корзину</strong>
+            <p>Выберите нужные товары и нажмите кнопку «В корзину».</p>
+          </li>
+          <li className="collection-order-step">
+            <span className="collection-order-step__number">2</span>
+            <span className="collection-order-step__icon" aria-hidden="true">🛒</span>
+            <strong>Откройте корзину</strong>
+            <p>Проверьте выбранные товары и их количество.</p>
+          </li>
+          <li className="collection-order-step">
+            <span className="collection-order-step__number">3</span>
+            <span className="collection-order-step__icon" aria-hidden="true">✓</span>
+            <strong>Оформите заказ</strong>
+            <p>Укажите телефон и адрес — аптека подтвердит заказ.</p>
+          </li>
         </ol>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '18px' }}>
+        <div className="collection-order-guide__actions">
           <Link href="/cart" style={{ padding: '12px 24px', background: 'var(--primary)', color: 'white', borderRadius: '24px', fontWeight: 600 }}>
             Перейти в корзину
           </Link>

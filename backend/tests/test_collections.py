@@ -192,6 +192,29 @@ class AdminCollectionTests(unittest.TestCase):
             with self.assertRaises(ContractError):
                 collection_admin.collection_stats(query)
 
+    def test_reset_stats_requires_exact_confirmation(self):
+        with patch.object(collection_admin, "transaction") as tx:
+            for payload in ({}, {"confirmation": "сбросить"}, {"confirmation": "СБРОСИТЬ", "extra": True}):
+                with self.assertRaises(ContractError):
+                    collection_admin.reset_collection_stats(payload, "admin", "req_1", MagicMock())
+        tx.assert_not_called()
+
+    def test_reset_stats_clears_only_events_and_order_attribution(self):
+        cursor = MagicMock()
+        cursor.fetchone.return_value = {"events_deleted": 12, "orders_attribution_cleared": 3}
+        audit = MagicMock()
+        with patch.object(collection_admin, "transaction", lambda: fake_transaction(cursor)):
+            result = collection_admin.reset_collection_stats(
+                {"confirmation": "СБРОСИТЬ"}, "admin", "req_2", audit,
+            )
+        self.assertEqual(result, {"events_deleted": 12, "orders_attribution_cleared": 3})
+        sql = cursor.execute.call_args[0][0]
+        self.assertIn("DELETE FROM collection_events", sql)
+        self.assertIn("UPDATE orders", sql)
+        self.assertIn("source_collection = NULL", sql)
+        self.assertNotIn("DELETE FROM orders", sql)
+        audit.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
