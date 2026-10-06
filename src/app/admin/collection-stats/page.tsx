@@ -10,7 +10,7 @@ type SearchParams = Promise<{ from?: string; to?: string; slug?: string }>;
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const cell = { padding: '8px 10px', textAlign: 'right' } as const;
-const money = (value: number) => `${value.toLocaleString('ru-RU')} с.`;
+const money = (value: number | string) => `${Number(value).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} с.`;
 
 function Totals({ row }: { row: CollectionStatsTotals }) {
   return (

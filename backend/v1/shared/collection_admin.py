@@ -286,7 +286,7 @@ def collection_stats(query: dict[str, Any]) -> dict[str, Any]:
             medium = item["by_medium"].setdefault(row["medium"], _empty_totals())
             for target in (item, medium):
                 target["orders"] += int(row["orders"])
-                target["orders_total"] += int(row["orders_total"])
+                target["orders_total"] += row["orders_total"]
 
         cur.execute(
             f"""
@@ -306,7 +306,7 @@ def collection_stats(query: dict[str, Any]) -> dict[str, Any]:
         )
         utm_orders = [
             {**{key: row[key] for key in ("utm_content", "utm_source", "utm_medium", "utm_campaign")},
-             "orders": int(row["orders"]), "orders_total": int(row["orders_total"])}
+             "orders": int(row["orders"]), "orders_total": row["orders_total"]}
             for row in cur.fetchall()
         ]
 
@@ -349,7 +349,7 @@ def collection_stats(query: dict[str, Any]) -> dict[str, Any]:
                     "product_opens": int((product_events.get(pid) or {}).get("product_opens", 0)),
                     "add_to_carts": int((product_events.get(pid) or {}).get("add_to_carts", 0)),
                     "orders": int((product_orders.get(pid) or {}).get("orders", 0)),
-                    "orders_total": int((product_orders.get(pid) or {}).get("orders_total", 0)),
+                    "orders_total": (product_orders.get(pid) or {}).get("orders_total", 0),
                 }
                 for pid in all_ids if pid
             ]

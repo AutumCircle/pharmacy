@@ -322,7 +322,7 @@ export type CollectionStatsTotals = {
   product_opens: number;
   add_to_carts: number;
   orders: number;
-  orders_total: number;
+  orders_total: number | string;
 };
 
 export type CollectionStatsRow = CollectionStatsTotals & {
@@ -340,7 +340,7 @@ export type CollectionProductStats = {
   product_opens: number;
   add_to_carts: number;
   orders: number;
-  orders_total: number;
+  orders_total: number | string;
 };
 
 export type CollectionUtmOrders = {
@@ -349,7 +349,7 @@ export type CollectionUtmOrders = {
   utm_medium: string;
   utm_campaign: string;
   orders: number;
-  orders_total: number;
+  orders_total: number | string;
 };
 
 export type CollectionStats = {

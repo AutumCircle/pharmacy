@@ -183,6 +183,16 @@ def build() -> Path:
         "file": delivery_migration_destination.name, "handler": "lambda_function.lambda_handler",
         "sha256": hashlib.sha256(delivery_migration_payload).hexdigest(), "size_bytes": len(delivery_migration_payload),
     })
+    collections_migration_destination = OUTPUT / "migration-0019-collections-once.zip"
+    _write_deterministic_zip(collections_migration_destination, [
+        ("lambda_function.py", ROOT / "backend" / "operations" / "collections_migration_once" / "lambda_function.py"),
+        ("migration.sql", ROOT / "db" / "migrations" / "0019_collections_and_attribution.sql"),
+    ])
+    collections_migration_payload = collections_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": collections_migration_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(collections_migration_payload).hexdigest(), "size_bytes": len(collections_migration_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

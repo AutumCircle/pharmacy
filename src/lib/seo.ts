@@ -45,7 +45,7 @@ function normalizeOrigin(value: string | undefined): string | null {
 export function getSiteUrl(): string {
   return normalizeOrigin(process.env.SITE_URL)
     ?? normalizeOrigin(process.env.VERCEL_PROJECT_PRODUCTION_URL)
-    ?? 'http://localhost:3000';
+    ?? (process.env.NODE_ENV === 'production' ? 'https://www.aptekavatan.tj' : 'http://localhost:3000');
 }
 
 export function absoluteUrl(path = '/'): string {
