@@ -38,7 +38,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    // Attribution is taken from the first-touch cookie on the server; the browser body cannot set it.
+    // Attribution is taken from the latest tracked-link cookie; the browser body cannot set it.
     const attribution = attributionForOrder(parseSource((await cookies()).get(SOURCE_COOKIE)?.value));
     const response = await createPublicOrder(
       attribution ? { ...body, attribution: attribution as OrderAttribution } : body,

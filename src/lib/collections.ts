@@ -1,4 +1,4 @@
-/** Shared (browser + server) helpers for marketing collections, UTM capture and first-touch attribution.
+/** Shared (browser + server) helpers for marketing collections and UTM attribution.
  *
  * Nothing here is personal data: the visitor id is a random value and the source cookie only holds
  * a collection slug and UTM labels.
@@ -53,6 +53,20 @@ export function readUtm(search: string): Utm {
   const utm = emptyUtm();
   for (const key of UTM_KEYS) utm[key] = cleanLabel(params.get(key));
   return utm;
+}
+
+export function buildInstagramStoryUrl(
+  siteUrl: string,
+  path: string,
+  campaign: string,
+  content: string,
+): string {
+  const url = new URL(path, `${siteUrl.replace(/\/$/, '')}/`);
+  url.searchParams.set('utm_source', 'instagram');
+  url.searchParams.set('utm_medium', 'story');
+  url.searchParams.set('utm_campaign', cleanLabel(campaign) || 'story');
+  url.searchParams.set('utm_content', cleanLabel(content) || 'link');
+  return url.toString();
 }
 
 export function hasUtm(utm: Utm): boolean {
@@ -176,12 +190,11 @@ export function getVisitorId(): string | null {
 }
 
 /**
- * First-touch source: written only when no source younger than 7 days exists.
- * `collection` is set when the visitor opened an existing collection page.
+ * Last tracked source: every tagged link (or collection page) replaces the previous source.
+ * This makes the order reflect the latest campaign link opened before checkout.
  */
-export function saveFirstTouchSource(collection: string | null, utm: Utm): void {
+export function saveAttributionSource(collection: string | null, utm: Utm): void {
   if (!collection && !hasUtm(utm)) return;
-  if (parseSource(readCookie(SOURCE_COOKIE))) return;
   writeCookie(SOURCE_COOKIE, serializeSource({ collection, utm, savedAt: Date.now() }), SOURCE_MAX_AGE_SECONDS);
 }
 

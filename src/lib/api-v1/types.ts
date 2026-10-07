@@ -184,7 +184,7 @@ export interface CreateOrderRequest {
   address: string;
   comment?: string | null;
   items: CreateOrderItemRequest[];
-  /** Added by the Next.js server from the first-touch cookie; never accepted from the browser. */
+  /** Added by the Next.js server from the latest tracked-link cookie; never accepted from the browser. */
   attribution?: OrderAttribution;
 }
 

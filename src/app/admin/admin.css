@@ -861,8 +861,26 @@
 .admin-reset-stats .admin-reset-stats__success { grid-column: 1 / -1; color: #16743a; font-weight: 700; }
 .admin-reset-stats .admin-inline-error { grid-column: 1 / -1; color: #b5121b; }
 
+.collection-story-links { margin-top: 14px; padding-top: 14px; border-top: 1px solid #ebe7e7; }
+.collection-story-links > button { padding: 9px 14px; border: 1px solid #b5121b; border-radius: 9px; background: #fff; color: #a00f18; font-weight: 700; cursor: pointer; }
+.collection-story-links__panel { display: grid; gap: 14px; margin-top: 12px; padding: 16px; border-radius: 12px; background: #faf7f7; }
+.collection-story-links__panel p { margin: 4px 0 0; color: #667085; font-size: 13px; line-height: 1.45; }
+.collection-story-links__panel label { display: grid; gap: 6px; max-width: 520px; font-weight: 650; }
+.collection-story-links__panel input { width: 100%; padding: 9px 11px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; }
+.collection-story-links__rows { display: grid; gap: 7px; }
+.collection-story-links__rows > div { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; border: 1px solid #e8e1e2; border-radius: 9px; background: #fff; }
+.collection-story-links__rows span { display: grid; min-width: 0; }
+.collection-story-links__rows strong { overflow: hidden; text-overflow: ellipsis; }
+.collection-story-links__rows small { overflow-wrap: anywhere; color: #667085; }
+.collection-story-links__rows button { flex: 0 0 auto; min-width: 124px; padding: 8px 11px; }
+.collection-story-links__rows button:disabled { opacity: .5; cursor: not-allowed; }
+.collection-story-links__note { color: #5d5153; line-height: 1.45; }
+
 @media (max-width: 700px) {
   .admin-reset-stats { grid-template-columns: 1fr; align-items: stretch; }
   .admin-reset-stats__controls { display: grid; }
   .admin-reset-stats__controls input { width: 100%; }
+  .collection-story-links__panel { padding: 12px; }
+  .collection-story-links__rows > div { align-items: stretch; flex-direction: column; }
+  .collection-story-links__rows button { width: 100%; }
 }

@@ -49,7 +49,7 @@ def normalize_utm(payload: Any) -> dict[str, str | None]:
 
 
 def normalize_attribution(value: Any) -> dict[str, str | None] | None:
-    """Order attribution as supplied by the Next.js server from the first-touch cookie.
+    """Order attribution as supplied by the Next.js server from the latest tracked-link cookie.
 
     Returns None when there is nothing to store. Values are untrusted and only used as labels.
     """

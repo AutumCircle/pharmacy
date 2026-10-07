@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   attributionForOrder,
+  buildInstagramStoryUrl,
   collectionSlugFromPath,
   formatOrderSource,
   isBotUserAgent,
@@ -36,6 +37,20 @@ test('UTM labels are read, trimmed and limited', () => {
   assert.equal(utm.utm_medium, 'dm');
   assert.equal(utm.utm_content?.length, 100);
   assert.equal(readUtm('?a=1').utm_source, null);
+});
+
+test('Instagram story links identify the campaign and exact target', () => {
+  const link = new URL(buildInstagramStoryUrl(
+    'https://aptekavatan.tj',
+    '/medicine/4048',
+    'oct7-evening',
+    'product_4048',
+  ));
+  assert.equal(link.origin + link.pathname, 'https://aptekavatan.tj/medicine/4048');
+  assert.equal(link.searchParams.get('utm_source'), 'instagram');
+  assert.equal(link.searchParams.get('utm_medium'), 'story');
+  assert.equal(link.searchParams.get('utm_campaign'), 'oct7-evening');
+  assert.equal(link.searchParams.get('utm_content'), 'product_4048');
 });
 
 test('source cookie round-trips and expires after seven days', () => {

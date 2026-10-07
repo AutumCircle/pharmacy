@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import ProductCard from '@/components/ProductCard';
 import type { PublicMedicine } from '@/lib/api-v1/types';
-import { readUtm, saveFirstTouchSource, sendCollectionEvent } from '@/lib/collections';
+import { readUtm, saveAttributionSource, sendCollectionEvent } from '@/lib/collections';
 
 /**
  * Product grid of a marketing collection. Statistics are sent from the browser only, after the
@@ -24,7 +24,7 @@ export default function CollectionProducts({
     if (viewed.current) return;
     viewed.current = true;
     const track = () => {
-      saveFirstTouchSource(slug, readUtm(window.location.search));
+      saveAttributionSource(slug, readUtm(window.location.search));
       sendCollectionEvent(slug, 'view');
     };
     // A page that Chrome pre-renders in the background has not been opened by the visitor yet.

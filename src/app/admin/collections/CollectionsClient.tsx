@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { previewCollectionProducts, removeCollection, saveCollection, setCollectionActive } from './actions';
 import type { AdminCollection, AdminCollectionProduct } from '@/lib/api-v1/admin-types';
+import { buildInstagramStoryUrl } from '@/lib/collections';
 
 type Draft = { id: number | null; slug: string; title: string; description: string; productIds: string; isActive: boolean };
 type Preview = { products: AdminCollectionProduct[]; missing: number[]; error: string | null };
@@ -16,6 +17,85 @@ function toDraft(collection: AdminCollection): Draft {
     id: collection.id, slug: collection.slug, title: collection.title, description: collection.description,
     productIds: collection.product_ids.join(', '), isActive: collection.is_active,
   };
+}
+
+function StoryLinks({ collection, siteUrl }: { collection: AdminCollection; siteUrl: string }) {
+  const [open, setOpen] = useState(false);
+  const [campaign, setCampaign] = useState(`story-${collection.slug}`);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const trackedLink = (path: string, content: string) => (
+    buildInstagramStoryUrl(siteUrl, path, campaign, content)
+  );
+  const copy = async (label: string, link: string) => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(label);
+    } catch {
+      window.prompt('Скопируйте ссылку', link);
+    }
+  };
+
+  return (
+    <div className="collection-story-links">
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        {open ? 'Скрыть UTM-ссылки' : 'Ссылки для сторис'}
+      </button>
+      {open && (
+        <div className="collection-story-links__panel">
+          <div>
+            <strong>Отдельные ссылки для Instagram Stories</strong>
+            <p>Задайте название конкретной сториз. В заказе будет видно это название и выбранный товар или подборку.</p>
+          </div>
+          <label>
+            Название сториз или кампании
+            <input
+              value={campaign}
+              maxLength={100}
+              onChange={(event) => { setCampaign(event.target.value); setCopied(null); }}
+              placeholder="Например: oct7-evening"
+            />
+          </label>
+          <div className="collection-story-links__rows">
+            <div>
+              <span><strong>Вся подборка</strong><small>content: collection_{collection.slug}</small></span>
+              <button
+                type="button"
+                disabled={!campaign.trim()}
+                onClick={() => void copy(
+                  'collection',
+                  trackedLink(`/podborka/${collection.slug}`, `collection_${collection.slug}`),
+                )}
+              >
+                {copied === 'collection' ? 'Скопировано ✓' : 'Скопировать'}
+              </button>
+            </div>
+            {collection.products.map((product) => (
+              <div key={product.id}>
+                <span>
+                  <strong>{product.name ?? `Товар ${product.id}`}</strong>
+                  <small>content: product_{product.id}_{product.name ?? 'unknown'}</small>
+                </span>
+                <button
+                  type="button"
+                  disabled={!campaign.trim() || !product.name}
+                  onClick={() => void copy(
+                    `product-${product.id}`,
+                    trackedLink(`/medicine/${product.id}`, `product_${product.id}_${product.name ?? 'unknown'}`),
+                  )}
+                >
+                  {copied === `product-${product.id}` ? 'Скопировано ✓' : 'Скопировать'}
+                </button>
+              </div>
+            ))}
+          </div>
+          <small className="collection-story-links__note">
+            Источник будет записан как Instagram / story. Если клиент откроет несколько рекламных ссылок, заказ относится к последней открытой ссылке.
+          </small>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function CollectionsClient({ initialCollections, siteUrl }: { initialCollections: AdminCollection[]; siteUrl: string }) {
@@ -95,8 +175,8 @@ export default function CollectionsClient({ initialCollections, siteUrl }: { ini
         <button type="button" disabled={busy} onClick={() => openDraft(EMPTY)} style={{ padding: '10px 18px' }}>Новая подборка</button>
       </div>
       <p style={{ color: '#667085' }}>
-        Страница подборки: <code>/podborka/slug</code>. Одну такую ссылку можно отправлять в Direct. Для статистики добавляйте метки:
-        <code> ?utm_source=instagram&amp;utm_medium=dm&amp;utm_campaign=post_oct6</code>. Рецептурные препараты в подборки добавлять нельзя.
+        Создайте подборку, затем откройте «Ссылки для сторис»: админка подготовит отдельную отслеживаемую ссылку для подборки и каждого товара.
+        Рецептурные препараты в подборки добавлять нельзя.
       </p>
       {message && (
         <div role="status" style={{ margin: '12px 0', padding: 12, borderRadius: 8, background: message.kind === 'ok' ? '#e8f5e9' : '#fdecea', color: message.kind === 'ok' ? '#1b5e20' : '#b71c1c' }}>
@@ -172,6 +252,7 @@ export default function CollectionsClient({ initialCollections, siteUrl }: { ini
               ))}
               {collection.products.length === 0 && <li style={{ listStyle: 'none', color: '#b71c1c' }}>Товаров нет</li>}
             </ol>
+            <StoryLinks collection={collection} siteUrl={siteUrl} />
           </article>
         ))}
       </div>
