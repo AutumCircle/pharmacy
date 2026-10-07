@@ -234,6 +234,13 @@ export function recordPublicCollectionEvent(
   return request('/v1/public/collection-events', { method: 'POST', body, timeoutMs: 4_000 });
 }
 
+export function recordPublicUtmLinkEvent(
+  body: Record<string, unknown>,
+): Promise<ApiSuccessResponse<{ recorded: boolean }>> {
+  // Not retried: duplicate landing events would inflate statistics.
+  return request('/v1/public/utm-link-events', { method: 'POST', body, timeoutMs: 4_000 });
+}
+
 export function getPublicSiteSettings(): Promise<ApiSuccessResponse<SiteContactSettings>> {
   return request('/v1/public/site-settings');
 }

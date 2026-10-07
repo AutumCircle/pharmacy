@@ -220,3 +220,28 @@ export function sendCollectionEvent(slug: string, eventType: CollectionEventType
     // Statistics must never break shopping.
   }
 }
+
+export function sendUtmLinkEvent(path: string, utm: Utm): void {
+  if (!hasUtm(utm)) return;
+  const visitorId = getVisitorId();
+  if (!visitorId) return;
+  const productMatch = /^\/medicine\/(\d+)\/?$/.exec(path);
+  const productId = productMatch ? Number(productMatch[1]) : undefined;
+  const body = JSON.stringify({
+    path,
+    ...(productId ? { product_id: productId } : {}),
+    visitor_id: visitorId,
+    referrer: document.referrer || null,
+    ...utm,
+  });
+  try {
+    void fetch('/api/utm-link-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    // Statistics must never break shopping.
+  }
+}

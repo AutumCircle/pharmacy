@@ -11,6 +11,7 @@ from backend.v1.shared.marketing import (
     normalize_attribution,
     parse_product_ids,
     validate_collection_event,
+    validate_utm_link_event,
 )
 
 VISITOR = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
@@ -69,6 +70,20 @@ class EventValidationTests(unittest.TestCase):
         self.assertEqual(len(result["utm_medium"]), 100)
         self.assertIsNone(result["utm_campaign"])
 
+    def test_direct_utm_landing_requires_valid_utm_and_visitor(self):
+        result = validate_utm_link_event({
+            "path": "/medicine/4200865", "product_id": 4200865, "visitor_id": VISITOR,
+            "utm_source": "instagram", "utm_medium": "story", "utm_campaign": "story-oct-7",
+            "utm_content": "product_4200865", "user_agent": IPHONE,
+        })
+        self.assertEqual(result["product_id"], 4200865)
+        for bad in (
+            {"path": "/medicine/1", "visitor_id": VISITOR},
+            {"path": "https://evil.example", "visitor_id": VISITOR, "utm_source": "x"},
+        ):
+            with self.assertRaises(ContractError):
+                validate_utm_link_event(bad)
+
 
 class RecordEventTests(unittest.TestCase):
     def test_bot_event_is_not_stored(self):
@@ -91,7 +106,25 @@ class RecordEventTests(unittest.TestCase):
         cursor = MagicMock()
         cursor.fetchone.return_value = None
         with patch.object(public_api, "transaction", lambda: fake_transaction(cursor)):
-            self.assertEqual(public_api.record_collection_event(event()), {"recorded": False})
+                self.assertEqual(public_api.record_collection_event(event()), {"recorded": False})
+
+    def test_direct_utm_landing_is_recorded_and_bots_are_dropped(self):
+        payload = {
+            "path": "/medicine/4200865", "product_id": 4200865, "visitor_id": VISITOR,
+            "utm_source": "instagram", "utm_medium": "story", "utm_campaign": "story-oct-7",
+            "utm_content": "product_4200865", "user_agent": IPHONE,
+        }
+        cursor = MagicMock()
+        cursor.fetchone.return_value = {"id": 1}
+        with patch.object(public_api, "transaction", lambda: fake_transaction(cursor)):
+            self.assertEqual(public_api.record_utm_link_event(payload), {"recorded": True})
+        self.assertIn("INSERT INTO utm_link_events", cursor.execute.call_args[0][0])
+        with patch.object(public_api, "transaction") as tx:
+            self.assertEqual(
+                public_api.record_utm_link_event({**payload, "user_agent": "facebookexternalhit/1.1"}),
+                {"recorded": False, "reason": "bot"},
+            )
+        tx.assert_not_called()
 
 
 class AttributionTests(unittest.TestCase):
@@ -201,15 +234,20 @@ class AdminCollectionTests(unittest.TestCase):
 
     def test_reset_stats_clears_only_events_and_order_attribution(self):
         cursor = MagicMock()
-        cursor.fetchone.return_value = {"events_deleted": 12, "orders_attribution_cleared": 3}
+        cursor.fetchone.return_value = {
+            "events_deleted": 12, "utm_events_deleted": 8, "orders_attribution_cleared": 3,
+        }
         audit = MagicMock()
         with patch.object(collection_admin, "transaction", lambda: fake_transaction(cursor)):
             result = collection_admin.reset_collection_stats(
                 {"confirmation": "СБРОСИТЬ"}, "admin", "req_2", audit,
             )
-        self.assertEqual(result, {"events_deleted": 12, "orders_attribution_cleared": 3})
+        self.assertEqual(result, {
+            "events_deleted": 12, "utm_events_deleted": 8, "orders_attribution_cleared": 3,
+        })
         sql = cursor.execute.call_args[0][0]
         self.assertIn("DELETE FROM collection_events", sql)
+        self.assertIn("DELETE FROM utm_link_events", sql)
         self.assertIn("UPDATE orders", sql)
         self.assertIn("source_collection = NULL", sql)
         self.assertNotIn("DELETE FROM orders", sql)

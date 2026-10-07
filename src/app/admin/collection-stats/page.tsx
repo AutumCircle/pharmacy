@@ -129,6 +129,42 @@ export default async function CollectionStatsPage({ searchParams }: { searchPara
           )}
 
           <section style={{ marginTop: 28 }}>
+            <h2>Переходы по ссылкам из сторис</h2>
+            <p style={{ color: '#667085', marginTop: 0 }}>
+              Реальные загрузки страниц по UTM-ссылкам. Предпросмотры Instagram и известные боты не учитываются.
+            </p>
+            <div style={{ overflowX: 'auto', background: 'white', borderRadius: 12 }}>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Сторис / кампания</th><th>Товар или ссылка</th><th>Источник</th>
+                    <th style={cell}>Переходы</th><th style={cell}>Уникальные</th>
+                    <th style={cell}>Заказы</th><th style={cell}>Сумма заказов</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.utm_links.length === 0 && <tr><td colSpan={7} style={{ textAlign: 'center', padding: 24 }}>Переходов пока нет</td></tr>}
+                  {stats.utm_links.map((row, index) => (
+                    <tr key={`${row.utm_campaign}-${row.utm_content}-${row.product_id ?? 'link'}-${index}`}>
+                      <td><strong>{row.utm_campaign || 'Без названия'}</strong><div style={{ color: '#667085', fontSize: 12 }}>{row.utm_content || '—'}</div></td>
+                      <td>
+                        {row.product_id ? (
+                          <Link href={`/medicine/${row.product_id}`} target="_blank">
+                            {row.product_name ?? `Товар ${row.product_id}`}
+                          </Link>
+                        ) : row.utm_content || 'Ссылка'}
+                      </td>
+                      <td>{[row.utm_source, row.utm_medium].filter(Boolean).join(' / ') || '—'}</td>
+                      <td style={cell}>{row.views}</td><td style={cell}>{row.unique_visitors}</td>
+                      <td style={cell}>{row.orders}</td><td style={cell}>{money(row.orders_total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section style={{ marginTop: 28 }}>
             <h2>Заказы с UTM без подборки</h2>
             <p style={{ color: '#667085', marginTop: 0 }}>Например, сторис со ссылкой прямо на товар. Сгруппировано по utm_content.</p>
             <div style={{ overflowX: 'auto', background: 'white', borderRadius: 12 }}>

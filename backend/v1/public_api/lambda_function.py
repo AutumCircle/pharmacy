@@ -23,7 +23,12 @@ from backend.v1.shared.contract import (
     validate_idempotency_key,
 )
 from backend.v1.shared.database import transaction
-from backend.v1.shared.marketing import is_bot_user_agent, validate_collection_event, validate_collection_slug
+from backend.v1.shared.marketing import (
+    is_bot_user_agent,
+    validate_collection_event,
+    validate_collection_slug,
+    validate_utm_link_event,
+)
 from backend.v1.shared.responses import error_response, request_id, success, success_document
 from backend.v1.shared.search_ranking import did_you_mean, query_variants, rank_candidates, retrieval_terms
 
@@ -750,6 +755,31 @@ def record_collection_event(payload: dict[str, Any]) -> dict[str, Any]:
     return {"recorded": recorded}
 
 
+def record_utm_link_event(payload: dict[str, Any]) -> dict[str, Any]:
+    event = validate_utm_link_event(payload)
+    if is_bot_user_agent(event["user_agent"]):
+        return {"recorded": False, "reason": "bot"}
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO utm_link_events (
+                visitor_id, path, product_id, utm_source, utm_medium,
+                utm_campaign, utm_content, referrer, user_agent
+            )
+            SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s
+            WHERE %s::int IS NULL OR EXISTS (SELECT 1 FROM medicines WHERE id = %s)
+            RETURNING id
+            """,
+            (
+                event["visitor_id"], event["path"], event["product_id"],
+                event["utm_source"], event["utm_medium"], event["utm_campaign"], event["utm_content"],
+                event["referrer"], event["user_agent"][:300], event["product_id"], event["product_id"],
+            ),
+        )
+        recorded = cur.fetchone() is not None
+    return {"recorded": recorded}
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     current_request_id = request_id()
     method = event.get("httpMethod", "").upper()
@@ -773,6 +803,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(get_collection(tail[1]), request=current_request_id)
         if method == "POST" and path.endswith("/public/collection-events"):
             return success(record_collection_event(_body(event)), request=current_request_id)
+        if method == "POST" and path.endswith("/public/utm-link-events"):
+            return success(record_utm_link_event(_body(event)), request=current_request_id)
         if method == "GET" and path.endswith("/public/site-settings"):
             return success(get_site_settings(), request=current_request_id)
         if method == "GET" and path.endswith("/public/categories"):

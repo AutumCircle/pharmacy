@@ -352,11 +352,19 @@ export type CollectionUtmOrders = {
   orders_total: number | string;
 };
 
+export type CollectionUtmLinkStats = CollectionUtmOrders & {
+  product_id: number | null;
+  product_name: string | null;
+  views: number;
+  unique_visitors: number;
+};
+
 export type CollectionStats = {
   from: string | null;
   to: string | null;
   time_zone: string;
   collections: CollectionStatsRow[];
+  utm_links: CollectionUtmLinkStats[];
   utm_orders: CollectionUtmOrders[];
   slug?: string;
   products?: CollectionProductStats[];

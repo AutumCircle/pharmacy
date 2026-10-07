@@ -25,7 +25,7 @@ export default function ResetCollectionStats() {
         return;
       }
       setMessage(
-        `История обнулена: удалено событий — ${result.events_deleted}, очищено источников заказов — ${result.orders_attribution_cleared}.`,
+        `История обнулена: удалено событий подборок — ${result.events_deleted}, UTM-переходов — ${result.utm_events_deleted}, очищено источников заказов — ${result.orders_attribution_cleared}.`,
       );
       setConfirmation('');
       setOpen(false);
