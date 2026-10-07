@@ -802,12 +802,16 @@
 .order-earnings-table-wrap tbody tr:last-child td { border-bottom: 0; }
 .order-earnings-table-wrap a { color: #a00f18; font-weight: 700; text-decoration: none; }
 .order-earnings-table-wrap .positive-earning { color: #16803a; background: #f0faf3; font-weight: 750; }
-.admin-medicine-image-editor { width: 126px; display: grid; gap: 6px; }
+.admin-medicine-image-editor { width: 260px; display: grid; gap: 7px; }
 .admin-medicine-thumb { width: 72px; height: 72px; display: grid; place-items: center; overflow: hidden; border: 1px solid #e1dddd; border-radius: 10px; background: #fafafa; }
 .admin-medicine-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .admin-medicine-thumb span { color: #8a8081; font-size: 11px; text-align: center; }
 .admin-medicine-image-editor>div:nth-child(3) { display: flex; flex-wrap: wrap; gap: 5px; }
 .admin-medicine-image-editor button { padding: 5px 7px; border: 1px solid #d8ced0; border-radius: 7px; background: #fff; color: #5b4548; font-size: 11px; cursor: pointer; }
+.admin-medicine-image-url { display: grid; gap: 4px; color: #5f5556; font-size: 11px; font-weight: 700; }
+.admin-medicine-image-url input { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid #d8ced0; border-radius: 7px; background: #fff; color: #2e2627; font-size: 12px; }
+.admin-medicine-image-url input:focus { border-color: #b5121b; outline: 2px solid rgba(181,18,27,.1); }
+.admin-medicine-image-editor .admin-medicine-save-url { padding: 8px 9px; border-color: #b5121b; background: #b5121b; color: #fff; font-size: 12px; font-weight: 700; }
 .admin-medicine-image-editor button.remove { color: #a00f18; }
 .admin-medicine-image-editor button:disabled { opacity: .55; cursor: wait; }
 .admin-medicine-image-editor small { color: #6c6263; font-size: 10px; }

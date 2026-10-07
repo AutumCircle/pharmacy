@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const details = readFileSync('src/app/medicine/[name]/ProductDetailsClient.tsx', 'utf8');
+const medicineImageEditor = readFileSync('src/app/admin/medicines/MedicineImageEditor.tsx', 'utf8');
 const footer = readFileSync('src/components/Footer.tsx', 'utf8');
 const footerConfig = readFileSync('src/config/site-footer.ts', 'utf8');
 
@@ -11,6 +12,14 @@ test('product detail uses image_url with eager loading and an error fallback', (
   assert.match(details, /loading="eager"/);
   assert.match(details, /fetchPriority="high"/);
   assert.match(details, /onError=\{\(\) => setImageFailed\(true\)\}/);
+});
+
+test('admin medicine image editor accepts and saves a direct HTTPS URL', () => {
+  assert.match(medicineImageEditor, /type="url"/);
+  assert.match(medicineImageEditor, /Ссылка на изображение/);
+  assert.match(medicineImageEditor, /Сохранить ссылку/);
+  assert.match(medicineImageEditor, /parsed\.protocol !== 'https:'/);
+  assert.match(medicineImageEditor, /JSON\.stringify\(\{ image_url: nextUrl \}\)/);
 });
 
 test('footer contains only the approved contact data', () => {
