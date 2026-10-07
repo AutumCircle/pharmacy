@@ -74,14 +74,14 @@ function StoryLinks({ collection, siteUrl }: { collection: AdminCollection; site
               <div key={product.id}>
                 <span>
                   <strong>{product.name ?? `Товар ${product.id}`}</strong>
-                  <small>content: product_{product.id}_{product.name ?? 'unknown'}</small>
+                  <small>content: product_{product.id}</small>
                 </span>
                 <button
                   type="button"
                   disabled={!campaign.trim() || !product.name}
                   onClick={() => void copy(
                     `product-${product.id}`,
-                    trackedLink(`/medicine/${product.id}`, `product_${product.id}_${product.name ?? 'unknown'}`),
+                    trackedLink(`/medicine/${product.id}`, `product_${product.id}`),
                   )}
                 >
                   {copied === `product-${product.id}` ? 'Скопировано ✓' : 'Скопировать'}
