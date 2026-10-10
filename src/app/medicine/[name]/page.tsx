@@ -4,7 +4,7 @@ import { cache } from 'react';
 import { ApiV1Error, getPublicMedicine } from '@/lib/api-v1/server';
 import type { PublicMedicine } from '@/lib/api-v1/types';
 import { formatVendorCountry } from '@/lib/formatters';
-import { SITE_CITY, SITE_NAME, absoluteUrl, formatPriceTjs, getSiteUrl, jsonLd, medicinePath } from '@/lib/seo';
+import { SITE_CITY, SITE_NAME, SITE_TAJIK_NAME, absoluteUrl, formatPriceTjs, getSiteUrl, jsonLd, medicinePath } from '@/lib/seo';
 import ProductDetailsClient from './ProductDetailsClient';
 
 type Params = { params: Promise<{ name: string }> };
@@ -31,7 +31,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     .filter((value) => value && value !== 'Не указано')
     .join(', ');
   const description = `${product.medicine_name}${maker ? ` (${maker})` : ''}: цена ${price}, ${availability}. `
-    + `Закажите онлайн в ${SITE_NAME} с доставкой по ${SITE_CITY}, оплата при получении.`;
+    + `Закажите онлайн в ${SITE_NAME} с доставкой по ${SITE_CITY}, оплата при получении. `
+    + `Харидани ${product.medicine_name} дар Душанбе — ${SITE_TAJIK_NAME}.`;
   const path = medicinePath(product.medicine_id);
   return {
     title,
@@ -86,6 +87,20 @@ export default async function MedicinePage({ params }: Params) {
         dangerouslySetInnerHTML={{ __html: jsonLd(productStructuredData(product)) }}
       />
       <ProductDetailsClient product={product} />
+      <section className="product-seo-text" style={{ margin: '30px 0 40px', color: '#555', lineHeight: 1.6, fontSize: '15px' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px', color: '#333' }}>
+          Купить {product.medicine_name} в {SITE_CITY}
+        </h2>
+        <p>
+          {product.medicine_name} в аптеке Ватан: цена {formatPriceTjs(product.selling_unit_price)},
+          {product.in_stock ? ' есть в наличии' : ' сейчас нет в наличии'}. Оформите заказ на сайте — доставим по {SITE_CITY},
+          оплата наличными при получении.
+        </p>
+        <p lang="tg" style={{ marginTop: '6px' }}>
+          Харидани {product.medicine_name} дар Душанбе — {SITE_TAJIK_NAME}. Нарх: {product.selling_unit_price.toFixed(2)} сомонӣ.
+          Фармоишро ба тамоми Душанбе мерасонем, пардохт ҳангоми гирифтан.
+        </p>
+      </section>
     </div>
   );
 }

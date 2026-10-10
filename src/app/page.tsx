@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { SITE_FOOTER } from '@/config/site-footer';
 import Link from 'next/link';
 import CategoryIcon from '@/components/CategoryIcon';
 import { Suspense } from 'react';
@@ -164,6 +165,23 @@ export default async function Home({
           <li>Нажмите «В корзину», затем оформите заказ: имя, телефон и адрес доставки.</li>
           <li>Аптека подтвердит заказ и доставит его. Статус можно проверить на странице <Link href="/tracking" style={{ color: 'var(--primary)' }}>отслеживания заказа</Link>.</li>
         </ol>
+        <p style={{ marginTop: '12px' }}>
+          Официальный сайт аптеки Ватан — aptekavatan.tj. Адрес: {SITE_FOOTER.address}, работаем {SITE_FOOTER.workingDays.toLowerCase()} {SITE_FOOTER.workingHours}.
+        </p>
+        <div lang="tg" style={{ marginTop: '20px' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, margin: '0 0 8px' }}>Дорухонаи Ватан — фармоиши дору дар Душанбе</h2>
+          <p style={{ marginBottom: '8px' }}>
+            Дорухонаи Ватан — дорухона дар шаҳри Душанбе. Дар сомонаи aptekavatan.tj доруҳо ва маҳсулоти саломатиро
+            ҷустуҷӯ кунед, нархро бо сомонӣ бинед ва онлайн фармоиш диҳед. Фармоишро ба тамоми Душанбе мерасонем,
+            пардохт бо пули нақд ҳангоми гирифтан.
+          </p>
+          <ol style={{ paddingLeft: '20px' }}>
+            <li>Номи доруро дар ҷустуҷӯ нависед, масалан «парацетамол» ё «нурофен».</li>
+            <li>Тугмаи «В корзину»-ро пахш кунед.</li>
+            <li>Ном, рақами телефон ва суроғаи худро нависед.</li>
+            <li>Мо фармоишро тасдиқ карда, ба шумо мерасонем.</li>
+          </ol>
+        </div>
       </section>
     </div>
   );
