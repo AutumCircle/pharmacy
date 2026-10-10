@@ -86,6 +86,8 @@
 .staff-order-warning { margin-bottom: 16px; padding: 14px 16px; border: 1px solid #f1cf82; border-radius: 11px; background: #fff8e6; color: #7b4d00; }
 .courier-new-order { align-self: center; padding: 11px 16px; border-radius: 10px; background: #b71920; color: #fff; text-decoration: none; font-weight: 750; }
 .courier-order-list { display: grid; gap: 14px; }
+.pharmacy-preparation-items { margin: 15px 0 0; padding-left: 22px; display: grid; gap: 8px; }
+.pharmacy-preparation-items li { overflow-wrap: anywhere; }
 .courier-order-card { padding: 20px; border: 1px solid #e0e5e1; border-radius: 14px; background: #fff; box-shadow: 0 3px 14px rgba(20,35,25,.04); }
 .courier-order-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .courier-order-heading>div { display: grid; gap: 4px; }

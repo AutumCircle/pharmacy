@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { STAFF_SESSION_COOKIE } from '@/lib/admin-session';
-import { createStaffOrder, listCourierOrders } from '@/lib/api-v1/staff-server';
+import { createStaffOrder, getStaffSession, listCourierOrders } from '@/lib/api-v1/staff-server';
 import { sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 import type { CreateStaffOrderRequest } from '@/lib/api-v1/staff-types';
@@ -52,10 +52,14 @@ export async function POST(request: Request) {
   try {
     const token = (await cookies()).get(STAFF_SESSION_COOKIE)?.value;
     if (!token) return NextResponse.json({ error: 'Требуется вход' }, { status: 401 });
+    const account = await getStaffSession(token);
+    if (account.role !== 'courier') return NextResponse.json({ error: 'Создавать заказ может только доставщик' }, { status: 403 });
     const idempotencyKey = request.headers.get('idempotency-key');
     if (!idempotencyKey) return NextResponse.json({ error: 'Повторите отправку' }, { status: 400 });
     const body: unknown = await request.json();
-    if (!isRequest(body)) return NextResponse.json({ error: 'Проверьте заполнение полей' }, { status: 400 });
+    if (!isRequest(body) || body.pharmacy_id === undefined || body.items.length !== 0) {
+      return NextResponse.json({ error: 'Проверьте заполнение полей' }, { status: 400 });
+    }
     const response = await createStaffOrder(token, body, idempotencyKey);
     const notification = response.data._notification;
     delete response.data._notification;

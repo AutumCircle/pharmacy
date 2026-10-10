@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from backend.v1.shared import staff_accounts as staff
 from backend.v1.shared.contract import ContractError, validate_staff_order_request
-from backend.v1.admin_api.lambda_function import create_staff_order, lambda_handler
+from backend.v1.admin_api.lambda_function import create_staff_order, lambda_handler, list_pharmacy_preparation_orders
 
 
 class StaffTests(unittest.TestCase):
@@ -81,35 +81,14 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(response['statusCode'], 200)
         self.assertEqual(set(json.loads(response['body'])['data']), {'token'})
 
-    def test_second_employee_can_create_manual_order_without_catalog(self):
+    def test_pharmacy_employees_cannot_create_orders(self):
         second = {**self.account, 'account_id': 2, 'username': 'vatan_2', 'catalog_access': False}
-        order_cursor = Mock()
-        order_cursor.fetchone.side_effect = [
-            {'id': 1},
-            {'id': 12, 'public_id': 'ord_test', 'status': 'pending', 'created_at': '2026-09-28T10:00:00Z'},
-        ]
-        order_cursor.fetchall.return_value = [{
-            'id': 44, 'name': 'Test medicine', 'price': '10.00',
-            'selling_unit_price': 11, 'in_stock': True,
-        }]
-
-        @contextmanager
-        def order_transaction():
-            yield order_cursor
-
-        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
-            response, status, notification = create_staff_order({
-                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
-                'landmark': 'напротив школы', 'source': 'phone',
-                'items': [{'medicine_id': 44, 'quantity': 2}],
-            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', second, 'req_test')
-        self.assertEqual(status, 201)
-        self.assertEqual(response['created_by_staff_account_id'], 2)
-        self.assertEqual(notification['created_by_staff_username'], 'vatan_2')
-        sql_calls = ' '.join(call.args[0] for call in order_cursor.execute.call_args_list)
-        self.assertIn('created_by_staff_account_id', sql_calls)
-        self.assertIn('jsonb_to_recordset', sql_calls)
-        self.assertIn('staff.order.created', str(order_cursor.execute.call_args_list))
+        payload = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                   'landmark': 'напротив школы', 'source': 'phone', 'items': []}
+        for account in (self.account, second):
+            with self.assertRaises(ContractError) as caught:
+                create_staff_order(payload, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', account, 'req_test')
+            self.assertEqual(caught.exception.http_status, 403)
 
     def test_courier_creates_attributed_order_without_medicines(self):
         courier = {**self.account, 'account_id': 3, 'username': 'courier',
@@ -175,11 +154,37 @@ class StaffTests(unittest.TestCase):
             response = lambda_handler(self.event(path, token=token), None)
             self.assertEqual(response['statusCode'], 403)
 
-    def test_only_courier_can_list_and_change_order_status(self):
+    def test_pharmacy_only_sees_own_website_preparation_orders(self):
+        from datetime import datetime, timezone
+        order_cursor = Mock()
+        order_cursor.fetchall.return_value = [{
+            'id': 12, 'public_id': 'ord_test', 'order_reference': '3456-012',
+            'status': 'pending', 'created_at': datetime(2026, 10, 10, tzinfo=timezone.utc),
+            'notes': None, 'customer_name': 'Клиент',
+            'medicines': [{'medicine_name': 'NOW D3', 'quantity': 2}],
+        }]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            result = list_pharmacy_preparation_orders({}, 1)
+        self.assertEqual(result['data'][0]['medicines'][0]['medicine_name'], 'NOW D3')
+        sql, args = order_cursor.execute.call_args.args
+        self.assertIn('o.created_by_staff_account_id IS NULL', sql)
+        self.assertIn('COALESCE(o.fulfillment_pharmacy_id, 1) = %s', sql)
+        self.assertEqual(args, (1, 21))
+        self.assertNotIn('o.phone', sql)
+
+    def test_pharmacy_reads_preparation_list_but_cannot_change_status(self):
         courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
         self.cursor.fetchone.return_value = self.account
-        response = lambda_handler(self.event('/v1/staff/orders', token=staff.create_session(self.account)), None)
-        self.assertEqual(response['statusCode'], 403)
+        with patch('backend.v1.admin_api.lambda_function.list_pharmacy_preparation_orders',
+                   return_value={'data': [], 'page': {'has_more': False, 'next_cursor': None}}) as preparation:
+            response = lambda_handler(self.event('/v1/staff/orders', token=staff.create_session(self.account)), None)
+        self.assertEqual(response['statusCode'], 200)
+        preparation.assert_called_once_with({}, 1)
         self.cursor.fetchone.return_value = courier
         with patch('backend.v1.admin_api.lambda_function.list_courier_orders',
                    return_value={'data': [], 'page': {'has_more': False, 'next_cursor': None}}):

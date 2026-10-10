@@ -530,11 +530,17 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
         )
         notification = {
             "admin_order_id": int(order["id"]),
+            "fulfillment_pharmacy_id": 1,
             "order_reference": order_reference,
             "customer_name": request["customer_name"],
             "phone": request["phone"],
             "address": request["address"],
             "comment": request["comment"],
+            "source_collection": attribution.get("source_collection"),
+            "utm_source": attribution.get("utm_source"),
+            "utm_medium": attribution.get("utm_medium"),
+            "utm_campaign": attribution.get("utm_campaign"),
+            "utm_content": attribution.get("utm_content"),
             "items": [
                 {
                     "medicine_id": item["medicine_id"],

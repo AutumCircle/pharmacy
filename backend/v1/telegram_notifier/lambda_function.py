@@ -63,6 +63,19 @@ def _item_lines(event: dict[str, Any], price_key: str) -> list[str]:
     return lines
 
 
+def _medicine_lines(event: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for item in event.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        line = f"• {html.escape(str(item.get('medicine_name') or 'Товар'))} × {int(item.get('quantity') or 0)}"
+        if sum(len(part) + 1 for part in lines) + len(line) > 2900:
+            lines.append("• …остальные товары смотрите в панели заказов")
+            break
+        lines.append(line)
+    return lines
+
+
 def format_owner_message(event: dict[str, Any]) -> str:
     if event.get("notification_kind") == "staff_manual_order":
         reference, customer, phone, address = _identity(event)
@@ -73,7 +86,7 @@ def format_owner_message(event: dict[str, Any]) -> str:
         source = source_labels.get(str(event.get("order_source")), "—")
         landmark = html.escape(str(event.get("landmark") or "—"))
         lines = [
-            f"🏥 <b>Новый заказ из аптеки {account_id}</b>",
+            f"🚚 <b>Новый заказ от доставщика · аптека {account_id}</b>",
             f"🧾 Заказ: {reference}",
             f"👤 {actor_label}: {username}",
             f"📨 Источник: {source}",
@@ -106,9 +119,13 @@ def format_owner_message(event: dict[str, Any]) -> str:
         else:
             lines.extend(["", "Товары будут уточнены по телефону."])
         return "\n".join(lines)
-    reference, _, _, _ = _identity(event)
+    reference, customer, phone, address = _identity(event)
     lines = [
         f"📊 <b>Новый заказ {reference} — для владельца</b>",
+        "🏥 Аптека 1 · заказ с сайта",
+        f"👤 Клиент: {customer}",
+        f"📞 Телефон: {phone}",
+        f"📍 Адрес: {address}",
         "",
         "<b>Товары:</b>",
     ]
@@ -118,13 +135,19 @@ def format_owner_message(event: dict[str, Any]) -> str:
         f"💵 <b>Сумма заказа: {_money(event.get('order_total'))}</b>",
         f"📈 <b>Валовая прибыль: {_money(event.get('profit'))}</b>",
     ])
+    if event.get("comment"):
+        lines.append(f"💬 Комментарий: {html.escape(str(event['comment'])[:500])}")
+    attribution = [str(event.get(key) or "").strip() for key in
+                   ("source_collection", "utm_source", "utm_medium", "utm_campaign", "utm_content")]
+    if any(attribution):
+        lines.append("🔗 Источник: " + html.escape(" / ".join(value or "—" for value in attribution)))
     return "\n".join(lines)
 
 
 def format_pharmacy_message(event: dict[str, Any]) -> str:
     reference, _, _, _ = _identity(event)
     lines = [
-        f"💊 <b>Заказ {reference} — собрать</b>",
+        f"💊 <b>Аптека 1 · заказ {reference} — собрать</b>",
         "",
         "<b>Товары:</b>",
     ]
@@ -133,6 +156,8 @@ def format_pharmacy_message(event: dict[str, Any]) -> str:
         "",
         f"🧾 <b>Итого: {_money(event.get('base_total'))}</b>",
     ])
+    if event.get("comment"):
+        lines.append(f"💬 Комментарий: {html.escape(str(event['comment'])[:500])}")
     return "\n".join(lines)
 
 
@@ -146,7 +171,11 @@ def format_delivery_message(event: dict[str, Any]) -> str:
         f"📍 Адрес: {address}",
         f"💵 Получить: <b>{_money(event.get('order_total'))}</b>",
     ]
-    if event.get("notification_kind") == "staff_manual_order":
+    if event.get("notification_kind") != "staff_manual_order":
+        lines.insert(1, "🏥 Забрать из аптеки 1")
+        lines.extend(["", "<b>Лекарства:</b>"])
+        lines.extend(_medicine_lines(event))
+    else:
         landmark = html.escape(str(event.get("landmark") or "—"))
         pharmacy_id = event.get("fulfillment_pharmacy_id") or event.get("created_by_staff_account_id")
         lines.insert(1, f"🏥 Аптека {html.escape(str(pharmacy_id or '—'))}")
@@ -154,9 +183,7 @@ def format_delivery_message(event: dict[str, Any]) -> str:
         items = event.get("items") if isinstance(event.get("items"), list) else []
         if items:
             lines.extend(["", "<b>Доставить:</b>"])
-            for item in items:
-                if isinstance(item, dict):
-                    lines.append(f"• {html.escape(str(item.get('medicine_name') or 'Товар'))} × {int(item.get('quantity') or 0)}")
+            lines.extend(_medicine_lines(event))
     comment = str(event.get("comment") or "").strip()
     if comment:
         lines.extend(["", f"💬 Комментарий: {html.escape(comment[:500])}"])
@@ -236,13 +263,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raise RuntimeError("Telegram notification configuration is incomplete")
     if notification.get("notification_kind") == "staff_manual_order":
         deliveries = [(token, owner_chat_id, format_owner_message(notification), True)]
-        configured_delivery_chat = os.environ.get("TELEGRAM_DELIVERY_CHAT_ID", "").strip()
-        if configured_delivery_chat and configured_delivery_chat != owner_chat_id:
-            deliveries.append((delivery_token, configured_delivery_chat, format_delivery_message(notification), False))
     else:
         deliveries = (
             (token, owner_chat_id, format_owner_message(notification), True),
-            (token, pharmacy_chat_id, format_pharmacy_message(notification), True),
+            (token, pharmacy_chat_id, format_pharmacy_message(notification), False),
             (delivery_token, delivery_chat_id, format_delivery_message(notification), False),
         )
     for message_token, chat_id, text, include_admin_link in deliveries:

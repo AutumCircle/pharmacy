@@ -35,12 +35,16 @@ class TelegramMessageTests(unittest.TestCase):
         self.assertIn("NOW D3 × 2", owner)
         self.assertIn("Сумма заказа: 210.00 с.", owner)
         self.assertIn("Валовая прибыль: 10.50 с.", owner)
+        self.assertIn("&lt;Фируз&gt;", owner)
+        self.assertIn("Айни 29", owner)
         self.assertIn("<b>Товары:</b>", pharmacy)
         self.assertIn("NOW D3 × 2 — 180.00 с.", pharmacy)
         self.assertIn("Итого: 180.00 с.", pharmacy)
         self.assertNotIn("нацен", pharmacy.lower())
         self.assertNotIn("прибыл", pharmacy.lower())
         self.assertIn("Получатель: &lt;Фируз&gt;", delivery)
+        self.assertIn("Забрать из аптеки 1", delivery)
+        self.assertIn("NOW D3 × 2", delivery)
         self.assertIn("Позвонить: +992917123456", delivery)
 
     def test_long_orders_fit_telegram_limit(self):
@@ -61,7 +65,7 @@ class TelegramMessageTests(unittest.TestCase):
             "items": [{"medicine_name": "NOW D3", "quantity": 2, "base_line_total": 100, "line_total": 106}],
             "base_total": 100, "order_total": 106, "profit": 6,
         })
-        self.assertIn("аптеки 2", text)
+        self.assertIn("аптека 2", text)
         self.assertIn("vatan_2", text)
         self.assertIn("Instagram", text)
         self.assertIn("напротив школы", text)
@@ -87,10 +91,15 @@ class TelegramDispatchTests(unittest.TestCase):
             "requestContext": {"requestId": "test"},
             "body": json.dumps({"order_reference": "1234-001", "items": []}),
         }
-        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_OWNER_CHAT_ID": "123"}):
+        with patch.dict("os.environ", {
+            "TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_OWNER_CHAT_ID": "owner",
+            "TELEGRAM_PHARMACY_CHAT_ID": "pharmacy", "TELEGRAM_DELIVERY_CHAT_ID": "courier",
+        }):
             response = lambda_handler(event, None)
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(send_message.call_count, 3)
+        self.assertEqual([call.args[1] for call in send_message.call_args_list], ["owner", "pharmacy", "courier"])
+        self.assertFalse(send_message.call_args_list[1].kwargs["include_admin_link"])
 
     @patch("backend.v1.telegram_notifier.lambda_function._send_message")
     def test_staff_order_sends_owner_notification_only(self, send_message):
@@ -109,13 +118,13 @@ class TelegramDispatchTests(unittest.TestCase):
                  "created_by_staff_username": "courier", "fulfillment_pharmacy_id": 2,
                  "comment": "Вход <со двора>"}
         text = format_owner_message(event)
-        self.assertIn("аптеки 2", text)
+        self.assertIn("аптека 2", text)
         self.assertIn("Доставщик: courier", text)
         self.assertIn("Вход &lt;со двора&gt;", text)
-        self.assertNotIn("аптеки 3", text)
+        self.assertNotIn("аптека 3", text)
 
     @patch("backend.v1.telegram_notifier.lambda_function._send_message")
-    def test_staff_order_sends_separate_courier_message_when_configured(self, send_message):
+    def test_courier_created_order_never_sends_courier_or_pharmacy_message(self, send_message):
         event = {
             "requestContext": {"requestId": "test"},
             "body": json.dumps({
@@ -129,11 +138,9 @@ class TelegramDispatchTests(unittest.TestCase):
             "TELEGRAM_DELIVERY_CHAT_ID": "courier",
         }):
             response = lambda_handler(event, None)
-        self.assertEqual(send_message.call_count, 2)
-        delivery_call = send_message.call_args_list[1]
-        self.assertEqual(delivery_call.args[:2], ("delivery-token", "courier"))
-        self.assertFalse(delivery_call.kwargs["include_admin_link"])
-        self.assertEqual(json.loads(response["body"])["data"]["messages_sent"], 2)
+        self.assertEqual(send_message.call_count, 1)
+        self.assertEqual(send_message.call_args.args[:2], ("token", "owner"))
+        self.assertEqual(json.loads(response["body"])["data"]["messages_sent"], 1)
 
 
 if __name__ == "__main__":

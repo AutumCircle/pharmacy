@@ -64,6 +64,22 @@ export type CourierOrderList = {
   request_id: string;
 };
 
+export type PharmacyPreparationOrder = {
+  order_id: string;
+  order_reference: string | null;
+  status: 'pending' | 'confirmed';
+  created_at: string;
+  customer_name: string;
+  notes: string | null;
+  medicines: Array<{ medicine_name: string; quantity: number }>;
+};
+
+export type PharmacyPreparationOrderList = {
+  data: PharmacyPreparationOrder[];
+  page: { next_cursor: string | null; has_more: boolean };
+  request_id: string;
+};
+
 export type CourierEarnings = {
   total: number | string;
   today: number | string;

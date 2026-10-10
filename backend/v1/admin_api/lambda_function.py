@@ -824,16 +824,11 @@ def create_staff_order(
     current_request_id: str,
 ) -> tuple[dict[str, Any], int, dict[str, Any] | None]:
     request = validate_staff_order_request(payload)
-    courier = account["account_id"] == 3
-    if courier:
-        if request.get("pharmacy_id") not in (1, 2) or request["items"]:
-            raise ContractError("VALIDATION_ERROR", "Доставщик выбирает аптеку и заполняет заказ без лекарств")
-    elif account["account_id"] in (1, 2):
-        if "pharmacy_id" in request:
-            raise ContractError("VALIDATION_ERROR", "Аптека определяется учётной записью")
-    else:
-        raise ContractError("FORBIDDEN", "Аккаунт не может создавать заказы", http_status=403)
-    pharmacy_id = request["pharmacy_id"] if courier else account["account_id"]
+    if account["account_id"] != 3:
+        raise ContractError("FORBIDDEN", "Заказы создаёт только доставщик", http_status=403)
+    if request.get("pharmacy_id") not in (1, 2) or request["items"]:
+        raise ContractError("VALIDATION_ERROR", "Доставщик выбирает аптеку и заполняет заказ без лекарств")
+    pharmacy_id = request["pharmacy_id"]
     normalized_key = validate_idempotency_key(idempotency_key)
     request_hash = hashlib.sha256(
         json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -1017,6 +1012,56 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
                                 THEN o.created_by_staff_account_id END) AS pharmacy_id
                 FROM orders o
                 WHERE {' AND '.join(clauses)}
+                ORDER BY o.created_at DESC, o.id DESC LIMIT %s""",
+            tuple(params),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        next_cursor = _encode_cursor({"created_at": last["created_at"].isoformat(), "id": last["id"]})
+    for row in rows:
+        row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
+        row.pop("id")
+    return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
+
+
+def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) -> dict[str, Any]:
+    """Only live website orders assigned to this pharmacy; no courier/admin financial data."""
+    if set(query) - {"limit", "cursor"}:
+        raise ContractError("VALIDATION_ERROR", "Unknown order filter")
+    limit = min(_limit(query), 50)
+    cursor = _decode_cursor(query.get("cursor"))
+    params: list[Any] = [pharmacy_id]
+    cursor_filter = ""
+    if cursor:
+        try:
+            created_at = datetime.fromisoformat(cursor["created_at"])
+            order_id = int(cursor["id"])
+            if order_id <= 0:
+                raise ValueError()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractError("VALIDATION_ERROR", "cursor is invalid") from exc
+        cursor_filter = "AND (o.created_at, o.id) < (%s, %s)"
+        params.extend([created_at, order_id])
+    params.append(limit + 1)
+    with transaction() as cur:
+        cur.execute(
+            f"""SELECT o.id, o.public_id, o.order_reference, o.status, o.created_at,
+                       o.notes, o.customer_name,
+                       COALESCE(items.medicines, '[]'::json) AS medicines
+                FROM orders o
+                LEFT JOIN LATERAL (
+                    SELECT json_agg(json_build_object('medicine_name', oi.medicine_name,
+                        'quantity', oi.quantity) ORDER BY oi.id) AS medicines
+                    FROM order_items oi WHERE oi.order_id = o.id
+                ) items ON true
+                WHERE o.deleted_at IS NULL AND o.created_by_staff_account_id IS NULL
+                  AND o.status IN ('pending', 'confirmed')
+                  AND COALESCE(o.fulfillment_pharmacy_id, 1) = %s
+                  {cursor_filter}
                 ORDER BY o.created_at DESC, o.id DESC LIMIT %s""",
             tuple(params),
         )
@@ -2939,16 +2984,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     request=current_request_id,
                 )
             if staff_method == "GET" and staff_path == "/v1/staff/orders":
-                staff_accounts.session_account(event, courier=True)
+                account = staff_accounts.session_account(event)
+                query = event.get("queryStringParameters") or {}
+                if account["account_id"] == 3:
+                    return success_document(list_courier_orders(query), request=current_request_id)
                 return success_document(
-                    list_courier_orders(event.get("queryStringParameters") or {}),
-                    request=current_request_id,
+                    list_pharmacy_preparation_orders(query, account["account_id"]), request=current_request_id,
                 )
             if staff_method == "GET" and staff_path == "/v1/staff/earnings":
                 staff_accounts.session_account(event, courier=True)
                 return success(courier_earnings(event.get("queryStringParameters") or {}), request=current_request_id)
             if staff_method == "POST" and staff_path == "/v1/staff/orders":
-                account = staff_accounts.session_account(event)
+                account = staff_accounts.session_account(event, courier=True)
                 headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
                 result, status_code, notification = create_staff_order(
                     _body(event), str(headers.get("idempotency-key") or ""), account, current_request_id,

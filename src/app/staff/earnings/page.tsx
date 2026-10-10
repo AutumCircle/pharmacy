@@ -9,7 +9,7 @@ export default async function CourierEarningsPage({ searchParams }: {
   searchParams: Promise<{ cursor?: string }>;
 }) {
   const { account, token } = await requireStaffSession();
-  if (account.role !== 'courier') redirect('/staff/orders/new');
+  if (account.role !== 'courier') redirect('/staff/orders');
   const params = await searchParams;
   const cursor = /^\d{4}-\d{2}-\d{2}$/.test(params.cursor || '') ? params.cursor : undefined;
   const response = await getCourierEarnings(token, { cursor, limit: 31 }).catch(() => null);
