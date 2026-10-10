@@ -7,6 +7,7 @@ import {
   listCatalogSyncs,
 } from '@/lib/api-v1/admin-server';
 import OrderEarningsPanel from './orders/OrderEarningsPanel';
+import CourierDailyChart from './orders/CourierDailyChart';
 
 export const dynamic = 'force-dynamic';
 const PHARMACY_TIME_ZONE = 'Asia/Dushanbe';
@@ -44,7 +45,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
       pharmacy_2_orders: 0, instagram_orders: 0, whatsapp_orders: 0,
       phone_orders: 0, unspecified_source_orders: 0,
     },
-    recent_orders: [],
+    recent_orders: [], courier_daily: [],
     delivered_orders: [], currency: 'TJS' as const,
   };
   const categories = categoriesResult.status === 'fulfilled' ? categoriesResult.value.data : [];
@@ -136,6 +137,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
         {lastSync && ` · ${new Date(lastSync.created_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE })}`}
       </div>
       <OrderEarningsPanel summary={summary} days={days} compact />
+      <CourierDailyChart daily={summary.courier_daily} days={days} />
       {warnings.length > 0 && (
         <div style={{ background: '#fff8e1', color: '#7a4f00', padding: 20, borderRadius: 12, marginTop: 16 }}>
           <strong>Системные предупреждения</strong>

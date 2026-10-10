@@ -36,8 +36,8 @@ class CourierOrderTests(unittest.TestCase):
         self.assertIn('UPDATE orders SET items_subtotal', sql)
         self.assertIn('courier.order.items_added', str(cursor.execute.call_args_list))
 
-    def test_add_items_rejects_final_and_wrong_pharmacy_orders(self):
-        for status, pharmacy_id in [('delivered', 1), ('pending', 2)]:
+    def test_add_items_rejects_cancelled_and_wrong_pharmacy_orders(self):
+        for status, pharmacy_id in [('cancelled', 1), ('pending', 2)]:
             cursor = Mock()
             cursor.fetchone.return_value = {'id': 7, 'status': status, 'pharmacy_id': pharmacy_id,
                 'created_by_staff_account_id': 3, 'items_subtotal': Decimal('0')}
@@ -46,6 +46,27 @@ class CourierOrderTests(unittest.TestCase):
                     {'items': [{'medicine_id': 44, 'quantity': 1}]},
                     '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req_test')
             self.assertEqual(cursor.execute.call_count, 1)
+
+    def test_add_items_to_delivered_order_preserves_delivery_amount(self):
+        cursor = Mock()
+        cursor.fetchone.side_effect = [
+            {'id': 7, 'status': 'delivered', 'items_subtotal': Decimal('10'),
+             'created_by_staff_account_id': None, 'pharmacy_id': 1},
+            {'id': 99}, {'total': Decimal('22.00')},
+        ]
+        cursor.fetchall.side_effect = [
+            [{'id': 44, 'name': 'NOW D3', 'price': Decimal('10'),
+              'selling_unit_price': Decimal('12'), 'in_stock': True}],
+            [],
+        ]
+        with self._tx(cursor):
+            result = add_courier_order_items('ord_' + 'a' * 32,
+                {'items': [{'medicine_id': 44, 'quantity': 1}]},
+                '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req_test', 'admin:owner')
+        self.assertEqual(result['items_subtotal'], '22.00')
+        sql = ' '.join(call.args[0] for call in cursor.execute.call_args_list)
+        self.assertNotIn('SET delivery_courier_amount', sql)
+        self.assertIn('admin.order.items_added', str(cursor.execute.call_args_list))
 
     def test_add_items_repeated_request_returns_saved_result_without_new_items(self):
         import hashlib

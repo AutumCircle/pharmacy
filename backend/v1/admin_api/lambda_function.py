@@ -545,6 +545,29 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
             (days,),
         )
         financial_totals = dict(cur.fetchone())
+        cur.execute(
+            """
+            WITH days AS (
+                SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Dushanbe')::date - offsets.day AS day
+                FROM generate_series(0, %s - 1) AS offsets(day)
+            ), earned AS (
+                SELECT (COALESCE(
+                    (SELECT MAX(h.created_at) FROM order_status_history h
+                     WHERE h.order_id = o.id AND h.to_status = 'delivered'),
+                    o.delivery_updated_at, o.created_at
+                ) AT TIME ZONE 'Asia/Dushanbe')::date AS day,
+                o.delivery_courier_amount
+                FROM orders o
+                WHERE o.deleted_at IS NULL AND o.status = 'delivered'
+            )
+            SELECT days.day AS date, COALESCE(SUM(earned.delivery_courier_amount), 0) AS amount,
+                   COUNT(earned.day) AS orders_count
+            FROM days LEFT JOIN earned ON earned.day = days.day
+            GROUP BY days.day ORDER BY days.day ASC
+            """,
+            (days,),
+        )
+        courier_daily = [dict(item) for item in cur.fetchall()]
     for item in delivered_orders:
         item["order_id"] = item.pop("public_id") or str(item["order_reference"])
         item["profit"] = item["sales_total"] - item["pharmacy_total"]
@@ -567,6 +590,7 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
         "online_profit_total": financial_totals["online_profit_total"],
         "delivery_owner_total": financial_totals["delivery_owner_total"],
         "delivery_courier_total": financial_totals["delivery_courier_total"],
+        "courier_daily": courier_daily,
         "origin_counts": origin_counts,
         "recent_orders": recent_orders,
         "delivered_orders": delivered_orders,
@@ -1040,8 +1064,9 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
 
 def add_courier_order_items(
     order_id: str, payload: dict[str, Any], idempotency_key: str, current_request_id: str,
+    actor_id: str = "staff:3",
 ) -> dict[str, Any]:
-    """Atomically add catalogue medicines to an existing, non-final pharmacy-1 order."""
+    """Atomically add catalogue medicines to a non-cancelled pharmacy-1 order."""
     if not isinstance(payload, dict) or set(payload) != {"items"} or not isinstance(payload["items"], list):
         raise ContractError("VALIDATION_ERROR", "Укажите лекарства для добавления")
     requested = payload["items"]
@@ -1068,8 +1093,8 @@ def add_courier_order_items(
         order = cur.fetchone()
         if not order:
             raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
-        if order["status"] in {"delivered", "cancelled"}:
-            raise ContractError("ORDER_STATUS_CONFLICT", "Завершённый заказ нельзя изменить", http_status=409)
+        if order["status"] == "cancelled":
+            raise ContractError("ORDER_STATUS_CONFLICT", "Отменённый заказ нельзя изменить", http_status=409)
         if order["pharmacy_id"] != 1:
             raise ContractError("PHARMACY_CATALOG_UNAVAILABLE", "Каталог аптеки 2 пока не подключён", http_status=409)
         cur.execute("""INSERT INTO order_idempotency (idempotency_key, request_hash)
@@ -1142,10 +1167,11 @@ def add_courier_order_items(
                        response_body = %s::jsonb, completed_at = CURRENT_TIMESTAMP
                        WHERE idempotency_key = %s""",
                     (order["id"], json.dumps(result), normalized_key))
-        _write_admin_audit(cur, actor_id="staff:3", action="courier.order.items_added",
+        _write_admin_audit(cur, actor_id=actor_id,
+                           action="courier.order.items_added" if actor_id == "staff:3" else "admin.order.items_added",
                            resource_type="order", resource_id=order_id, request=current_request_id,
                            details={"items": requested, "old_subtotal": str(order["items_subtotal"]),
-                                    "new_subtotal": str(total)})
+                                    "new_subtotal": str(total), "status": order["status"]})
     return result
 
 
@@ -3172,6 +3198,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(catalog_stats(), request=current_request_id)
         if method == "GET" and tail == ["medicines"]:
             return success_document(list_medicines(query), request=current_request_id)
+        if method == "GET" and tail == ["order-medicines"]:
+            return success_document(search_staff_order_medicines(query), request=current_request_id)
         if method == "PATCH" and len(tail) == 3 and tail[0] == "medicines" and tail[2] == "image":
             return success(
                 update_medicine_image(
@@ -3189,6 +3217,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(list_orders(query), request=current_request_id)
         if method == "GET" and len(tail) == 2 and tail[0] == "orders":
             return success(get_order(tail[1]), request=current_request_id)
+        if method == "POST" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "items":
+            if not re.fullmatch(r"ord_[0-9a-f]{32}|legacy_[1-9][0-9]*", tail[1]):
+                raise ContractError("VALIDATION_ERROR", "Неверный номер заказа")
+            headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
+            return success(add_courier_order_items(tail[1], _body(event),
+                str(headers.get("idempotency-key") or ""), current_request_id, actor_id), request=current_request_id)
         if method == "PATCH" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "status":
             payload = _body(event)
             if "order_item_id" in payload:

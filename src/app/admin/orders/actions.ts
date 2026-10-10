@@ -2,9 +2,35 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/admin-auth';
-import { deleteAdminOrder, updateAdminOrderDelivery, updateAdminOrderItemPrice, updateAdminOrderStatus } from '@/lib/api-v1/admin-server';
+import { addAdminOrderItems, deleteAdminOrder, searchAdminOrderMedicines, updateAdminOrderDelivery, updateAdminOrderItemPrice, updateAdminOrderStatus } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import type { OrderStatus } from '@/lib/api-v1/types';
+
+export async function searchOrderMedicines(query: string) {
+  try {
+    await requireAdminSession();
+    if (query.trim().length < 2 || query.trim().length > 120) throw new Error('Введите от 2 до 120 символов');
+    return { success: true as const, medicines: (await searchAdminOrderMedicines(query.trim())).data };
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : 'Не удалось найти лекарства' };
+  }
+}
+
+export async function addOrderMedicines(orderId: string, items: Array<{ medicine_id: number; quantity: number }>, idempotencyKey: string) {
+  try {
+    await requireAdminSession();
+    if (!Array.isArray(items) || items.length < 1 || items.length > 20 ||
+      items.some((item) => !Number.isInteger(item.medicine_id) || item.medicine_id <= 0 ||
+        !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99)) throw new Error('Проверьте лекарства и количество');
+    const response = await addAdminOrderItems(orderId, items, idempotencyKey);
+    revalidatePath('/admin');
+    revalidatePath('/admin/orders');
+    revalidatePath(`/admin/orders/${orderId}`);
+    return { success: true as const, added: response.data.added, increased: response.data.quantity_increased };
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : 'Не удалось добавить лекарства' };
+  }
+}
 
 export async function updateOrderStatus(
   orderId: string,

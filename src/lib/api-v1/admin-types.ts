@@ -40,6 +40,7 @@ export type AdminDashboardSummary = {
   online_profit_total?: number | string;
   delivery_owner_total: number | string;
   delivery_courier_total: number | string;
+  courier_daily: Array<{ date: string; amount: number | string; orders_count: number }>;
   origin_counts: {
     total_orders: number;
     client_orders: number;

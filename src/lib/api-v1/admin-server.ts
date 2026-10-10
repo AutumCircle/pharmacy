@@ -35,6 +35,7 @@ import type {
 } from './admin-types';
 import { ApiV1Error } from './server';
 import type { StaffAccount } from './staff-types';
+import type { StaffOrderMedicine } from './staff-types';
 
 export function listStaffAccounts(): Promise<ApiSuccessResponse<StaffAccount[]>> {
   return request('/v1/admin/staff');
@@ -171,6 +172,16 @@ export function listAdminOrders(values: {
 
 export function getAdminOrder(orderId: string): Promise<ApiSuccessResponse<AdminOrderDetail>> {
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}`);
+}
+
+export function searchAdminOrderMedicines(query: string): Promise<AdminNumberedListResponse<StaffOrderMedicine>> {
+  return request(`/v1/admin/order-medicines${queryString({ q: query })}`);
+}
+
+export function addAdminOrderItems(orderId: string, items: Array<{ medicine_id: number; quantity: number }>, idempotencyKey: string): Promise<ApiSuccessResponse<{ added: number; quantity_increased: number }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/items`, {
+    method: 'POST', body: { items }, headers: { 'Idempotency-Key': idempotencyKey },
+  });
 }
 
 export function updateAdminOrderStatus(

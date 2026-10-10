@@ -47,6 +47,7 @@ function OrderCard({ order }: { order: CourierOrder }) {
 
   async function saveMedicines() {
     if (!selectedMedicines.length) return;
+    if (status === 'delivered' && !window.confirm('Лекарства добавятся в уже доставленный заказ. Сумма заказа изменится задним числом, плата за доставку не изменится. Продолжить?')) return;
     setItemBusy(true); setError(''); setItemMessage('');
     if (!itemRequestKey.current) itemRequestKey.current = crypto.randomUUID();
     try {
@@ -119,7 +120,7 @@ function OrderCard({ order }: { order: CourierOrder }) {
         {item.medicine_name} × {item.quantity}
         {item.base_unit_price !== null && <small> · цена аптеки {Number(item.base_unit_price).toFixed(2)} с.</small>}
       </li>)}</ul> : <p>Лекарства ещё не указаны.</p>}
-      {order.pharmacy_id === 1 && !['delivered', 'cancelled'].includes(status) &&
+      {order.pharmacy_id === 1 && status !== 'cancelled' &&
         <button type="button" className="courier-add-medicines" onClick={() => setEditingItems((value) => !value)}>
           {editingItems ? 'Закрыть' : '+ Добавить лекарства'}
         </button>}
