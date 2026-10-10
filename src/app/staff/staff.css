@@ -86,6 +86,13 @@
 .staff-order-warning { margin-bottom: 16px; padding: 14px 16px; border: 1px solid #f1cf82; border-radius: 11px; background: #fff8e6; color: #7b4d00; }
 .courier-new-order { align-self: center; padding: 11px 16px; border-radius: 10px; background: #b71920; color: #fff; text-decoration: none; font-weight: 750; }
 .courier-order-list { display: grid; gap: 14px; }
+.courier-order-medicines { margin-top: 18px; padding: 14px; border: 1px solid #e3e9e4; border-radius: 11px; background: #f8faf8; }
+.courier-order-medicines ul { margin: 10px 0; padding-left: 21px; display: grid; gap: 6px; }
+.courier-order-medicines li { overflow-wrap: anywhere; }
+.courier-order-medicines p { margin: 10px 0; color: #687269; }
+.courier-add-medicines { margin-top: 8px; padding: 9px 12px; border: 1px solid #b71920; border-radius: 9px; color: #a4141b; background: #fff; font-weight: 700; cursor: pointer; }
+.courier-medicine-editor { display: grid; gap: 12px; margin-top: 14px; }
+.courier-medicine-editor .staff-search { margin-bottom: 0; }
 .pharmacy-preparation-items { margin: 15px 0 0; padding-left: 22px; display: grid; gap: 8px; }
 .pharmacy-preparation-items li { overflow-wrap: anywhere; }
 .courier-order-card { padding: 20px; border: 1px solid #e0e5e1; border-radius: 14px; background: #fff; box-shadow: 0 3px 14px rgba(20,35,25,.04); }

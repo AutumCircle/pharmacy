@@ -56,6 +56,8 @@ export type CourierOrder = {
   created_at: string;
   pharmacy_id: 1 | 2 | null;
   delivery_courier_amount: number | string;
+  medicines: Array<{ medicine_id: number | null; medicine_name: string; quantity: number;
+    base_unit_price: number | string | null }>;
 };
 
 export type CourierOrderList = {

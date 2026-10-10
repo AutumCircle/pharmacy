@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { StaffOrderMedicine, StaffOrderSource } from '@/lib/api-v1/staff-types';
 
 const sources: Array<{ value: StaffOrderSource; label: string }> = [
@@ -16,10 +16,12 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
   const [created, setCreated] = useState('');
   const [notificationSent, setNotificationSent] = useState(true);
   const [formKey, setFormKey] = useState(0);
+  const [pharmacyId, setPharmacyId] = useState<1 | 2 | null>(null);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<StaffOrderMedicine[]>([]);
   const [items, setItems] = useState<Array<StaffOrderMedicine & { quantity: number }>>([]);
+  const pendingRequest = useRef<{ payload: string; key: string } | null>(null);
 
   async function searchMedicines() {
     if (query.trim().length < 2) { setError('Введите минимум 2 символа для поиска лекарства'); return; }
@@ -54,20 +56,25 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       landmark: String(data.get('landmark') || '').trim(),
       comment: String(data.get('comment') || '').trim(),
       source: String(data.get('source') || ''),
-      items: isCourier ? [] : items.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })),
+      items: items.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })),
       ...(isCourier ? { pharmacy_id: Number(data.get('pharmacy_id')) } : {}),
     };
+    const serialized = JSON.stringify(payload);
+    if (!pendingRequest.current || pendingRequest.current.payload !== serialized) {
+      pendingRequest.current = { payload: serialized, key: crypto.randomUUID() };
+    }
     try {
       const response = await fetch('/api/staff/orders', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
-        body: JSON.stringify(payload),
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': pendingRequest.current.key },
+        body: serialized,
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result?.error?.message || result?.error || 'Не удалось сохранить заказ');
       setCreated(result.data.order_reference);
+      pendingRequest.current = null;
       setNotificationSent(result.data.notification_sent === true);
       setFormKey((value) => value + 1);
-      setItems([]); setResults([]); setQuery('');
+      setItems([]); setResults([]); setQuery(''); setPharmacyId(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Не удалось сохранить заказ');
     } finally { setSubmitting(false); }
@@ -84,18 +91,21 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       {error && <div className="staff-login-error">{error}</div>}
       <form key={formKey} className="staff-order-form" onSubmit={submit}>
         {isCourier && <label>Аптека
-          <select name="pharmacy_id" required defaultValue="">
+          <select name="pharmacy_id" required value={pharmacyId ?? ''} onChange={(event) => {
+            const selected = Number(event.target.value) as 1 | 2;
+            setPharmacyId(selected); setItems([]); setResults([]); setQuery('');
+          }}>
             <option value="" disabled>Выберите аптеку</option>
             <option value="1">Аптека 1</option>
             <option value="2">Аптека 2</option>
           </select>
         </label>}
-        {isCourier ? null : accountId === 2 ? (
+        {pharmacyId === 2 ? (
           <fieldset className="staff-medicine-picker">
             <legend>Лекарства</legend>
-            <p>Добавление лекарств в заказ пока недоступно.</p>
+            <p>Каталог аптеки 2 пока не подключён. Заказ можно создать без лекарств.</p>
           </fieldset>
-        ) : (
+        ) : pharmacyId === 1 ? (
           <fieldset className="staff-medicine-picker">
             <legend>Лекарства</legend>
             <div className="staff-search">
@@ -123,7 +133,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
               <div className="staff-pharmacy-total"><span>Сумма</span><strong>{pharmacyTotal.toFixed(2)} TJS</strong></div>
             </div>}
           </fieldset>
-        )}
+        ) : null}
         <label>Имя клиента<input name="customer_name" maxLength={120} autoComplete="name" /></label>
         <label>Телефон <span>ровно 9 цифр</span><div className="staff-phone"><b>+992</b><input name="phone" required inputMode="numeric" pattern="[0-9]{9}" minLength={9} maxLength={9} placeholder="917123456" autoComplete="tel-national" /></div></label>
         <label>Адрес<input name="address" required minLength={3} maxLength={500} autoComplete="street-address" /></label>

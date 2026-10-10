@@ -119,6 +119,31 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(order_insert.args[1][4], 'Позвонить перед выездом')
         self.assertNotIn('jsonb_to_recordset', ' '.join(call.args[0] for call in order_cursor.execute.call_args_list))
 
+    def test_courier_can_create_pharmacy_one_order_with_base_price_medicines(self):
+        courier = {**self.account, 'account_id': 3, 'username': 'courier', 'role': 'courier'}
+        order_cursor = Mock()
+        order_cursor.fetchone.side_effect = [
+            {'id': 1}, {'id': 12, 'public_id': 'ord_test', 'status': 'pending',
+                        'created_at': '2026-10-10T10:00:00Z'},
+        ]
+        order_cursor.fetchall.return_value = [{
+            'id': 44, 'name': 'NOW D3', 'price': '10.00', 'selling_unit_price': 12, 'in_stock': True,
+        }]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            response, _, notification = create_staff_order({
+                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone', 'pharmacy_id': 1,
+                'items': [{'medicine_id': 44, 'quantity': 2}],
+            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+        self.assertEqual(response['order_total'], '20.00')
+        self.assertEqual(notification['profit'], '0.00')
+        self.assertEqual(response['items'][0]['selling_unit_price'], '10.00')
+
     def test_manual_order_comment_is_optional_and_bounded(self):
         payload = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
                    'landmark': 'напротив школы', 'source': 'phone', 'items': []}
@@ -129,11 +154,11 @@ class StaffTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_staff_order_request({**payload, 'comment': 'x' * 501})
 
-    def test_courier_cannot_add_medicines_or_skip_pharmacy(self):
+    def test_courier_requires_pharmacy_and_pharmacy_two_cannot_use_pharmacy_one_catalog(self):
         courier = {**self.account, 'account_id': 3}
         base = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
                 'landmark': 'напротив школы', 'source': 'phone', 'items': []}
-        for payload in (base, {**base, 'pharmacy_id': 1, 'items': [{'medicine_id': 44, 'quantity': 1}]}):
+        for payload in (base, {**base, 'pharmacy_id': 2, 'items': [{'medicine_id': 44, 'quantity': 1}]}):
             with self.assertRaises(ContractError):
                 create_staff_order(payload, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
 
@@ -146,13 +171,17 @@ class StaffTests(unittest.TestCase):
                 self.assertEqual(response['statusCode'], 403)
                 medicines.assert_not_called()
 
-    def test_courier_cannot_read_catalog_or_medicine_picker(self):
+    def test_courier_can_search_order_medicines_but_not_catalog(self):
         courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
         self.cursor.fetchone.return_value = courier
         token = staff.create_session(courier)
-        for path in ('/v1/staff/medicines', '/v1/staff/catalog/stats', '/v1/staff/order-medicines'):
+        for path in ('/v1/staff/medicines', '/v1/staff/catalog/stats'):
             response = lambda_handler(self.event(path, token=token), None)
             self.assertEqual(response['statusCode'], 403)
+        with patch('backend.v1.admin_api.lambda_function.search_staff_order_medicines',
+                   return_value={'data': [], 'page': {}}):
+            response = lambda_handler(self.event('/v1/staff/order-medicines', token=token), None)
+        self.assertEqual(response['statusCode'], 200)
 
     def test_pharmacy_only_sees_own_website_preparation_orders(self):
         from datetime import datetime, timezone
@@ -195,6 +224,21 @@ class StaffTests(unittest.TestCase):
         response = lambda_handler(self.event(path, 'PATCH', token=staff.create_session(self.account),
                                            body={'status': 'confirmed', 'expected_current_status': 'pending'}), None)
         self.assertEqual(response['statusCode'], 403)
+
+    def test_only_courier_can_add_items_to_existing_order(self):
+        path = '/v1/staff/orders/ord_' + 'a' * 32 + '/items'
+        self.cursor.fetchone.return_value = self.account
+        response = lambda_handler(self.event(path, 'POST', token=staff.create_session(self.account),
+            body={'items': [{'medicine_id': 44, 'quantity': 1}]}), None)
+        self.assertEqual(response['statusCode'], 403)
+        courier = {**self.account, 'account_id': 3, 'role': 'courier'}
+        self.cursor.fetchone.return_value = courier
+        with patch('backend.v1.admin_api.lambda_function.add_courier_order_items',
+                   return_value={'order_id': 'ord_' + 'a' * 32}) as add_items:
+            response = lambda_handler(self.event(path, 'POST', token=staff.create_session(courier),
+                body={'items': [{'medicine_id': 44, 'quantity': 1}]}), None)
+        self.assertEqual(response['statusCode'], 200)
+        add_items.assert_called_once()
 
     def test_employee_with_catalog_can_read_catalog(self):
         with_catalog = {**self.account, 'account_id': 2, 'catalog_access': True}

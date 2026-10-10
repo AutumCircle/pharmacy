@@ -35,7 +35,8 @@ async function request<T>(path: string, options: StaffRequestOptions = {}): Prom
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const error = payload as Partial<ApiErrorResponse> | null;
-    throw new ApiV1Error(response.status, error?.error?.code || 'UPSTREAM_ERROR', 'Staff API request failed');
+    throw new ApiV1Error(response.status, error?.error?.code || 'UPSTREAM_ERROR',
+      error?.error?.message || 'Не удалось выполнить запрос', error?.error?.details);
   }
   if (!payload || typeof payload !== 'object' || !('data' in payload) || !('request_id' in payload)) {
     throw new ApiV1Error(502, 'UPSTREAM_INVALID_RESPONSE', 'Staff API response shape is invalid');
@@ -83,6 +84,15 @@ export function listCourierOrders(token: string, values: { status?: CourierOrder
   if (values.cursor) params.set('cursor', values.cursor);
   params.set('limit', String(values.limit ?? 20));
   return request<CourierOrderList>(`orders?${params}`, { token });
+}
+
+export function addCourierOrderItems(token: string, orderId: string,
+  items: Array<{ medicine_id: number; quantity: number }>, idempotencyKey: string) {
+  return request<ApiSuccessResponse<{ order_id: string; added: number; quantity_increased: number;
+    items_subtotal: string; currency: 'TJS' }>>(
+    `orders/${encodeURIComponent(orderId)}/items`,
+    { token, method: 'POST', body: { items }, idempotencyKey },
+  );
 }
 
 export function listPharmacyPreparationOrders(token: string, values: { cursor?: string; limit?: number } = {}) {

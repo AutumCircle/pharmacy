@@ -1,8 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
-import type { CourierOrder, CourierOrderStatus } from '@/lib/api-v1/staff-types';
+import { useRef, useState } from 'react';
+import type { CourierOrder, CourierOrderStatus, StaffOrderMedicine } from '@/lib/api-v1/staff-types';
 
 const labels: Record<CourierOrderStatus, string> = {
   pending: 'Новый', confirmed: 'Собирается', delivering: 'В пути',
@@ -23,6 +23,48 @@ function OrderCard({ order }: { order: CourierOrder }) {
   const [error, setError] = useState('');
   const [amount, setAmount] = useState(Number(order.delivery_courier_amount || 0).toFixed(2));
   const [amountState, setAmountState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [editingItems, setEditingItems] = useState(false);
+  const [medicineQuery, setMedicineQuery] = useState('');
+  const [medicineResults, setMedicineResults] = useState<StaffOrderMedicine[]>([]);
+  const [selectedMedicines, setSelectedMedicines] = useState<Array<StaffOrderMedicine & { quantity: number }>>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [itemBusy, setItemBusy] = useState(false);
+  const [itemMessage, setItemMessage] = useState('');
+  const itemRequestKey = useRef<string | null>(null);
+
+  async function searchMedicines() {
+    if (medicineQuery.trim().length < 2) { setError('Введите минимум 2 символа'); return; }
+    setSearchBusy(true); setError('');
+    try {
+      const response = await fetch(`/api/staff/order-medicines?q=${encodeURIComponent(medicineQuery.trim())}`, { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error?.message || 'Поиск не выполнен');
+      setMedicineResults(result.data || []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Ошибка поиска');
+    } finally { setSearchBusy(false); }
+  }
+
+  async function saveMedicines() {
+    if (!selectedMedicines.length) return;
+    setItemBusy(true); setError(''); setItemMessage('');
+    if (!itemRequestKey.current) itemRequestKey.current = crypto.randomUUID();
+    try {
+      const response = await fetch(`/api/staff/orders/${encodeURIComponent(order.order_id)}/items`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': itemRequestKey.current },
+        body: JSON.stringify({ items: selectedMedicines.map((item) =>
+          ({ medicine_id: item.medicine_id, quantity: item.quantity })) }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error?.message || 'Не удалось добавить лекарства');
+      setItemMessage(`Сохранено: новых ${result.data.added}, количество увеличено у ${result.data.quantity_increased}.`);
+      setSelectedMedicines([]); setMedicineResults([]); setMedicineQuery(''); setEditingItems(false);
+      itemRequestKey.current = null;
+      router.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Ошибка сети');
+    } finally { setItemBusy(false); }
+  }
 
   async function saveAmount() {
     const value = Number(amount.replace(',', '.'));
@@ -70,6 +112,44 @@ function OrderCard({ order }: { order: CourierOrder }) {
         <small>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</small></div>
       <div className="courier-order-pay"><strong>{Number(amount || 0).toLocaleString('ru-RU')} с.</strong>
         <small>заработок курьера</small><span className={`courier-order-status ${status}`}>{labels[status]}</span></div>
+    </div>
+    <div className="courier-order-medicines">
+      <b>Лекарства</b>
+      {order.medicines.length ? <ul>{order.medicines.map((item, index) => <li key={`${item.medicine_id}-${index}`}>
+        {item.medicine_name} × {item.quantity}
+        {item.base_unit_price !== null && <small> · цена аптеки {Number(item.base_unit_price).toFixed(2)} с.</small>}
+      </li>)}</ul> : <p>Лекарства ещё не указаны.</p>}
+      {order.pharmacy_id === 1 && !['delivered', 'cancelled'].includes(status) &&
+        <button type="button" className="courier-add-medicines" onClick={() => setEditingItems((value) => !value)}>
+          {editingItems ? 'Закрыть' : '+ Добавить лекарства'}
+        </button>}
+      {order.pharmacy_id === 2 && <p>Для аптеки 2 каталог пока не подключён.</p>}
+      {itemMessage && <p className="staff-order-success" role="status">{itemMessage}</p>}
+      {editingItems && <div className="courier-medicine-editor">
+        <div className="staff-search"><input aria-label="Название лекарства" value={medicineQuery}
+          onChange={(event) => setMedicineQuery(event.target.value)} placeholder="Название лекарства" />
+          <button type="button" disabled={searchBusy} onClick={searchMedicines}>{searchBusy ? 'Поиск…' : 'Найти'}</button></div>
+        {medicineResults.length > 0 && <div className="staff-picker-results">{medicineResults.map((medicine) =>
+          <div key={medicine.medicine_id}><span><strong>{medicine.medicine_name}</strong>
+            <small>Цена аптеки {Number(medicine.base_unit_price).toFixed(2)} с.</small></span>
+            <button type="button" disabled={selectedMedicines.length >= 20 || selectedMedicines.some((item) => item.medicine_id === medicine.medicine_id)}
+              onClick={() => { setSelectedMedicines((items) => [...items, { ...medicine, quantity: 1 }]); itemRequestKey.current = null; }}>
+              {selectedMedicines.some((item) => item.medicine_id === medicine.medicine_id) ? 'Выбрано' :
+                order.medicines.some((item) => item.medicine_id === medicine.medicine_id) ? 'Увеличить' : 'Добавить'}
+            </button></div>)}</div>}
+        {selectedMedicines.length > 0 && <div className="staff-selected-items">{selectedMedicines.map((item) =>
+          <div key={item.medicine_id}><span><strong>{item.medicine_name}</strong></span>
+            <input aria-label={`Добавить количество: ${item.medicine_name}`} type="number" min={1} max={99}
+              value={item.quantity} onChange={(event) => {
+                const quantity = Math.min(99, Math.max(1, Number(event.target.value) || 1));
+                setSelectedMedicines((items) => items.map((entry) => entry.medicine_id === item.medicine_id
+                  ? { ...entry, quantity } : entry)); itemRequestKey.current = null;
+              }} />
+            <button type="button" onClick={() => { setSelectedMedicines((items) => items.filter((entry) =>
+              entry.medicine_id !== item.medicine_id)); itemRequestKey.current = null; }}>Убрать</button></div>)}</div>}
+        <button type="button" className="staff-submit" disabled={itemBusy || selectedMedicines.length === 0}
+          onClick={saveMedicines}>{itemBusy ? 'Сохраняем…' : `Сохранить лекарства (${selectedMedicines.length})`}</button>
+      </div>}
     </div>
     <div className="courier-order-details">
       <p><b>Аптека:</b> {order.pharmacy_id ? `Аптека ${order.pharmacy_id}` : 'Не указана'}</p>

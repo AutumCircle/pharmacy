@@ -57,7 +57,8 @@ export async function POST(request: Request) {
     const idempotencyKey = request.headers.get('idempotency-key');
     if (!idempotencyKey) return NextResponse.json({ error: 'Повторите отправку' }, { status: 400 });
     const body: unknown = await request.json();
-    if (!isRequest(body) || body.pharmacy_id === undefined || body.items.length !== 0) {
+    if (!isRequest(body) || body.pharmacy_id === undefined
+      || (body.pharmacy_id === 2 && body.items.length > 0)) {
       return NextResponse.json({ error: 'Проверьте заполнение полей' }, { status: 400 });
     }
     const response = await createStaffOrder(token, body, idempotencyKey);

@@ -6,12 +6,69 @@ from unittest.mock import Mock, patch
 from decimal import Decimal
 
 from backend.v1.admin_api.lambda_function import (
-    courier_earnings, list_courier_orders, update_courier_order_status, update_order_delivery, update_order_item_price,
+    add_courier_order_items, courier_earnings, list_courier_orders, update_courier_order_status,
+    update_order_delivery, update_order_item_price,
 )
 from backend.v1.shared.contract import ContractError
 
 
 class CourierOrderTests(unittest.TestCase):
+    def test_add_items_uses_catalog_prices_and_one_transaction(self):
+        cursor = Mock()
+        cursor.fetchone.side_effect = [
+            {'id': 7, 'status': 'confirmed', 'items_subtotal': Decimal('10'),
+             'created_by_staff_account_id': None, 'pharmacy_id': 1},
+            {'id': 99}, {'total': Decimal('35.00')},
+        ]
+        cursor.fetchall.side_effect = [
+            [{'id': 44, 'name': 'NOW D3', 'price': Decimal('10'), 'selling_unit_price': 12, 'in_stock': True},
+             {'id': 55, 'name': 'Old', 'price': Decimal('5'), 'selling_unit_price': 6, 'in_stock': True}],
+            [{'id': 81, 'medicine_id': 55, 'quantity': 2}],
+        ]
+        with self._tx(cursor):
+            result = add_courier_order_items('ord_' + 'a' * 32, {'items': [
+                {'medicine_id': 44, 'quantity': 1}, {'medicine_id': 55, 'quantity': 2},
+            ]}, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req_test')
+        self.assertEqual((result['added'], result['quantity_increased']), (1, 1))
+        self.assertEqual(result['items_subtotal'], '35.00')
+        sql = ' '.join(call.args[0] for call in cursor.execute.call_args_list)
+        self.assertIn('jsonb_to_recordset', sql)
+        self.assertIn('UPDATE orders SET items_subtotal', sql)
+        self.assertIn('courier.order.items_added', str(cursor.execute.call_args_list))
+
+    def test_add_items_rejects_final_and_wrong_pharmacy_orders(self):
+        for status, pharmacy_id in [('delivered', 1), ('pending', 2)]:
+            cursor = Mock()
+            cursor.fetchone.return_value = {'id': 7, 'status': status, 'pharmacy_id': pharmacy_id,
+                'created_by_staff_account_id': 3, 'items_subtotal': Decimal('0')}
+            with self._tx(cursor), self.assertRaises(ContractError):
+                add_courier_order_items('ord_' + 'a' * 32,
+                    {'items': [{'medicine_id': 44, 'quantity': 1}]},
+                    '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req_test')
+            self.assertEqual(cursor.execute.call_count, 1)
+
+    def test_add_items_repeated_request_returns_saved_result_without_new_items(self):
+        import hashlib
+        import json
+        order_id = 'ord_' + 'a' * 32
+        payload = {'items': [{'medicine_id': 44, 'quantity': 1}]}
+        request_hash = hashlib.sha256(json.dumps({'order_id': order_id, 'items': payload['items']},
+            sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        saved = {'order_id': order_id, 'added': 1, 'quantity_increased': 0,
+                 'items_subtotal': '12.00', 'currency': 'TJS'}
+        cursor = Mock()
+        cursor.fetchone.side_effect = [
+            {'id': 7, 'status': 'pending', 'pharmacy_id': 1, 'created_by_staff_account_id': 3,
+             'items_subtotal': Decimal('12.00')},
+            None,
+            {'request_hash': request_hash, 'response_body': saved},
+        ]
+        with self._tx(cursor):
+            result = add_courier_order_items(order_id, payload,
+                '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req_test')
+        self.assertEqual(result, saved)
+        self.assertEqual(cursor.execute.call_count, 3)
+
     def test_list_is_paginated_and_omits_prices(self):
         cursor = Mock()
         cursor.fetchall.return_value = [{
