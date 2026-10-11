@@ -90,8 +90,9 @@ export default async function AdminOrderDetailPage({
         </table>
       </div>
 
-      {order.status !== 'cancelled' && (order.fulfillment_pharmacy_id ?? order.created_by_staff_account_id ?? 1) === 1 &&
-        <OrderMedicineEditor orderId={order.order_id} delivered={order.status === 'delivered'} />}
+      {order.status !== 'cancelled' &&
+        <OrderMedicineEditor orderId={order.order_id} delivered={order.status === 'delivered'}
+          pharmacyId={order.fulfillment_pharmacy_id ?? order.created_by_staff_account_id ?? 1} />}
       {order.status !== 'cancelled' && <ManualOrderMedicineEditor orderId={order.order_id} delivered={order.status === 'delivered'} />}
 
       <h2 style={{ marginTop: 30 }}>История статусов</h2>

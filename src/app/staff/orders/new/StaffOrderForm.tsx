@@ -123,7 +123,17 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
         {pharmacyId === 2 ? (
           <fieldset className="staff-medicine-picker">
             <legend>Лекарства</legend>
-            <p>Каталог аптеки 2 пока не подключён. Лекарства можно вписать вручную.</p>
+            <p>Найдите название в общем каталоге, затем введите цену аптеки 2 ниже. Цена аптеки 1 не используется.</p>
+            <div className="staff-search">
+              <input aria-label="Название лекарства для поиска" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название лекарства" />
+              <button type="button" disabled={searching || query.trim().length < 2} onClick={searchMedicines}>{searching ? 'Поиск…' : 'Найти'}</button>
+            </div>
+            {results.length > 0 && <div className="staff-picker-results">{results.map((medicine) => <div key={medicine.medicine_id}>
+              <span><strong>{medicine.medicine_name}</strong></span>
+              <button type="button" onClick={() => { setManualName(medicine.medicine_name); setManualPrice(''); setError(''); }}>
+                Указать свою цену
+              </button>
+            </div>)}</div>}
           </fieldset>
         ) : pharmacyId === 1 ? (
           <fieldset className="staff-medicine-picker">

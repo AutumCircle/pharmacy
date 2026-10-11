@@ -27,6 +27,7 @@ function OrderCard({ order }: { order: CourierOrder }) {
   const [medicineQuery, setMedicineQuery] = useState('');
   const [medicineResults, setMedicineResults] = useState<StaffOrderMedicine[]>([]);
   const [selectedMedicines, setSelectedMedicines] = useState<Array<StaffOrderMedicine & { quantity: number }>>([]);
+  const [pharmacyTwoPrice, setPharmacyTwoPrice] = useState('');
   const [searchBusy, setSearchBusy] = useState(false);
   const [itemBusy, setItemBusy] = useState(false);
   const [itemMessage, setItemMessage] = useState('');
@@ -79,19 +80,26 @@ function OrderCard({ order }: { order: CourierOrder }) {
 
   async function saveMedicines() {
     if (!selectedMedicines.length) return;
+    const ownPrice = pharmacyTwoPrice.replace(',', '.').trim();
+    if (order.pharmacy_id === 2 && (selectedMedicines.length !== 1 || !/^\d{1,6}(?:\.\d{1,2})?$/.test(ownPrice) || Number(ownPrice) <= 0)) {
+      setError('Введите цену аптеки 2 для выбранного лекарства'); return;
+    }
     if (status === 'delivered' && !window.confirm('Лекарства добавятся в уже доставленный заказ. Сумма заказа изменится задним числом, плата за доставку не изменится. Продолжить?')) return;
     setItemBusy(true); setError(''); setItemMessage('');
     if (!itemRequestKey.current) itemRequestKey.current = crypto.randomUUID();
     try {
-      const response = await fetch(`/api/staff/orders/${encodeURIComponent(order.order_id)}/items`, {
+      const response = await fetch(`/api/staff/orders/${encodeURIComponent(order.order_id)}/${order.pharmacy_id === 2 ? 'manual-items' : 'items'}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': itemRequestKey.current },
-        body: JSON.stringify({ items: selectedMedicines.map((item) =>
-          ({ medicine_id: item.medicine_id, quantity: item.quantity })) }),
+        body: JSON.stringify(order.pharmacy_id === 2
+          ? { manual_items: [{ medicine_name: selectedMedicines[0].medicine_name, price: ownPrice,
+              quantity: selectedMedicines[0].quantity }] }
+          : { items: selectedMedicines.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })) }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result?.error?.message || 'Не удалось добавить лекарства');
-      setItemMessage(`Сохранено: новых ${result.data.added}, количество увеличено у ${result.data.quantity_increased}.`);
-      setSelectedMedicines([]); setMedicineResults([]); setMedicineQuery(''); setEditingItems(false);
+      setItemMessage(order.pharmacy_id === 2 ? 'Лекарство добавлено с ценой аптеки 2 только в этот заказ.'
+        : `Сохранено: новых ${result.data.added}, количество увеличено у ${result.data.quantity_increased}.`);
+      setSelectedMedicines([]); setMedicineResults([]); setMedicineQuery(''); setPharmacyTwoPrice(''); setEditingItems(false);
       itemRequestKey.current = null;
       router.refresh();
     } catch (cause) {
@@ -152,11 +160,10 @@ function OrderCard({ order }: { order: CourierOrder }) {
         {item.medicine_name} × {item.quantity}
         {item.base_unit_price !== null && <small> · цена аптеки {Number(item.base_unit_price).toFixed(2)} с.</small>}
       </li>)}</ul> : <p>Лекарства ещё не указаны.</p>}
-      {order.pharmacy_id === 1 && status !== 'cancelled' &&
+      {status !== 'cancelled' &&
         <button type="button" className="courier-add-medicines" onClick={() => setEditingItems((value) => !value)}>
-          {editingItems ? 'Закрыть' : '+ Добавить лекарства'}
+          {editingItems ? 'Закрыть' : '+ Найти лекарство в каталоге'}
         </button>}
-      {order.pharmacy_id === 2 && <p>Каталог аптеки 2 пока не подключён. Лекарство можно добавить вручную.</p>}
       {status !== 'cancelled' && <button type="button" className="courier-add-medicines" onClick={() => setManualOpen((value) => !value)}>
         {manualOpen ? 'Закрыть ручной ввод' : '+ Лекарство вне каталога'}
       </button>}
@@ -176,14 +183,17 @@ function OrderCard({ order }: { order: CourierOrder }) {
       </div>}
       {itemMessage && <p className="staff-order-success" role="status">{itemMessage}</p>}
       {editingItems && <div className="courier-medicine-editor">
+        {order.pharmacy_id === 2 && <p>Поиск только названия. Цена аптеки 2 вводится вручную; цена аптеки 1 не применяется.</p>}
         <div className="staff-search"><input aria-label="Название лекарства" value={medicineQuery}
           onChange={(event) => setMedicineQuery(event.target.value)} placeholder="Название лекарства" />
           <button type="button" disabled={searchBusy} onClick={searchMedicines}>{searchBusy ? 'Поиск…' : 'Найти'}</button></div>
         {medicineResults.length > 0 && <div className="staff-picker-results">{medicineResults.map((medicine) =>
           <div key={medicine.medicine_id}><span><strong>{medicine.medicine_name}</strong>
-            <small>Цена аптеки {Number(medicine.base_unit_price).toFixed(2)} с.</small></span>
+            {order.pharmacy_id === 1 && <small>Цена аптеки {Number(medicine.base_unit_price).toFixed(2)} с.</small>}</span>
             <button type="button" disabled={selectedMedicines.length >= 20 || selectedMedicines.some((item) => item.medicine_id === medicine.medicine_id)}
-              onClick={() => { setSelectedMedicines((items) => [...items, { ...medicine, quantity: 1 }]); itemRequestKey.current = null; }}>
+              onClick={() => { setSelectedMedicines((items) => order.pharmacy_id === 2
+                ? [{ ...medicine, quantity: 1 }] : [...items, { ...medicine, quantity: 1 }]);
+                setPharmacyTwoPrice(''); itemRequestKey.current = null; }}>
               {selectedMedicines.some((item) => item.medicine_id === medicine.medicine_id) ? 'Выбрано' :
                 order.medicines.some((item) => item.medicine_id === medicine.medicine_id) ? 'Увеличить' : 'Добавить'}
             </button></div>)}</div>}
@@ -197,6 +207,10 @@ function OrderCard({ order }: { order: CourierOrder }) {
               }} />
             <button type="button" onClick={() => { setSelectedMedicines((items) => items.filter((entry) =>
               entry.medicine_id !== item.medicine_id)); itemRequestKey.current = null; }}>Убрать</button></div>)}</div>}
+        {order.pharmacy_id === 2 && selectedMedicines.length > 0 && <label>Цена аптеки 2, с.
+          <input aria-label="Цена аптеки 2" type="number" inputMode="decimal" min="0.01" max="999999.99" step="0.01"
+            value={pharmacyTwoPrice} onChange={(event) => { setPharmacyTwoPrice(event.target.value); itemRequestKey.current = null; }} />
+        </label>}
         <button type="button" className="staff-submit" disabled={itemBusy || selectedMedicines.length === 0}
           onClick={saveMedicines}>{itemBusy ? 'Сохраняем…' : `Сохранить лекарства (${selectedMedicines.length})`}</button>
       </div>}
