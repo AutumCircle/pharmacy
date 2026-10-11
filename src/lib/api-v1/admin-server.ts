@@ -31,6 +31,7 @@ import type {
   AdminPricingSettings,
   AdminContactSettings,
   AdminNotificationSettings,
+  AdminNotificationPreview,
   AdminProductCarousel,
   CatalogSyncSummary,
 } from './admin-types';
@@ -188,6 +189,12 @@ export function addAdminOrderItems(orderId: string, items: Array<{ medicine_id: 
 export function addAdminManualOrderItems(orderId: string, manualItems: Array<{ medicine_name: string; price: string; quantity: number }>, idempotencyKey: string): Promise<ApiSuccessResponse<{ added: number; items_subtotal: string }>> {
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/manual-items`, {
     method: 'POST', body: { manual_items: manualItems }, headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+export function adjustAdminOrderItem(orderId: string, orderItemId: number, expectedQuantity: number, quantity: number): Promise<ApiSuccessResponse<{ removed: boolean; quantity: number; order_total: number | string }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/item-adjustments`, {
+    method: 'PATCH', body: { order_item_id: orderItemId, expected_quantity: expectedQuantity, quantity },
   });
 }
 
@@ -605,6 +612,10 @@ export function getAdminNotificationSettings(): Promise<ApiSuccessResponse<Admin
 
 export function updateAdminNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>): Promise<ApiSuccessResponse<AdminNotificationSettings>> {
   return request('/v1/admin/order-notification-settings', { method: 'PATCH', body });
+}
+
+export function previewAdminNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>): Promise<ApiSuccessResponse<AdminNotificationPreview>> {
+  return request('/v1/admin/order-notification-preview', { method: 'POST', body });
 }
 
 export function resetAdminCollectionStats(confirmation: string): Promise<ApiSuccessResponse<{

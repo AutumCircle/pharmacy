@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import type { AdminNotificationSettings, NotificationChannel, NotificationField } from '@/lib/api-v1/admin-types';
-import { saveNotificationSettings } from './actions';
+import { useEffect, useState } from 'react';
+import type { AdminNotificationPreview, AdminNotificationSettings, NotificationChannel, NotificationField } from '@/lib/api-v1/admin-types';
+import { previewNotificationSettings, saveNotificationSettings } from './actions';
 
 const channels: Array<{ key: NotificationChannel; label: string }> = [
   { key: 'owner_telegram', label: 'Владелец · Telegram' },
@@ -35,6 +35,24 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
   const [draft, setDraft] = useState(initialSettings);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [preview, setPreview] = useState<AdminNotificationPreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(true);
+  const [previewError, setPreviewError] = useState('');
+  const [openPreview, setOpenPreview] = useState<NotificationChannel | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      const result = await previewNotificationSettings({
+        courier_enabled: draft.courier_enabled, policies: draft.policies, revision: draft.revision,
+      });
+      if (!active) return;
+      if (result.success) { setPreview(result.preview); setPreviewError(''); }
+      else setPreviewError(result.error);
+      setPreviewBusy(false);
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [draft]);
 
   function toggle(channel: NotificationChannel, field: NotificationField) {
     if (field === 'order_reference') return;
@@ -42,12 +60,14 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
       ...value.policies, [channel]: { ...value.policies[channel], [field]: !value.policies[channel][field] },
     } }));
     setMessage('');
+    setPreviewBusy(true);
   }
 
   function toggleCourier() {
     if (draft.courier_enabled && !window.confirm('Отключить все Telegram-уведомления курьеру? Старые события после повторного включения не отправятся.')) return;
     setDraft((value) => ({ ...value, courier_enabled: !value.courier_enabled }));
     setMessage('');
+    setPreviewBusy(true);
   }
 
   async function save() {
@@ -85,9 +105,28 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
           disabled={field.key === 'order_reference' || busy} onChange={() => toggle(channel.key, field.key)} />
       </label>)}
     </section>)}</div>
+    <section className="notification-preview-section">
+      <h2>Как это будет выглядеть</h2>
+      <p>Пример с вымышленным заказом. Измените галочки — образец обновится, но сообщение никому не отправится.</p>
+      {previewError && <p role="alert" className="error">{previewError}</p>}
+      <div className="notification-preview-grid">{channels.map((channel) => <section key={channel.key} className="notification-preview-card">
+        <button type="button" aria-expanded={openPreview === channel.key}
+          onClick={() => setOpenPreview((current) => current === channel.key ? null : channel.key)}>
+          <span>{channel.label}</span><span>{openPreview === channel.key ? 'Скрыть пример ↑' : 'Показать пример ↓'}</span>
+        </button>
+        {openPreview === channel.key && <div className="notification-preview-body">
+          {channel.key === 'courier_telegram' && !draft.courier_enabled &&
+            <p className="notification-preview-muted">Отправка курьеру выключена. Ниже — как выглядело бы сообщение после включения.</p>}
+          {previewBusy && <p className="notification-preview-muted">Обновляем пример…</p>}
+          {!previewBusy && preview && (channel.key === 'pharmacy_web'
+            ? <div>{preview.pharmacy_web.map((entry) => <p key={entry.label}><b>{entry.label}:</b> {entry.value}</p>)}</div>
+            : <div className="notification-telegram-message" dangerouslySetInnerHTML={{ __html: preview.telegram[channel.key] }} />)}
+        </div>}
+      </section>)}</div>
+    </section>
     <div className="notification-settings-actions"><button type="button" disabled={busy} onClick={save}>
       {busy ? 'Сохраняем…' : 'Сохранить настройки'}</button>
-      <button type="button" disabled={busy} onClick={() => { setDraft(saved); setMessage('Изменения отменены.'); }}>Сбросить изменения</button></div>
+      <button type="button" disabled={busy} onClick={() => { setDraft(saved); setPreviewBusy(true); setMessage('Изменения отменены.'); }}>Сбросить изменения</button></div>
     {message && <p role="status" className={message.startsWith('Ошибка') ? 'error' : 'success'}>{message}</p>}
     <small>Последнее изменение: {saved.updated_at ? new Date(saved.updated_at).toLocaleString('ru-RU') : 'по умолчанию'}{saved.updated_by ? ` · ${saved.updated_by}` : ''}</small>
   </div>;

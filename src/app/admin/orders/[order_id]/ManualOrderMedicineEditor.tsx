@@ -3,8 +3,10 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { addManualOrderMedicine } from '../actions';
+import type { OrderStatus } from '@/lib/api-v1/types';
 
-export default function ManualOrderMedicineEditor({ orderId, delivered }: { orderId: string; delivered: boolean }) {
+export default function ManualOrderMedicineEditor({ orderId, status }: { orderId: string; status: OrderStatus }) {
+  const delivered = status === 'delivered';
   const inputStyle = { minWidth: 0, width: '100%', minHeight: 44, padding: '8px 10px', border: '1px solid #d0d5dd', borderRadius: 8, font: 'inherit' };
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -24,6 +26,7 @@ export default function ManualOrderMedicineEditor({ orderId, delivered }: { orde
       setError('Проверьте название, цену и количество'); return;
     }
     if (delivered && !window.confirm('Позиция добавится в доставленный заказ. Его сумма изменится задним числом, плата за доставку не изменится. Продолжить?')) return;
+    if (status === 'cancelled' && !window.confirm('Заказ отменён. Добавить позицию для истории? Статус останется отменённым.')) return;
     setBusy(true); setError(''); setMessage('');
     if (!requestKey.current) requestKey.current = crypto.randomUUID();
     const result = await addManualOrderMedicine(orderId,

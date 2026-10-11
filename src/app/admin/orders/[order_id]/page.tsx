@@ -9,6 +9,7 @@ import OrderDeliveryEditor from './OrderDeliveryEditor';
 import OrderMedicineEditor from './OrderMedicineEditor';
 import ManualOrderMedicineEditor from './ManualOrderMedicineEditor';
 import OrderDeleteButton from '../OrderDeleteButton';
+import OrderItemQuantityEditor from './OrderItemQuantityEditor';
 import { formatOrderSource } from '@/lib/collections';
 
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефонный звонок' } as const;
@@ -80,7 +81,8 @@ export default async function AdminOrderDetailPage({
               <tr key={`${item.medicine_id ?? 'legacy'}-${index}`}>
                 <td>{item.medicine_id ?? 'legacy'}</td>
                 <td>{item.medicine_name}</td>
-                <td>{item.quantity}</td>
+                <td><OrderItemQuantityEditor key={`${item.order_item_id}-${item.quantity}`} orderId={order.order_id} itemId={item.order_item_id}
+                  name={item.medicine_name} initialQuantity={item.quantity} status={order.status} /></td>
                 <td><OrderItemPriceEditor field="base" orderId={order.order_id} orderItemId={item.order_item_id} initialPrice={Number(item.base_unit_price || 0)} /></td>
                 <td><OrderItemPriceEditor orderId={order.order_id} orderItemId={item.order_item_id} initialPrice={Number(item.selling_unit_price || 0)} /></td>
                 <td>{Number(item.line_total || 0).toFixed(2)}</td>
@@ -90,10 +92,9 @@ export default async function AdminOrderDetailPage({
         </table>
       </div>
 
-      {order.status !== 'cancelled' &&
-        <OrderMedicineEditor orderId={order.order_id} delivered={order.status === 'delivered'}
-          pharmacyId={order.fulfillment_pharmacy_id ?? order.created_by_staff_account_id ?? 1} />}
-      {order.status !== 'cancelled' && <ManualOrderMedicineEditor orderId={order.order_id} delivered={order.status === 'delivered'} />}
+      <OrderMedicineEditor orderId={order.order_id} status={order.status}
+        pharmacyId={order.fulfillment_pharmacy_id ?? order.created_by_staff_account_id ?? 1} />
+      <ManualOrderMedicineEditor orderId={order.order_id} status={order.status} />
 
       <h2 style={{ marginTop: 30 }}>История статусов</h2>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

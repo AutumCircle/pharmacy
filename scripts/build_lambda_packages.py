@@ -72,6 +72,7 @@ def build() -> Path:
         ("backend/v1/shared/__init__.py", ROOT / "backend" / "v1" / "shared" / "__init__.py"),
         ("backend/v1/shared/contract.py", ROOT / "backend" / "v1" / "shared" / "contract.py"),
         ("backend/v1/shared/order_notification_settings.py", telegram_shared),
+        ("backend/v1/shared/order_notification_messages.py", ROOT / "backend" / "v1" / "shared" / "order_notification_messages.py"),
     ])
     telegram_payload = telegram_destination.read_bytes()
     manifest_packages.append({

@@ -40,6 +40,7 @@ from backend.v1.shared import collection_admin, staff_accounts
 from backend.v1.shared.order_notification_settings import (
     CHANNELS as NOTIFICATION_CHANNELS, effective_settings, validate_update,
 )
+from backend.v1.shared.order_notification_messages import format_configured_message
 
 
 DEFAULT_LIMIT = 20
@@ -433,6 +434,53 @@ def get_order_notification_settings() -> dict[str, Any]:
         cur.execute("""SELECT courier_enabled, policies, revision, updated_at, updated_by
                        FROM order_notification_settings WHERE singleton_id = 1""")
         return effective_settings(cur.fetchone())
+
+
+def preview_order_notifications(payload: dict[str, Any]) -> dict[str, Any]:
+    """Render a fixed sample with the exact formatter used by Telegram delivery."""
+    try:
+        enabled, policies, _ = validate_update(payload)
+    except ValueError as exc:
+        raise ContractError("VALIDATION_ERROR", "Неверные настройки предпросмотра") from exc
+    sample = {
+        "order_reference": "VAT-1042", "created_at": "11.10.2026 15:30",
+        "order_source": "Сайт", "customer_name": "Пример клиента", "phone": "+992 90 000 00 00",
+        "address": "Душанбе, ул. Айни 29", "landmark": "У главного входа",
+        "comment": "Позвоните перед доставкой", "created_by_staff_username": "Сайт",
+        "fulfillment_pharmacy_id": 1, "status": "pending", "order_total": "40.00",
+        "base_total": "32.00", "profit": "8.00",
+        "items": [{"medicine_name": "Пример лекарства", "quantity": 2,
+                   "line_total": "40.00", "base_line_total": "32.00"}],
+    }
+    telegram = {channel: format_configured_message(sample, policies[channel], channel)
+                for channel in NOTIFICATION_CHANNELS[:3]}
+    web_labels = {
+        "order_reference": ("Заказ", sample["order_reference"]),
+        "created_at": ("Создан", sample["created_at"]),
+        "source": ("Источник", sample["order_source"]),
+        "customer_name": ("Клиент", sample["customer_name"]),
+        "phone": ("Телефон", sample["phone"]),
+        "address": ("Адрес", sample["address"]),
+        "landmark": ("Ориентир", sample["landmark"]),
+        "comment": ("Комментарий", sample["comment"]),
+        "client_total": ("Клиентская сумма", "40.00 с."),
+        "base_total": ("Базовая сумма", "32.00 с."),
+        "profit": ("Разница", "8.00 с."),
+        "creator": ("Создал", "Сайт"),
+        "status": ("Статус", "pending"),
+    }
+    web = [{"label": label, "value": value} for field, (label, value) in web_labels.items()
+           if policies["pharmacy_web"][field]]
+    if policies["pharmacy_web"]["items"]:
+        item = "Пример лекарства"
+        if policies["pharmacy_web"]["quantity"]:
+            item += " × 2"
+        if policies["pharmacy_web"]["item_client_total"]:
+            item += " · клиенту 40.00 с."
+        if policies["pharmacy_web"]["item_base_total"]:
+            item += " · базовая 32.00 с."
+        web.append({"label": "Товары", "value": item})
+    return {"telegram": telegram, "pharmacy_web": web, "courier_enabled": enabled}
 
 
 def update_order_notification_settings(payload: dict[str, Any], actor_id: str, current_request_id: str) -> dict[str, Any]:
@@ -1145,6 +1193,7 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
 def add_courier_order_items(
     order_id: str, payload: dict[str, Any], idempotency_key: str, current_request_id: str,
     actor_id: str = "staff:3",
+    allow_cancelled: bool = False,
 ) -> dict[str, Any]:
     """Atomically add catalogue medicines to a non-cancelled pharmacy-1 order."""
     if not isinstance(payload, dict) or set(payload) != {"items"} or not isinstance(payload["items"], list):
@@ -1173,7 +1222,7 @@ def add_courier_order_items(
         order = cur.fetchone()
         if not order:
             raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
-        if order["status"] == "cancelled":
+        if order["status"] == "cancelled" and not allow_cancelled:
             raise ContractError("ORDER_STATUS_CONFLICT", "Отменённый заказ нельзя изменить", http_status=409)
         if order["pharmacy_id"] != 1:
             raise ContractError("PHARMACY_CATALOG_UNAVAILABLE", "Каталог аптеки 2 пока не подключён", http_status=409)
@@ -1239,6 +1288,8 @@ def add_courier_order_items(
                         (order["id"], json.dumps(inserts, ensure_ascii=False)))
         cur.execute("SELECT COALESCE(SUM(line_total), 0) AS total FROM order_items WHERE order_id = %s", (order["id"],))
         total = cur.fetchone()["total"]
+        if total > Decimal("99999999.99"):
+            raise ContractError("VALIDATION_ERROR", "Сумма заказа слишком велика")
         cur.execute("UPDATE orders SET items_subtotal = %s, order_total = %s, total_price = %s WHERE id = %s",
                     (total, total, total, order["id"]))
         result = {"order_id": order_id, "added": len(inserts), "quantity_increased": len(updates),
@@ -1257,7 +1308,7 @@ def add_courier_order_items(
 
 def add_manual_order_items(
     order_id: str, payload: dict[str, Any], idempotency_key: str,
-    current_request_id: str, actor_id: str,
+    current_request_id: str, actor_id: str, allow_cancelled: bool = False,
 ) -> dict[str, Any]:
     """Append order-only snapshots; never create or modify catalogue medicines."""
     if not isinstance(payload, dict) or set(payload) != {"manual_items"}:
@@ -1273,7 +1324,7 @@ def add_manual_order_items(
         order = cur.fetchone()
         if not order:
             raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
-        if order["status"] == "cancelled":
+        if order["status"] == "cancelled" and not allow_cancelled:
             raise ContractError("ORDER_STATUS_CONFLICT", "Отменённый заказ нельзя изменить", http_status=409)
         cur.execute("""INSERT INTO order_idempotency (idempotency_key, request_hash)
                        VALUES (%s, %s) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id""",
@@ -1779,6 +1830,61 @@ def update_order_item_price(
         "selling_unit_price": new_price, "base_unit_price": base_price, "line_total": line_total,
         "items_subtotal": items_subtotal, "order_total": items_subtotal, "currency": "TJS",
     }
+
+
+def adjust_admin_order_item(
+    order_id: str, payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    """Set an exact quantity or remove one order line, including delivered/cancelled orders."""
+    if (not isinstance(payload, dict) or set(payload) != {"order_item_id", "expected_quantity", "quantity"}
+            or any(type(payload[key]) is not int for key in payload)
+            or payload["order_item_id"] <= 0 or not 1 <= payload["expected_quantity"] <= 99
+            or not 0 <= payload["quantity"] <= 99):
+        raise ContractError("VALIDATION_ERROR", "Проверьте позицию и количество")
+    lookup, lookup_values = _order_lookup(order_id)
+    with transaction() as cur:
+        cur.execute(
+            f"""SELECT id, status, items_subtotal, COALESCE(order_reference, public_id, id::text) AS reference
+                FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values,
+        )
+        order = cur.fetchone()
+        if not order:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        cur.execute(
+            """SELECT id, medicine_id, medicine_name, quantity, selling_unit_price, price
+               FROM order_items WHERE id = %s AND order_id = %s FOR UPDATE""",
+            (payload["order_item_id"], order["id"]),
+        )
+        item = cur.fetchone()
+        if not item:
+            raise ContractError("ORDER_ITEM_NOT_FOUND", "Позиция не найдена", http_status=404)
+        if int(item["quantity"]) != payload["expected_quantity"]:
+            raise ContractError("ORDER_ITEM_CONFLICT", "Количество уже изменилось. Обновите заказ.", http_status=409)
+        if payload["quantity"] == 0:
+            cur.execute("DELETE FROM order_items WHERE id = %s AND order_id = %s", (item["id"], order["id"]))
+        else:
+            cur.execute(
+                """UPDATE order_items SET quantity = %s,
+                   line_total = %s * COALESCE(selling_unit_price, price)
+                   WHERE id = %s AND order_id = %s""",
+                (payload["quantity"], payload["quantity"], item["id"], order["id"]),
+            )
+        cur.execute("SELECT COALESCE(SUM(line_total), 0) AS total FROM order_items WHERE order_id = %s", (order["id"],))
+        total = cur.fetchone()["total"]
+        if total > Decimal("99999999.99"):
+            raise ContractError("VALIDATION_ERROR", "Сумма заказа слишком велика")
+        cur.execute("UPDATE orders SET items_subtotal = %s, order_total = %s, total_price = %s WHERE id = %s",
+                    (total, total, total, order["id"]))
+        _write_admin_audit(
+            cur, actor_id=actor_id, action="order.item_removed" if payload["quantity"] == 0 else "order.item_quantity_set",
+            resource_type="order_item", resource_id=str(item["id"]), request=current_request_id,
+            details={"order_reference": str(order["reference"]), "medicine_id": item["medicine_id"],
+                     "medicine_name": item["medicine_name"], "status": order["status"],
+                     "previous_quantity": int(item["quantity"]), "new_quantity": payload["quantity"],
+                     "previous_subtotal": str(order["items_subtotal"]), "new_subtotal": str(total)},
+        )
+    return {"order_id": order_id, "order_item_id": item["id"], "quantity": payload["quantity"],
+            "removed": payload["quantity"] == 0, "items_subtotal": total, "order_total": total, "currency": "TJS"}
 
 
 def _delivery_amount(payload: dict[str, Any], field: str) -> Decimal:
@@ -3360,6 +3466,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(dashboard_summary(query), request=current_request_id)
         if method == "GET" and tail == ["order-notification-settings"]:
             return success(get_order_notification_settings(), request=current_request_id)
+        if method == "POST" and tail == ["order-notification-preview"]:
+            return success(preview_order_notifications(_body(event)), request=current_request_id)
         if method == "PATCH" and tail == ["order-notification-settings"]:
             return success(update_order_notification_settings(_body(event), actor_id, current_request_id), request=current_request_id)
         if method == "GET" and tail == ["pricing-settings"]:
@@ -3404,13 +3512,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 raise ContractError("VALIDATION_ERROR", "Неверный номер заказа")
             headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
             return success(add_courier_order_items(tail[1], _body(event),
-                str(headers.get("idempotency-key") or ""), current_request_id, actor_id), request=current_request_id)
+                str(headers.get("idempotency-key") or ""), current_request_id, actor_id,
+                allow_cancelled=True), request=current_request_id)
         if method == "POST" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "manual-items":
             if not re.fullmatch(r"ord_[0-9a-f]{32}|legacy_[1-9][0-9]*", tail[1]):
                 raise ContractError("VALIDATION_ERROR", "Неверный номер заказа")
             headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
             return success(add_manual_order_items(tail[1], _body(event),
-                str(headers.get("idempotency-key") or ""), current_request_id, actor_id), request=current_request_id)
+                str(headers.get("idempotency-key") or ""), current_request_id, actor_id,
+                allow_cancelled=True), request=current_request_id)
+        if method == "PATCH" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "item-adjustments":
+            if not re.fullmatch(r"ord_[0-9a-f]{32}|legacy_[1-9][0-9]*", tail[1]):
+                raise ContractError("VALIDATION_ERROR", "Неверный номер заказа")
+            return success(adjust_admin_order_item(tail[1], _body(event), actor_id, current_request_id),
+                           request=current_request_id)
         if method == "PATCH" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "status":
             payload = _body(event)
             if "order_item_id" in payload:

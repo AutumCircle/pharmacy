@@ -3,9 +3,11 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { StaffOrderMedicine } from '@/lib/api-v1/staff-types';
+import type { OrderStatus } from '@/lib/api-v1/types';
 import { addManualOrderMedicine, addOrderMedicines, searchOrderMedicines } from '../actions';
 
-export default function OrderMedicineEditor({ orderId, delivered, pharmacyId }: { orderId: string; delivered: boolean; pharmacyId: number }) {
+export default function OrderMedicineEditor({ orderId, status, pharmacyId }: { orderId: string; status: OrderStatus; pharmacyId: number }) {
+  const delivered = status === 'delivered';
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StaffOrderMedicine[]>([]);
@@ -31,6 +33,7 @@ export default function OrderMedicineEditor({ orderId, delivered, pharmacyId }: 
       setError('Введите цену аптеки 2 для выбранного лекарства'); return;
     }
     if (delivered && !window.confirm('Лекарства добавятся в доставленный заказ. Сумма заказа изменится задним числом, плата за доставку не изменится. Продолжить?')) return;
+    if (status === 'cancelled' && !window.confirm('Заказ отменён. Добавить лекарства для истории? Статус останется отменённым.')) return;
     setBusy(true); setError(''); setMessage('');
     if (!requestKey.current) requestKey.current = crypto.randomUUID();
     const result = pharmacyId === 2

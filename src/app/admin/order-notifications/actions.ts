@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/admin-auth';
-import { updateAdminNotificationSettings } from '@/lib/api-v1/admin-server';
+import { previewAdminNotificationSettings, updateAdminNotificationSettings } from '@/lib/api-v1/admin-server';
 import type { AdminNotificationSettings } from '@/lib/api-v1/admin-types';
 
 export async function saveNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>) {
@@ -14,5 +14,15 @@ export async function saveNotificationSettings(body: Pick<AdminNotificationSetti
     return { success: true as const, settings: response.data };
   } catch (error) {
     return { success: false as const, error: error instanceof Error ? error.message : 'Не удалось сохранить настройки' };
+  }
+}
+
+export async function previewNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>) {
+  try {
+    await requireAdminSession();
+    const response = await previewAdminNotificationSettings(body);
+    return { success: true as const, preview: response.data };
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : 'Не удалось показать пример' };
   }
 }

@@ -364,6 +364,11 @@ export type AdminNotificationSettings = {
   updated_at: string | null;
   updated_by: string | null;
 };
+export type AdminNotificationPreview = {
+  telegram: Record<Exclude<NotificationChannel, 'pharmacy_web'>, string>;
+  pharmacy_web: Array<{ label: string; value: string }>;
+  courier_enabled: boolean;
+};
 
 export type CollectionUtmLinkStats = CollectionUtmOrders & {
   product_id: number | null;
