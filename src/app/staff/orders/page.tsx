@@ -30,12 +30,23 @@ export default async function CourierOrdersPage({ searchParams }: {
       {response.data.length === 0 ? <div className="staff-order-form">Сейчас заказов на сборку нет.</div>
         : <div className="courier-order-list">{response.data.map((order) => <article className="courier-order-card" key={order.order_id}>
           <div className="courier-order-heading"><div><strong>Заказ {order.order_reference || order.order_id}</strong>
-            <small>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</small></div>
-            <span className={`courier-order-status ${order.status}`}>{order.status === 'pending' ? 'Новый' : 'Собирается'}</span></div>
+            {order.created_at && <small>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</small>}</div>
+            {order.status && <span className={`courier-order-status ${order.status}`}>{order.status === 'pending' ? 'Новый' : 'Собирается'}</span>}</div>
+          {order.source && <p>Источник: {order.source}</p>}
           {order.customer_name && <p>Клиент: {order.customer_name}</p>}
-          <ul className="pharmacy-preparation-items">{order.medicines.map((item, index) =>
-            <li key={`${item.medicine_name}-${index}`}>{item.medicine_name} × {item.quantity}</li>)}</ul>
+          {order.phone && <p>Телефон: {order.phone}</p>}
+          {order.address && <p>Адрес: {order.address}</p>}
+          {order.landmark && <p>Ориентир: {order.landmark}</p>}
+          {order.medicines && <ul className="pharmacy-preparation-items">{order.medicines.map((item, index) =>
+            <li key={`${item.medicine_name}-${index}`}>{item.medicine_name}{item.quantity !== undefined ? ` × ${item.quantity}` : ''}
+              {item.line_total !== undefined && ` · клиент: ${Number(item.line_total).toFixed(2)} с.`}
+              {item.base_line_total !== undefined && ` · аптека: ${Number(item.base_line_total).toFixed(2)} с.`}
+            </li>)}</ul>}
           {order.notes && <p>Комментарий: {order.notes}</p>}
+          {order.order_total !== undefined && <p>Клиентская сумма: {Number(order.order_total).toFixed(2)} с.</p>}
+          {order.base_total !== undefined && <p>Базовая сумма: {Number(order.base_total).toFixed(2)} с.</p>}
+          {order.profit !== undefined && <p>Разница: {Number(order.profit).toFixed(2)} с.</p>}
+          {order.created_by_staff_account_id && <p>Создал сотрудник: {order.created_by_staff_account_id}</p>}
         </article>)}</div>}
       {response.page.next_cursor && <div className="staff-pagination"><Link href={`/staff/orders?cursor=${encodeURIComponent(response.page.next_cursor)}`}>Следующие заказы →</Link></div>}
     </section>;

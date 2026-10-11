@@ -30,6 +30,7 @@ import type {
   AdminOrderSummary,
   AdminPricingSettings,
   AdminContactSettings,
+  AdminNotificationSettings,
   AdminProductCarousel,
   CatalogSyncSummary,
 } from './admin-types';
@@ -596,6 +597,14 @@ export function getAdminCollectionStats(
   values: { from?: string; to?: string; slug?: string } = {},
 ): Promise<ApiSuccessResponse<CollectionStats>> {
   return request(`/v1/admin/collection-stats${queryString(values)}`);
+}
+
+export function getAdminNotificationSettings(): Promise<ApiSuccessResponse<AdminNotificationSettings>> {
+  return request('/v1/admin/order-notification-settings');
+}
+
+export function updateAdminNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>): Promise<ApiSuccessResponse<AdminNotificationSettings>> {
+  return request('/v1/admin/order-notification-settings', { method: 'PATCH', body });
 }
 
 export function resetAdminCollectionStats(confirmation: string): Promise<ApiSuccessResponse<{

@@ -28,7 +28,7 @@ from backend.v1.shared.contract import (
     validate_staff_order_request,
     validate_status_transition,
 )
-from backend.v1.shared.authorization import require_admin_identity
+from backend.v1.shared.authorization import require_admin_identity, require_notification_claim_identity
 from backend.v1.shared.database import transaction
 from backend.v1.shared.responses import error_response, request_id, success, success_document
 from backend.v1.shared.xlsx_export import (
@@ -37,6 +37,9 @@ from backend.v1.shared.xlsx_export import (
     build_out_of_stock_workbook,
 )
 from backend.v1.shared import collection_admin, staff_accounts
+from backend.v1.shared.order_notification_settings import (
+    CHANNELS as NOTIFICATION_CHANNELS, effective_settings, validate_update,
+)
 
 
 DEFAULT_LIMIT = 20
@@ -423,6 +426,67 @@ def catalog_stats() -> dict[str, Any]:
         if int(result["out_of_stock"] or 0) > 100_000:
             result["warnings"].append("CATALOG_ARCHIVE_ABNORMALLY_LARGE")
         return result
+
+
+def get_order_notification_settings() -> dict[str, Any]:
+    with transaction() as cur:
+        cur.execute("""SELECT courier_enabled, policies, revision, updated_at, updated_by
+                       FROM order_notification_settings WHERE singleton_id = 1""")
+        return effective_settings(cur.fetchone())
+
+
+def update_order_notification_settings(payload: dict[str, Any], actor_id: str, current_request_id: str) -> dict[str, Any]:
+    try:
+        enabled, policies, revision = validate_update(payload)
+    except ValueError as exc:
+        raise ContractError("VALIDATION_ERROR", "Неверные настройки уведомлений") from exc
+    with transaction() as cur:
+        cur.execute("""SELECT courier_enabled, policies, revision, updated_at, updated_by
+                       FROM order_notification_settings WHERE singleton_id = 1 FOR UPDATE""")
+        current = effective_settings(cur.fetchone())
+        if current["revision"] != revision:
+            raise ContractError("SETTINGS_CONFLICT", "Настройки уже изменились. Обновите страницу.", http_status=409)
+        cur.execute("""UPDATE order_notification_settings
+                       SET courier_enabled = %s, policies = %s::jsonb, revision = revision + 1,
+                           courier_enabled_since = CASE WHEN courier_enabled IS FALSE AND %s IS TRUE
+                               THEN CURRENT_TIMESTAMP ELSE courier_enabled_since END,
+                           updated_at = CURRENT_TIMESTAMP, updated_by = %s
+                       WHERE singleton_id = 1
+                       RETURNING courier_enabled, policies, revision, updated_at, updated_by""",
+                    (enabled, json.dumps(policies), enabled, actor_id))
+        saved = effective_settings(cur.fetchone())
+        _write_admin_audit(cur, actor_id=actor_id, action="order.notification_settings_updated",
+                           resource_type="order_notification_settings", resource_id="1", request=current_request_id,
+                           details={"previous": {"courier_enabled": current["courier_enabled"], "policies": current["policies"]},
+                                    "current": {"courier_enabled": enabled, "policies": policies}})
+    return saved
+
+
+def claim_order_notification(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict) or set(payload) != {"event_key", "recipient"}:
+        raise ContractError("VALIDATION_ERROR", "Неверное событие уведомления")
+    event_key, recipient = payload["event_key"], payload["recipient"]
+    match = re.fullmatch(r"order:([1-9][0-9]*):created", event_key) if isinstance(event_key, str) else None
+    if not match or recipient not in NOTIFICATION_CHANNELS[:3]:
+        raise ContractError("VALIDATION_ERROR", "Неверное событие уведомления")
+    with transaction() as cur:
+        cur.execute("""SELECT s.courier_enabled, s.courier_enabled_since, s.policies,
+                              o.created_at AS order_created_at
+                       FROM order_notification_settings s
+                       JOIN orders o ON o.id = %s AND o.deleted_at IS NULL
+                       WHERE s.singleton_id = 1 FOR SHARE OF s""", (int(match.group(1)),))
+        row = cur.fetchone()
+        if not row:
+            return {"claimed": False, "fields": {}}
+        settings = effective_settings(row)
+        if recipient == "courier_telegram" and (not settings["courier_enabled"] or
+                row["order_created_at"] < row["courier_enabled_since"]):
+            return {"claimed": False, "fields": {}}
+        cur.execute("""INSERT INTO order_notification_deliveries (event_key, recipient)
+                       VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING event_key""",
+                    (event_key, recipient))
+        claimed = bool(cur.fetchone())
+    return {"claimed": claimed, "fields": settings["policies"][recipient] if claimed else {}}
 
 
 def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
@@ -1006,6 +1070,8 @@ def create_staff_order(
         )
         notification = {
             "notification_kind": "staff_manual_order", "admin_order_id": int(order["id"]),
+            "created_at": order["created_at"].isoformat() if hasattr(order["created_at"], "isoformat") else order["created_at"],
+            "status": "pending",
             "order_reference": order_reference, "customer_name": request["customer_name"],
             "phone": request["phone"], "address": request["address"], "landmark": request["landmark"],
             "comment": request.get("comment"),
@@ -1258,43 +1324,73 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
     cursor_filter = ""
     if cursor:
         try:
-            created_at = datetime.fromisoformat(cursor["created_at"])
             order_id = int(cursor["id"])
             if order_id <= 0:
                 raise ValueError()
         except (KeyError, TypeError, ValueError) as exc:
             raise ContractError("VALIDATION_ERROR", "cursor is invalid") from exc
-        cursor_filter = "AND (o.created_at, o.id) < (%s, %s)"
-        params.extend([created_at, order_id])
+        cursor_filter = "AND o.id < %s"
+        params.append(order_id)
     params.append(limit + 1)
     with transaction() as cur:
         cur.execute(
             f"""SELECT o.id, o.public_id, o.order_reference, o.status, o.created_at,
-                       o.notes, o.customer_name,
+                       o.notes, o.customer_name, o.phone, o.address, o.landmark,
+                       o.order_source, o.utm_source, o.order_total, o.created_by_staff_account_id,
+                       COALESCE(items.base_total, 0) AS base_total,
                        COALESCE(items.medicines, '[]'::json) AS medicines
                 FROM orders o
                 LEFT JOIN LATERAL (
                     SELECT json_agg(json_build_object('medicine_name', oi.medicine_name,
-                        'quantity', oi.quantity) ORDER BY oi.id) AS medicines
+                        'quantity', oi.quantity, 'line_total', oi.line_total,
+                        'base_line_total', COALESCE(oi.base_unit_price, oi.price) * oi.quantity)
+                        ORDER BY oi.id) AS medicines,
+                        SUM(COALESCE(oi.base_unit_price, oi.price) * oi.quantity) AS base_total
                     FROM order_items oi WHERE oi.order_id = o.id
                 ) items ON true
                 WHERE o.deleted_at IS NULL AND o.created_by_staff_account_id IS NULL
                   AND o.status IN ('pending', 'confirmed')
                   AND COALESCE(o.fulfillment_pharmacy_id, 1) = %s
                   {cursor_filter}
-                ORDER BY o.created_at DESC, o.id DESC LIMIT %s""",
+                ORDER BY o.id DESC LIMIT %s""",
             tuple(params),
         )
         rows = [dict(row) for row in cur.fetchall()]
+        cur.execute("SELECT courier_enabled, policies, revision FROM order_notification_settings WHERE singleton_id = 1")
+        policy = effective_settings(cur.fetchone())["policies"]["pharmacy_web"]
     has_more = len(rows) > limit
     rows = rows[:limit]
     next_cursor = None
     if has_more and rows:
         last = rows[-1]
-        next_cursor = _encode_cursor({"created_at": last["created_at"].isoformat(), "id": last["id"]})
+        next_cursor = _encode_cursor({"id": last["id"]})
     for row in rows:
         row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
         row.pop("id")
+        row["profit"] = (row["order_total"] or Decimal("0")) - row["base_total"]
+        if policy["source"]:
+            utm_source = row.pop("utm_source")
+            row["source"] = row.pop("order_source") or (f"Сайт · {utm_source}" if utm_source else "Сайт")
+        else:
+            row.pop("order_source")
+            row.pop("utm_source")
+        fields = {
+            "order_reference": "order_reference", "created_at": "created_at", "customer_name": "customer_name",
+            "phone": "phone", "address": "address", "landmark": "landmark", "comment": "notes",
+            "client_total": "order_total", "base_total": "base_total", "profit": "profit",
+            "creator": "created_by_staff_account_id", "status": "status",
+        }
+        for field, key in fields.items():
+            if not policy[field]:
+                row.pop(key, None)
+        if not policy["items"]:
+            row.pop("medicines", None)
+        else:
+            for item in row["medicines"]:
+                for field, key in (("quantity", "quantity"), ("item_client_total", "line_total"),
+                                   ("item_base_total", "base_line_total")):
+                    if not policy[field]:
+                        item.pop(key, None)
     return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
@@ -3246,6 +3342,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     status_match.group(1), courier_payload, current_request_id,
                 ), request=current_request_id)
             raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
+        if staff_method == "POST" and staff_path == "/v1/admin/order-notification-deliveries/claim":
+            require_notification_claim_identity(event)
+            return success(claim_order_notification(_body(event)), request=current_request_id)
         actor_id = require_admin_identity(event)
         method = str(event.get("httpMethod") or "").upper()
         path = str(event.get("path") or "")
@@ -3259,6 +3358,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 _body(event), actor_id, current_request_id, _write_admin_audit), request=current_request_id)
         if method == "GET" and tail == ["dashboard"]:
             return success(dashboard_summary(query), request=current_request_id)
+        if method == "GET" and tail == ["order-notification-settings"]:
+            return success(get_order_notification_settings(), request=current_request_id)
+        if method == "PATCH" and tail == ["order-notification-settings"]:
+            return success(update_order_notification_settings(_body(event), actor_id, current_request_id), request=current_request_id)
         if method == "GET" and tail == ["pricing-settings"]:
             return success(get_pricing_settings(), request=current_request_id)
         if method == "PATCH" and tail == ["pricing-settings"]:

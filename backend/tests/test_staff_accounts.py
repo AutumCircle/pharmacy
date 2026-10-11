@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 from contextlib import contextmanager
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from backend.v1.shared import staff_accounts as staff
@@ -212,9 +213,13 @@ class StaffTests(unittest.TestCase):
         order_cursor.fetchall.return_value = [{
             'id': 12, 'public_id': 'ord_test', 'order_reference': '3456-012',
             'status': 'pending', 'created_at': datetime(2026, 10, 10, tzinfo=timezone.utc),
-            'notes': None, 'customer_name': 'Клиент',
+            'notes': None, 'customer_name': 'Клиент', 'phone': 'SECRET',
+            'address': 'SECRET-ADDRESS', 'landmark': None, 'order_source': None, 'utm_source': None,
+            'order_total': Decimal('120'), 'base_total': Decimal('100'),
+            'created_by_staff_account_id': None,
             'medicines': [{'medicine_name': 'NOW D3', 'quantity': 2}],
         }]
+        order_cursor.fetchone.return_value = {'courier_enabled': True, 'policies': {}, 'revision': 1}
 
         @contextmanager
         def order_transaction():
@@ -223,11 +228,42 @@ class StaffTests(unittest.TestCase):
         with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
             result = list_pharmacy_preparation_orders({}, 1)
         self.assertEqual(result['data'][0]['medicines'][0]['medicine_name'], 'NOW D3')
-        sql, args = order_cursor.execute.call_args.args
+        self.assertNotIn('phone', result['data'][0])
+        self.assertNotIn('customer_name', result['data'][0])
+        self.assertNotIn('profit', result['data'][0])
+        sql, args = order_cursor.execute.call_args_list[-2].args
         self.assertIn('o.created_by_staff_account_id IS NULL', sql)
         self.assertIn('COALESCE(o.fulfillment_pharmacy_id, 1) = %s', sql)
         self.assertEqual(args, (1, 21))
-        self.assertNotIn('o.phone', sql)
+        self.assertIn('o.phone', sql)
+
+    def test_pharmacy_web_policy_is_enforced_by_lambda(self):
+        from datetime import datetime, timezone
+        from backend.v1.shared.order_notification_settings import default_policies
+        policies = default_policies()
+        policies['pharmacy_web']['phone'] = True
+        policies['pharmacy_web']['items'] = False
+        policies['pharmacy_web']['status'] = False
+        cursor = Mock()
+        cursor.fetchall.return_value = [{
+            'id': 12, 'public_id': 'ord_test', 'order_reference': '3456-012',
+            'status': 'pending', 'created_at': datetime(2026, 10, 10, tzinfo=timezone.utc),
+            'notes': 'NOTE', 'customer_name': 'PRIVATE', 'phone': '+992917123456',
+            'address': 'PRIVATE ADDRESS', 'landmark': None, 'order_source': None, 'utm_source': None,
+            'order_total': Decimal('120'), 'base_total': Decimal('100'),
+            'created_by_staff_account_id': None,
+            'medicines': [{'medicine_name': 'NOW D3', 'quantity': 2}],
+        }]
+        cursor.fetchone.return_value = {'courier_enabled': True, 'policies': policies, 'revision': 1}
+        @contextmanager
+        def order_transaction():
+            yield cursor
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            row = list_pharmacy_preparation_orders({}, 1)['data'][0]
+        self.assertEqual(row['phone'], '+992917123456')
+        self.assertNotIn('medicines', row)
+        self.assertNotIn('status', row)
+        self.assertNotIn('customer_name', row)
 
     def test_pharmacy_reads_preparation_list_but_cannot_change_status(self):
         courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}

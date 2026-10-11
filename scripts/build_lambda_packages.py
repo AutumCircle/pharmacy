@@ -64,7 +64,15 @@ def build() -> Path:
         })
     telegram_destination = OUTPUT / "telegram-order-notifier.zip"
     telegram_source = ROOT / "backend" / "v1" / "telegram_notifier" / "lambda_function.py"
-    _write_deterministic_zip(telegram_destination, [("lambda_function.py", telegram_source)])
+    telegram_shared = ROOT / "backend" / "v1" / "shared" / "order_notification_settings.py"
+    _write_deterministic_zip(telegram_destination, [
+        ("lambda_function.py", telegram_source),
+        ("backend/__init__.py", ROOT / "backend" / "__init__.py"),
+        ("backend/v1/__init__.py", ROOT / "backend" / "v1" / "__init__.py"),
+        ("backend/v1/shared/__init__.py", ROOT / "backend" / "v1" / "shared" / "__init__.py"),
+        ("backend/v1/shared/contract.py", ROOT / "backend" / "v1" / "shared" / "contract.py"),
+        ("backend/v1/shared/order_notification_settings.py", telegram_shared),
+    ])
     telegram_payload = telegram_destination.read_bytes()
     manifest_packages.append({
         "file": telegram_destination.name,

@@ -11,6 +11,7 @@ const menu = [
   { name: 'Лекарства', path: '/admin/medicines', icon: '✚' },
   { name: 'Дубликаты', path: '/admin/duplicates', icon: '≡' },
   { name: 'Заказы', path: '/admin/orders', icon: '◉' },
+  { name: 'Уведомления заказов', path: '/admin/order-notifications', icon: '✉' },
   { name: 'Категории', path: '/admin/categories', icon: '▣' },
   { name: 'Цены', path: '/admin/pricing', icon: '%' },
   { name: 'Контакт доставки', path: '/admin/contact', icon: '☎' },

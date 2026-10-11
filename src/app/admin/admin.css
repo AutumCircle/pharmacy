@@ -888,3 +888,21 @@
   .collection-story-links__rows > div { align-items: stretch; flex-direction: column; }
   .collection-story-links__rows button { width: 100%; }
 }
+.notification-settings-page { max-width: 1300px; }
+.notification-settings-page>p { color: #667085; line-height: 1.5; }
+.notification-courier-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #b9ddc3; background: #f0faf2; }
+.notification-courier-switch.disabled { border-color: #e8b1b1; background: #fff1f1; }
+.notification-courier-switch p { margin: 5px 0 0; color: #59636b; }
+.notification-courier-switch button,.notification-settings-actions button { min-height: 44px; padding: 9px 16px; border: 1px solid #cbd2d8; border-radius: 9px; background: white; cursor: pointer; font: inherit; }
+.notification-settings-desktop { overflow-x: auto; background: white; border: 1px solid #e5e8eb; border-radius: 12px; }
+.notification-settings-desktop table { width: 100%; border-collapse: collapse; min-width: 760px; }
+.notification-settings-desktop th,.notification-settings-desktop td { padding: 11px 12px; border-bottom: 1px solid #eef0f1; }
+.notification-settings-desktop thead th { background: #fafafa; text-align: center; }
+.notification-settings-desktop thead th:first-child,.notification-settings-desktop tbody th { text-align: left; }
+.notification-settings-desktop td { text-align: center; }
+.notification-settings-page input[type='checkbox'] { width: 21px; height: 21px; accent-color: #b5121b; }
+.notification-settings-mobile { display: none; }
+.notification-settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+.notification-settings-actions button:first-child { background: #b5121b; border-color: #b5121b; color: white; }
+.notification-settings-page .success { color: #166534; }.notification-settings-page .error { color: #b42318; }
+@media (max-width: 760px) { .notification-settings-desktop { display: none; } .notification-settings-mobile { display: grid; gap: 14px; } .notification-settings-mobile section { background: white; border: 1px solid #e5e8eb; border-radius: 12px; padding: 16px; } .notification-settings-mobile h2 { font-size: 18px; margin: 0 0 12px; } .notification-settings-mobile label { display: flex; align-items: center; justify-content: space-between; gap: 15px; min-height: 44px; border-top: 1px solid #eef0f1; } .notification-courier-switch { align-items: flex-start; flex-direction: column; } }

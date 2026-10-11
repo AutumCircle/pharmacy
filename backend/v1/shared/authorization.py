@@ -52,3 +52,9 @@ def require_sync_identity(event: dict[str, Any]) -> str:
     if static_principal:
         return static_principal
     raise ContractError("FORBIDDEN", "Sync authorization is required", http_status=403)
+
+
+def require_notification_claim_identity(event: dict[str, Any]) -> None:
+    """Narrow service identity for notifier delivery claims only."""
+    if not _static_bearer_identity(event, "NOTIFICATION_CLAIM_TOKEN", "notification-claim"):
+        raise ContractError("FORBIDDEN", "Notification claim authorization is required", http_status=403)

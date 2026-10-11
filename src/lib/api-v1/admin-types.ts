@@ -353,6 +353,18 @@ export type CollectionUtmOrders = {
   orders_total: number | string;
 };
 
+export type NotificationField = 'order_reference' | 'created_at' | 'source' | 'customer_name' | 'phone' |
+  'address' | 'landmark' | 'comment' | 'items' | 'quantity' | 'item_client_total' | 'item_base_total' | 'client_total' |
+  'base_total' | 'profit' | 'creator' | 'status';
+export type NotificationChannel = 'owner_telegram' | 'courier_telegram' | 'pharmacy_telegram' | 'pharmacy_web';
+export type AdminNotificationSettings = {
+  courier_enabled: boolean;
+  policies: Record<NotificationChannel, Record<NotificationField, boolean>>;
+  revision: number;
+  updated_at: string | null;
+  updated_by: string | null;
+};
+
 export type CollectionUtmLinkStats = CollectionUtmOrders & {
   product_id: number | null;
   product_name: string | null;

@@ -69,12 +69,20 @@ export type CourierOrderList = {
 
 export type PharmacyPreparationOrder = {
   order_id: string;
-  order_reference: string | null;
-  status: 'pending' | 'confirmed';
-  created_at: string;
-  customer_name: string;
-  notes: string | null;
-  medicines: Array<{ medicine_name: string; quantity: number }>;
+  order_reference?: string | null;
+  status?: 'pending' | 'confirmed';
+  created_at?: string;
+  source?: string;
+  customer_name?: string;
+  phone?: string;
+  address?: string;
+  landmark?: string | null;
+  notes?: string | null;
+  medicines?: Array<{ medicine_name: string; quantity?: number; line_total?: number | string; base_line_total?: number | string }>;
+  order_total?: number | string;
+  base_total?: number | string;
+  profit?: number | string;
+  created_by_staff_account_id?: number | null;
 };
 
 export type PharmacyPreparationOrderList = {

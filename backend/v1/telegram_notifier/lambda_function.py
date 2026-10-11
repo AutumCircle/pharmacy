@@ -11,6 +11,8 @@ import urllib.request
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from backend.v1.shared.order_notification_settings import CHANNELS, FIELDS
+
 
 def _authorizer_response(event: dict[str, Any]) -> dict[str, Any] | None:
     if event.get("type") != "TOKEN":
@@ -197,6 +199,89 @@ def format_message(event: dict[str, Any]) -> str:
     return format_owner_message(event)
 
 
+def format_configured_message(event: dict[str, Any], fields: dict[str, bool], channel: str) -> str:
+    """Only explicitly allowed fields enter the recipient's Telegram text."""
+    if channel not in CHANNELS[:3] or set(fields) != set(FIELDS) or not fields["order_reference"]:
+        raise RuntimeError("Notification policy is invalid")
+    reference = html.escape(str(event.get("order_reference") or "—"))
+    titles = {"owner_telegram": "Новый заказ", "courier_telegram": "Новая доставка",
+              "pharmacy_telegram": "Заказ на сборку"}
+    lines = [f"<b>{titles[channel]} {reference}</b>"]
+    mapping = (
+        ("created_at", "📅 Дата", "created_at"),
+        ("source", "📨 Источник", "order_source"),
+        ("customer_name", "👤 Клиент", "customer_name"),
+        ("phone", "📞 Телефон", "phone"),
+        ("address", "📍 Адрес", "address"),
+        ("landmark", "🧭 Ориентир", "landmark"),
+        ("comment", "💬 Комментарий", "comment"),
+        ("creator", "🏥 Создал", "created_by_staff_username"),
+        ("status", "📦 Статус", "status"),
+    )
+    for field, label, key in mapping:
+        if not fields[field]:
+            continue
+        value = event.get(key)
+        if field == "source" and not value:
+            value = "Сайт"
+        if field == "creator" and not value:
+            value = f"Аптека {event.get('fulfillment_pharmacy_id') or 1}"
+        if value is not None and str(value).strip():
+            lines.append(f"{label}: {html.escape(str(value)[:500])}")
+    amount_lines = []
+    for field, label, key in (
+        ("client_total", "💵 Клиентская сумма", "order_total"),
+        ("base_total", "🏪 Базовая сумма", "base_total"),
+        ("profit", "📈 Разница", "profit"),
+    ):
+        if fields[field]:
+            amount_lines.append(f"{label}: <b>{_money(event.get(key))}</b>")
+    if fields["items"]:
+        items = event.get("items") if isinstance(event.get("items"), list) else []
+        lines.append("<b>Товары:</b>")
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = html.escape(str(item.get("medicine_name") or "Товар")[:200])
+            line = f"• {name}"
+            if fields["quantity"]:
+                line += f" × {int(item.get('quantity') or 0)}"
+            prices = []
+            if fields["item_client_total"]:
+                prices.append(_money(item.get("line_total")))
+            if fields["item_base_total"]:
+                prices.append(_money(item.get("base_line_total")))
+            if prices:
+                line += " — " + " / ".join(prices)
+            if sum(len(part) + 1 for part in lines + amount_lines) + len(line) > 3800:
+                lines.append("• …остальные товары в панели заказов")
+                break
+            lines.append(line)
+    lines.extend(amount_lines)
+    return "\n".join(lines)
+
+
+def _claim_delivery(event_key: str, recipient: str) -> dict[str, Any]:
+    url = os.environ.get("NOTIFICATION_CLAIM_API_URL", "").strip()
+    api_key = os.environ.get("NOTIFICATION_CLAIM_API_KEY", "").strip()
+    bearer = os.environ.get("NOTIFICATION_CLAIM_TOKEN", "").strip()
+    if not url.startswith("https://") or not api_key or not bearer:
+        raise RuntimeError("Notification claim configuration is incomplete")
+    request = urllib.request.Request(url,
+        data=json.dumps({"event_key": event_key, "recipient": recipient}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-api-key": api_key,
+                 "Authorization": f"Bearer {bearer}"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Notification claim failed") from exc
+    result = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(result, dict) or type(result.get("claimed")) is not bool:
+        raise RuntimeError("Notification claim returned invalid data")
+    return result
+
+
 def _send_message(
     token: str,
     chat_id: str,
@@ -257,27 +342,32 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     delivery_token = os.environ.get("TELEGRAM_DELIVERY_BOT_TOKEN", "").strip() or token
     legacy_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     owner_chat_id = os.environ.get("TELEGRAM_OWNER_CHAT_ID", "").strip() or legacy_chat_id
-    pharmacy_chat_id = os.environ.get("TELEGRAM_PHARMACY_CHAT_ID", "").strip() or owner_chat_id
-    delivery_chat_id = os.environ.get("TELEGRAM_DELIVERY_CHAT_ID", "").strip() or owner_chat_id
+    pharmacy_chat_id = os.environ.get("TELEGRAM_PHARMACY_CHAT_ID", "").strip()
+    delivery_chat_id = os.environ.get("TELEGRAM_DELIVERY_CHAT_ID", "").strip()
     if not token or not owner_chat_id:
         raise RuntimeError("Telegram notification configuration is incomplete")
-    if notification.get("notification_kind") == "staff_manual_order":
-        deliveries = [(token, owner_chat_id, format_owner_message(notification), True)]
-    else:
-        deliveries = (
-            (token, owner_chat_id, format_owner_message(notification), True),
-            (token, pharmacy_chat_id, format_pharmacy_message(notification), False),
-            (delivery_token, delivery_chat_id, format_delivery_message(notification), False),
-        )
-    for message_token, chat_id, text, include_admin_link in deliveries:
-        _send_message(
-            message_token,
-            chat_id,
-            text,
-            notification,
-            include_admin_link=include_admin_link,
-        )
-    result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": len(deliveries)}
+    order_id = notification.get("admin_order_id")
+    if type(order_id) is not int or order_id <= 0:
+        raise RuntimeError("Notification order ID is missing")
+    is_staff = notification.get("notification_kind") == "staff_manual_order"
+    is_courier_created = notification.get("created_by_staff_account_id") == 3
+    recipients = [("owner_telegram", token, owner_chat_id, True)]
+    if not is_staff and pharmacy_chat_id:
+        recipients.append(("pharmacy_telegram", token, pharmacy_chat_id, False))
+    if not is_courier_created and delivery_chat_id:
+        recipients.append(("courier_telegram", delivery_token, delivery_chat_id, False))
+    messages_sent = 0
+    for recipient, message_token, chat_id, include_admin_link in recipients:
+        claim = _claim_delivery(f"order:{order_id}:created", recipient)
+        if not claim["claimed"]:
+            continue
+        fields = claim.get("fields")
+        if not isinstance(fields, dict):
+            raise RuntimeError("Notification policy is missing")
+        _send_message(message_token, chat_id, format_configured_message(notification, fields, recipient),
+                      notification, include_admin_link=include_admin_link)
+        messages_sent += 1
+    result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": messages_sent}
     if is_api_gateway:
         return {
             "statusCode": 200,

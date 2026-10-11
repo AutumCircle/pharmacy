@@ -530,6 +530,9 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
         )
         notification = {
             "admin_order_id": int(order["id"]),
+            "created_at": order["created_at"].isoformat() if hasattr(order["created_at"], "isoformat") else order["created_at"],
+            "status": "pending",
+            "order_source": "Сайт" + (f" · {attribution['utm_source']}" if attribution.get("utm_source") else ""),
             "fulfillment_pharmacy_id": 1,
             "order_reference": order_reference,
             "customer_name": request["customer_name"],
