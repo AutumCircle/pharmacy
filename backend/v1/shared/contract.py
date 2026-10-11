@@ -31,7 +31,7 @@ class ContractError(ValueError):
 
 ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items", "attribution"}
 ORDER_ITEM_FIELDS = {"medicine_id", "quantity"}
-STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "pharmacy_id", "comment"}
+STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "manual_items", "pharmacy_id", "comment"}
 STAFF_ORDER_SOURCES = frozenset({"instagram", "whatsapp", "phone"})
 STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"confirmed", "cancelled"}),
@@ -44,6 +44,35 @@ STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
 
 def _is_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def validate_manual_order_items(value: Any) -> list[dict[str, Any]]:
+    """Only authorized staff/admin may supply these order-only price snapshots."""
+    if not isinstance(value, list) or not 1 <= len(value) <= 20:
+        raise ContractError("VALIDATION_ERROR", "Укажите от 1 до 20 ручных позиций")
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"medicine_name", "price", "quantity"}:
+            raise ContractError("VALIDATION_ERROR", "Укажите название, цену и количество")
+        name = item["medicine_name"]
+        if not isinstance(name, str):
+            raise ContractError("VALIDATION_ERROR", "Укажите название лекарства")
+        name = " ".join(name.split())
+        if not 2 <= len(name) <= 200 or "\x00" in name:
+            raise ContractError("VALIDATION_ERROR", "Название должно содержать от 2 до 200 символов")
+        if isinstance(item["price"], bool) or not isinstance(item["price"], (str, int, float, Decimal)):
+            raise ContractError("VALIDATION_ERROR", "Укажите корректную цену")
+        try:
+            price = Decimal(str(item["price"]))
+        except InvalidOperation as exc:
+            raise ContractError("VALIDATION_ERROR", "Укажите корректную цену") from exc
+        if not price.is_finite() or not Decimal("0.01") <= price <= Decimal("999999.99") or price.as_tuple().exponent < -2:
+            raise ContractError("VALIDATION_ERROR", "Цена должна быть от 0,01 до 999999,99 с. с точностью до копейки")
+        quantity = item["quantity"]
+        if not _is_integer(quantity) or not 1 <= quantity <= 99:
+            raise ContractError("VALIDATION_ERROR", "Количество должно быть от 1 до 99")
+        result.append({"medicine_name": name, "price": str(price.quantize(Decimal("0.01"))), "quantity": quantity})
+    return result
 
 
 def _required_text(
@@ -310,6 +339,8 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
         "source": source,
         "items": items,
     }
+    if "manual_items" in payload:
+        result["manual_items"] = validate_manual_order_items(payload["manual_items"])
     if isinstance(comment_value, str) and comment_value.strip():
         result["comment"] = comment_value.strip()
     if "pharmacy_id" in payload:

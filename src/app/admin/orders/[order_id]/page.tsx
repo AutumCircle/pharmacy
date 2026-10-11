@@ -7,6 +7,7 @@ import OrderStatusControl from './OrderStatusControl';
 import OrderItemPriceEditor from './OrderItemPriceEditor';
 import OrderDeliveryEditor from './OrderDeliveryEditor';
 import OrderMedicineEditor from './OrderMedicineEditor';
+import ManualOrderMedicineEditor from './ManualOrderMedicineEditor';
 import OrderDeleteButton from '../OrderDeleteButton';
 import { formatOrderSource } from '@/lib/collections';
 
@@ -91,6 +92,7 @@ export default async function AdminOrderDetailPage({
 
       {order.status !== 'cancelled' && (order.fulfillment_pharmacy_id ?? order.created_by_staff_account_id ?? 1) === 1 &&
         <OrderMedicineEditor orderId={order.order_id} delivered={order.status === 'delivered'} />}
+      {order.status !== 'cancelled' && <ManualOrderMedicineEditor orderId={order.order_id} delivered={order.status === 'delivered'} />}
 
       <h2 style={{ marginTop: 30 }}>История статусов</h2>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

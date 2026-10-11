@@ -21,6 +21,10 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<StaffOrderMedicine[]>([]);
   const [items, setItems] = useState<Array<StaffOrderMedicine & { quantity: number }>>([]);
+  const [manualItems, setManualItems] = useState<Array<{ medicine_name: string; price: string; quantity: number }>>([]);
+  const [manualName, setManualName] = useState('');
+  const [manualPrice, setManualPrice] = useState('');
+  const [manualQuantity, setManualQuantity] = useState(1);
   const pendingRequest = useRef<{ payload: string; key: string } | null>(null);
 
   async function searchMedicines() {
@@ -41,12 +45,27 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       ? current : [...current, { ...medicine, quantity: 1 }]);
   }
 
+  function addManualMedicine() {
+    const price = manualPrice.replace(',', '.').trim();
+    if (manualName.trim().length < 2 || manualName.trim().length > 200 ||
+      !/^\d{1,6}(?:\.\d{1,2})?$/.test(price) || Number(price) <= 0 ||
+      !Number.isInteger(manualQuantity) || manualQuantity < 1 || manualQuantity > 99) {
+      setError('Проверьте название, цену и количество'); return;
+    }
+    if (manualItems.length >= 20) { setError('Не более 20 ручных позиций'); return; }
+    setManualItems((current) => [...current, { medicine_name: manualName.trim(), price, quantity: manualQuantity }]);
+    setManualName(''); setManualPrice(''); setManualQuantity(1); setError('');
+  }
+
   const pharmacyTotal = items.reduce(
     (total, item) => total + Number(item.base_unit_price) * item.quantity, 0,
-  );
+  ) + manualItems.reduce((total, item) => total + Number(item.price) * item.quantity, 0);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (manualName.trim() || manualPrice.trim()) {
+      setError('Нажмите «+ Добавить» для ручного лекарства перед созданием заказа'); return;
+    }
     setSubmitting(true); setError(''); setCreated('');
     const data = new FormData(event.currentTarget);
     const payload = {
@@ -57,6 +76,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       comment: String(data.get('comment') || '').trim(),
       source: String(data.get('source') || ''),
       items: items.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })),
+      ...(manualItems.length ? { manual_items: manualItems } : {}),
       ...(isCourier ? { pharmacy_id: Number(data.get('pharmacy_id')) } : {}),
     };
     const serialized = JSON.stringify(payload);
@@ -74,7 +94,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
       pendingRequest.current = null;
       setNotificationSent(result.data.notification_sent === true);
       setFormKey((value) => value + 1);
-      setItems([]); setResults([]); setQuery(''); setPharmacyId(null);
+      setItems([]); setManualItems([]); setResults([]); setQuery(''); setPharmacyId(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Не удалось сохранить заказ');
     } finally { setSubmitting(false); }
@@ -93,7 +113,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
         {isCourier && <label>Аптека
           <select name="pharmacy_id" required value={pharmacyId ?? ''} onChange={(event) => {
             const selected = Number(event.target.value) as 1 | 2;
-            setPharmacyId(selected); setItems([]); setResults([]); setQuery('');
+            setPharmacyId(selected); setItems([]); setManualItems([]); setResults([]); setQuery('');
           }}>
             <option value="" disabled>Выберите аптеку</option>
             <option value="1">Аптека 1</option>
@@ -103,7 +123,7 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
         {pharmacyId === 2 ? (
           <fieldset className="staff-medicine-picker">
             <legend>Лекарства</legend>
-            <p>Каталог аптеки 2 пока не подключён. Заказ можно создать без лекарств.</p>
+            <p>Каталог аптеки 2 пока не подключён. Лекарства можно вписать вручную.</p>
           </fieldset>
         ) : pharmacyId === 1 ? (
           <fieldset className="staff-medicine-picker">
@@ -134,6 +154,26 @@ export default function StaffOrderForm({ accountId, username }: { accountId: 1 |
             </div>}
           </fieldset>
         ) : null}
+        {pharmacyId !== null && <fieldset className="staff-medicine-picker">
+          <legend>Лекарство вне каталога</legend>
+          <p>Ручная позиция сохраняется только в заказе · цена без наценки</p>
+          <div className="staff-manual-entry">
+            <input aria-label="Название лекарства вне каталога" placeholder="Название лекарства" maxLength={200}
+              value={manualName} onChange={(event) => setManualName(event.target.value)} />
+            <input aria-label="Цена лекарства в сомони" type="number" inputMode="decimal" min="0.01" max="999999.99" step="0.01"
+              placeholder="Цена, с." value={manualPrice} onChange={(event) => setManualPrice(event.target.value)} />
+            <input aria-label="Количество лекарства" type="number" min={1} max={99} value={manualQuantity}
+              onChange={(event) => setManualQuantity(Number(event.target.value))} />
+            <button type="button" onClick={addManualMedicine}>+ Добавить</button>
+          </div>
+          {manualItems.length > 0 && <div className="staff-selected-items">
+            {manualItems.map((item, index) => <div key={`${item.medicine_name}-${index}`}>
+              <span><strong>{item.medicine_name}</strong><small>{Number(item.price).toFixed(2)} с. × {item.quantity}</small></span>
+              <button type="button" onClick={() => setManualItems((current) => current.filter((_, position) => position !== index))}>Убрать</button>
+            </div>)}
+            <div className="staff-pharmacy-total"><span>Сумма лекарств</span><strong>{pharmacyTotal.toFixed(2)} с.</strong></div>
+          </div>}
+        </fieldset>}
         <label>Имя клиента<input name="customer_name" maxLength={120} autoComplete="name" /></label>
         <label>Телефон <span>ровно 9 цифр</span><div className="staff-phone"><b>+992</b><input name="phone" required inputMode="numeric" pattern="[0-9]{9}" minLength={9} maxLength={9} placeholder="917123456" autoComplete="tel-national" /></div></label>
         <label>Адрес<input name="address" required minLength={3} maxLength={500} autoComplete="street-address" /></label>

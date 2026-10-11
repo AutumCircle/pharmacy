@@ -6,13 +6,40 @@ from unittest.mock import Mock, patch
 from decimal import Decimal
 
 from backend.v1.admin_api.lambda_function import (
-    add_courier_order_items, courier_earnings, list_courier_orders, update_courier_order_status,
+    add_courier_order_items, add_manual_order_items, courier_earnings, list_courier_orders, update_courier_order_status,
     update_order_delivery, update_order_item_price,
 )
 from backend.v1.shared.contract import ContractError
 
 
 class CourierOrderTests(unittest.TestCase):
+    def test_manual_item_adds_to_delivered_order_without_catalog_or_delivery_mutation(self):
+        cursor = Mock()
+        cursor.fetchone.side_effect = [
+            {'id': 7, 'status': 'delivered', 'items_subtotal': Decimal('10.00')},
+            {'id': 99}, {'total': Decimal('35.00')},
+        ]
+        with self._tx(cursor):
+            result = add_manual_order_items('ord_' + 'a' * 32,
+                {'manual_items': [{'medicine_name': 'Витамин X', 'price': '12.50', 'quantity': 2}]},
+                '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req', 'staff:3')
+        self.assertEqual(result['items_subtotal'], '35.00')
+        sql = ' '.join(call.args[0] for call in cursor.execute.call_args_list)
+        self.assertIn('jsonb_to_recordset', sql)
+        self.assertIn('SELECT %s, NULL, item.medicine_name', sql)
+        self.assertNotIn('UPDATE medicines', sql)
+        self.assertNotIn('delivery_courier_amount', sql)
+        self.assertIn('order.manual_items_added', str(cursor.execute.call_args_list))
+
+    def test_manual_item_rejects_cancelled_order_before_mutation(self):
+        cursor = Mock()
+        cursor.fetchone.return_value = {'id': 7, 'status': 'cancelled', 'items_subtotal': Decimal('0')}
+        with self._tx(cursor), self.assertRaises(ContractError):
+            add_manual_order_items('ord_' + 'a' * 32,
+                {'manual_items': [{'medicine_name': 'Витамин X', 'price': '12.50', 'quantity': 1}]},
+                '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req', 'admin')
+        self.assertEqual(cursor.execute.call_count, 1)
+
     def test_add_items_uses_catalog_prices_and_one_transaction(self):
         cursor = Mock()
         cursor.fetchone.side_effect = [

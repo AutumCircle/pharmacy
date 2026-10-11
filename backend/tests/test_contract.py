@@ -102,6 +102,18 @@ class IdempotencyTests(unittest.TestCase):
 
 
 class StaffOrderValidationTests(unittest.TestCase):
+    def test_manual_medicine_is_validated_and_normalized(self):
+        base = {"phone": "917123456", "address": "Айни 29", "landmark": "школа",
+                "source": "phone", "items": [], "pharmacy_id": 2}
+        result = validate_staff_order_request({**base, "manual_items": [
+            {"medicine_name": "  Витамин   X  ", "price": "12.50", "quantity": 2}]})
+        self.assertEqual(result["manual_items"], [
+            {"medicine_name": "Витамин X", "price": "12.50", "quantity": 2}])
+        for bad in ("0", "-1", "NaN", "12.345", "1000000", "inf"):
+            with self.assertRaises(ContractError):
+                validate_staff_order_request({**base, "manual_items": [
+                    {"medicine_name": "Витамин X", "price": bad, "quantity": 1}]})
+
     def test_accepts_optional_name_and_required_contact_fields(self):
         result = validate_staff_order_request({
             "customer_name": "", "phone": "917123456", "address": "Айни 29",

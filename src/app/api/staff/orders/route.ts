@@ -9,7 +9,7 @@ import type { CreateStaffOrderRequest } from '@/lib/api-v1/staff-types';
 function isRequest(value: unknown): value is CreateStaffOrderRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const body = value as Record<string, unknown>;
-  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'source', 'items', 'pharmacy_id', 'comment']);
+  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'source', 'items', 'manual_items', 'pharmacy_id', 'comment']);
   return Object.keys(body).every((key) => allowed.has(key))
     && (body.customer_name === undefined || typeof body.customer_name === 'string')
     && typeof body.phone === 'string' && /^\d{9}$/.test(body.phone)
@@ -18,6 +18,16 @@ function isRequest(value: unknown): value is CreateStaffOrderRequest {
     && ['instagram', 'whatsapp', 'phone'].includes(String(body.source))
     && (body.pharmacy_id === undefined || body.pharmacy_id === 1 || body.pharmacy_id === 2)
     && Array.isArray(body.items) && body.items.length <= 50
+    && (body.manual_items === undefined || Array.isArray(body.manual_items) && body.manual_items.length <= 20 &&
+      body.manual_items.every((item: unknown) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+        const fields = item as Record<string, unknown>;
+        return Object.keys(fields).length === 3 && typeof fields.medicine_name === 'string' &&
+          fields.medicine_name.trim().length >= 2 && fields.medicine_name.trim().length <= 200 &&
+          typeof fields.price === 'string' && /^\d{1,6}(?:\.\d{1,2})?$/.test(fields.price) &&
+          Number(fields.price) > 0 && Number.isInteger(fields.quantity) &&
+          Number(fields.quantity) >= 1 && Number(fields.quantity) <= 99;
+      }))
     && body.items.every((item) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
       const fields = item as Record<string, unknown>;

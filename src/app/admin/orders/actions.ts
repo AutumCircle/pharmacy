@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/admin-auth';
-import { addAdminOrderItems, deleteAdminOrder, searchAdminOrderMedicines, updateAdminOrderDelivery, updateAdminOrderItemPrice, updateAdminOrderStatus } from '@/lib/api-v1/admin-server';
+import { addAdminManualOrderItems, addAdminOrderItems, deleteAdminOrder, searchAdminOrderMedicines, updateAdminOrderDelivery, updateAdminOrderItemPrice, updateAdminOrderStatus } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import type { OrderStatus } from '@/lib/api-v1/types';
 
@@ -29,6 +29,25 @@ export async function addOrderMedicines(orderId: string, items: Array<{ medicine
     return { success: true as const, added: response.data.added, increased: response.data.quantity_increased };
   } catch (error) {
     return { success: false as const, error: error instanceof Error ? error.message : 'Не удалось добавить лекарства' };
+  }
+}
+
+export async function addManualOrderMedicine(orderId: string, item: { medicine_name: string; price: string; quantity: number }, idempotencyKey: string) {
+  try {
+    await requireAdminSession();
+    const price = Number(item.price);
+    if (item.medicine_name.trim().length < 2 || item.medicine_name.trim().length > 200 ||
+      !/^\d{1,6}(?:\.\d{1,2})?$/.test(item.price) || price <= 0 ||
+      !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99) {
+      throw new Error('Проверьте название, цену и количество');
+    }
+    const response = await addAdminManualOrderItems(orderId, [item], idempotencyKey);
+    revalidatePath('/admin');
+    revalidatePath('/admin/orders');
+    revalidatePath(`/admin/orders/${orderId}`);
+    return { success: true as const, added: response.data.added };
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : 'Не удалось добавить позицию' };
   }
 }
 

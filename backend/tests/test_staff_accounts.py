@@ -119,6 +119,29 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(order_insert.args[1][4], 'Позвонить перед выездом')
         self.assertNotIn('jsonb_to_recordset', ' '.join(call.args[0] for call in order_cursor.execute.call_args_list))
 
+    def test_courier_creates_pharmacy_two_order_with_manual_medicine(self):
+        courier = {**self.account, 'account_id': 3, 'username': 'courier', 'role': 'courier'}
+        order_cursor = Mock()
+        order_cursor.fetchone.side_effect = [
+            {'id': 1}, {'id': 12, 'public_id': 'ord_test', 'status': 'pending',
+                        'created_at': '2026-10-11T10:00:00Z'},
+        ]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            response, _, notification = create_staff_order({
+                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'школа', 'source': 'phone', 'pharmacy_id': 2, 'items': [],
+                'manual_items': [{'medicine_name': 'Витамин X', 'price': '12.50', 'quantity': 2}],
+            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+        self.assertEqual(response['order_total'], '25.00')
+        self.assertEqual(notification['items'][0]['medicine_id'], None)
+        self.assertEqual(notification['items'][0]['medicine_name'], 'Витамин X')
+        self.assertNotIn('FROM medicines WHERE', ' '.join(call.args[0] for call in order_cursor.execute.call_args_list))
+
     def test_courier_can_create_pharmacy_one_order_with_base_price_medicines(self):
         courier = {**self.account, 'account_id': 3, 'username': 'courier', 'role': 'courier'}
         order_cursor = Mock()

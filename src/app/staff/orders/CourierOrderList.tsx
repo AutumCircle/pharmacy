@@ -31,6 +31,38 @@ function OrderCard({ order }: { order: CourierOrder }) {
   const [itemBusy, setItemBusy] = useState(false);
   const [itemMessage, setItemMessage] = useState('');
   const itemRequestKey = useRef<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualPrice, setManualPrice] = useState('');
+  const [manualQuantity, setManualQuantity] = useState(1);
+  const [manualBusy, setManualBusy] = useState(false);
+  const manualRequestKey = useRef<string | null>(null);
+
+  async function saveManualMedicine() {
+    const price = manualPrice.replace(',', '.').trim();
+    if (manualName.trim().length < 2 || manualName.trim().length > 200 ||
+      !/^\d{1,6}(?:\.\d{1,2})?$/.test(price) || Number(price) <= 0 ||
+      !Number.isInteger(manualQuantity) || manualQuantity < 1 || manualQuantity > 99) {
+      setError('Проверьте название, цену и количество'); return;
+    }
+    if (status === 'delivered' && !window.confirm('Позиция добавится в доставленный заказ. Его сумма изменится задним числом, плата за доставку не изменится. Продолжить?')) return;
+    setManualBusy(true); setError(''); setItemMessage('');
+    if (!manualRequestKey.current) manualRequestKey.current = crypto.randomUUID();
+    try {
+      const response = await fetch(`/api/staff/orders/${encodeURIComponent(order.order_id)}/manual-items`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': manualRequestKey.current },
+        body: JSON.stringify({ manual_items: [{ medicine_name: manualName.trim(), price, quantity: manualQuantity }] }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error?.message || 'Не удалось добавить лекарство');
+      setItemMessage('Лекарство добавлено в заказ. В каталог оно не добавлено.');
+      setManualOpen(false); setManualName(''); setManualPrice(''); setManualQuantity(1);
+      manualRequestKey.current = null;
+      router.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Ошибка сети');
+    } finally { setManualBusy(false); }
+  }
 
   async function searchMedicines() {
     if (medicineQuery.trim().length < 2) { setError('Введите минимум 2 символа'); return; }
@@ -124,7 +156,24 @@ function OrderCard({ order }: { order: CourierOrder }) {
         <button type="button" className="courier-add-medicines" onClick={() => setEditingItems((value) => !value)}>
           {editingItems ? 'Закрыть' : '+ Добавить лекарства'}
         </button>}
-      {order.pharmacy_id === 2 && <p>Для аптеки 2 каталог пока не подключён.</p>}
+      {order.pharmacy_id === 2 && <p>Каталог аптеки 2 пока не подключён. Лекарство можно добавить вручную.</p>}
+      {status !== 'cancelled' && <button type="button" className="courier-add-medicines" onClick={() => setManualOpen((value) => !value)}>
+        {manualOpen ? 'Закрыть ручной ввод' : '+ Лекарство вне каталога'}
+      </button>}
+      {manualOpen && <div className="courier-medicine-editor">
+        <p>Ручная позиция только для этого заказа · цена без наценки</p>
+        <div className="staff-manual-entry">
+          <input aria-label="Название лекарства вне каталога" placeholder="Название лекарства" maxLength={200}
+            value={manualName} onChange={(event) => { setManualName(event.target.value); manualRequestKey.current = null; }} />
+          <input aria-label="Цена лекарства в сомони" type="number" inputMode="decimal" min="0.01" max="999999.99" step="0.01"
+            placeholder="Цена, с." value={manualPrice} onChange={(event) => { setManualPrice(event.target.value); manualRequestKey.current = null; }} />
+          <input aria-label="Количество лекарства" type="number" min={1} max={99} value={manualQuantity}
+            onChange={(event) => { setManualQuantity(Number(event.target.value)); manualRequestKey.current = null; }} />
+        </div>
+        <button type="button" className="staff-submit" disabled={manualBusy} onClick={saveManualMedicine}>
+          {manualBusy ? 'Сохраняем…' : 'Добавить в заказ'}
+        </button>
+      </div>}
       {itemMessage && <p className="staff-order-success" role="status">{itemMessage}</p>}
       {editingItems && <div className="courier-medicine-editor">
         <div className="staff-search"><input aria-label="Название лекарства" value={medicineQuery}

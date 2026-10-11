@@ -184,6 +184,12 @@ export function addAdminOrderItems(orderId: string, items: Array<{ medicine_id: 
   });
 }
 
+export function addAdminManualOrderItems(orderId: string, manualItems: Array<{ medicine_name: string; price: string; quantity: number }>, idempotencyKey: string): Promise<ApiSuccessResponse<{ added: number; items_subtotal: string }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/manual-items`, {
+    method: 'POST', body: { manual_items: manualItems }, headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
 export function updateAdminOrderStatus(
   orderId: string,
   status: OrderStatus,

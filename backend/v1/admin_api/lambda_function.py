@@ -24,6 +24,7 @@ from backend.v1.shared.contract import (
     calculate_selling_unit_price,
     normalize_phone,
     validate_idempotency_key,
+    validate_manual_order_items,
     validate_staff_order_request,
     validate_status_transition,
 )
@@ -919,6 +920,19 @@ def create_staff_order(
                     "selling_unit_price": str(selling_price), "base_line_total": str(base_line_total),
                     "line_total": str(selling_line_total),
                 })
+        for manual in request.get("manual_items", []):
+            price = Decimal(manual["price"])
+            line_total = price * manual["quantity"]
+            base_total += line_total
+            selling_total += line_total
+            order_items.append({
+                "medicine_id": None, "medicine_name": manual["medicine_name"],
+                "quantity": manual["quantity"], "base_unit_price": str(price),
+                "selling_unit_price": str(price), "base_line_total": str(line_total),
+                "line_total": str(line_total),
+            })
+        if selling_total > Decimal("99999999.99"):
+            raise ContractError("VALIDATION_ERROR", "Сумма заказа слишком велика")
 
         public_id = f"ord_{uuid4().hex}"
         cur.execute(
@@ -1171,6 +1185,65 @@ def add_courier_order_items(
                            action="courier.order.items_added" if actor_id == "staff:3" else "admin.order.items_added",
                            resource_type="order", resource_id=order_id, request=current_request_id,
                            details={"items": requested, "old_subtotal": str(order["items_subtotal"]),
+                                    "new_subtotal": str(total), "status": order["status"]})
+    return result
+
+
+def add_manual_order_items(
+    order_id: str, payload: dict[str, Any], idempotency_key: str,
+    current_request_id: str, actor_id: str,
+) -> dict[str, Any]:
+    """Append order-only snapshots; never create or modify catalogue medicines."""
+    if not isinstance(payload, dict) or set(payload) != {"manual_items"}:
+        raise ContractError("VALIDATION_ERROR", "Укажите ручные позиции")
+    manual_items = validate_manual_order_items(payload["manual_items"])
+    normalized_key = validate_idempotency_key(idempotency_key)
+    request_hash = hashlib.sha256(json.dumps({"order_id": order_id, "manual_items": manual_items},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+    lookup, lookup_values = _order_lookup(order_id)
+    with transaction() as cur:
+        cur.execute(f"""SELECT id, status, items_subtotal FROM orders
+                       WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
+        order = cur.fetchone()
+        if not order:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        if order["status"] == "cancelled":
+            raise ContractError("ORDER_STATUS_CONFLICT", "Отменённый заказ нельзя изменить", http_status=409)
+        cur.execute("""INSERT INTO order_idempotency (idempotency_key, request_hash)
+                       VALUES (%s, %s) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id""",
+                    (normalized_key, request_hash))
+        if not cur.fetchone():
+            cur.execute("""SELECT request_hash, response_body FROM order_idempotency
+                           WHERE idempotency_key = %s FOR UPDATE""", (normalized_key,))
+            existing = cur.fetchone()
+            if not existing or existing["request_hash"] != request_hash:
+                raise ContractError("IDEMPOTENCY_CONFLICT", "Ключ уже использован для другого запроса", http_status=409)
+            if existing["response_body"] is None:
+                raise ContractError("IDEMPOTENCY_IN_PROGRESS", "Заказ ещё обновляется", http_status=409)
+            return existing["response_body"]
+        records = [{"medicine_name": item["medicine_name"], "quantity": item["quantity"],
+                    "price": item["price"], "line_total": str(Decimal(item["price"]) * item["quantity"])}
+                   for item in manual_items]
+        cur.execute("""INSERT INTO order_items (order_id, medicine_id, medicine_name, price, quantity,
+                       base_unit_price, selling_unit_price, line_total)
+                       SELECT %s, NULL, item.medicine_name, item.price, item.quantity,
+                              item.price, item.price, item.line_total
+                       FROM jsonb_to_recordset(%s::jsonb) AS item(
+                           medicine_name text, quantity integer, price numeric, line_total numeric)""",
+                    (order["id"], json.dumps(records, ensure_ascii=False)))
+        cur.execute("SELECT COALESCE(SUM(line_total), 0) AS total FROM order_items WHERE order_id = %s", (order["id"],))
+        total = cur.fetchone()["total"]
+        if total > Decimal("99999999.99"):
+            raise ContractError("VALIDATION_ERROR", "Сумма заказа слишком велика")
+        cur.execute("UPDATE orders SET items_subtotal = %s, order_total = %s, total_price = %s WHERE id = %s",
+                    (total, total, total, order["id"]))
+        result = {"order_id": order_id, "added": len(records), "items_subtotal": str(total), "currency": "TJS"}
+        cur.execute("""UPDATE order_idempotency SET order_id = %s, response_status = 200,
+                       response_body = %s::jsonb, completed_at = CURRENT_TIMESTAMP
+                       WHERE idempotency_key = %s""", (order["id"], json.dumps(result), normalized_key))
+        _write_admin_audit(cur, actor_id=actor_id, action="order.manual_items_added",
+                           resource_type="order", resource_id=order_id, request=current_request_id,
+                           details={"manual_items": manual_items, "old_subtotal": str(order["items_subtotal"]),
                                     "new_subtotal": str(total), "status": order["status"]})
     return result
 
@@ -3155,6 +3228,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
                 return success(add_courier_order_items(items_match.group(1), _body(event),
                     str(headers.get("idempotency-key") or ""), current_request_id), request=current_request_id)
+            manual_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/manual-items", staff_path)
+            if staff_method == "POST" and manual_match:
+                staff_accounts.session_account(event, courier=True)
+                headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
+                return success(add_manual_order_items(manual_match.group(1), _body(event),
+                    str(headers.get("idempotency-key") or ""), current_request_id, "staff:3"), request=current_request_id)
             status_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/status", staff_path)
             if staff_method == "PATCH" and status_match:
                 staff_accounts.session_account(event, courier=True)
@@ -3222,6 +3301,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 raise ContractError("VALIDATION_ERROR", "Неверный номер заказа")
             headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
             return success(add_courier_order_items(tail[1], _body(event),
+                str(headers.get("idempotency-key") or ""), current_request_id, actor_id), request=current_request_id)
+        if method == "POST" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "manual-items":
+            if not re.fullmatch(r"ord_[0-9a-f]{32}|legacy_[1-9][0-9]*", tail[1]):
+                raise ContractError("VALIDATION_ERROR", "Неверный номер заказа")
+            headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
+            return success(add_manual_order_items(tail[1], _body(event),
                 str(headers.get("idempotency-key") or ""), current_request_id, actor_id), request=current_request_id)
         if method == "PATCH" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "status":
             payload = _body(event)

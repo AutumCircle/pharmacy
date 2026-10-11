@@ -95,6 +95,14 @@ export function addCourierOrderItems(token: string, orderId: string,
   );
 }
 
+export function addCourierManualOrderItems(token: string, orderId: string,
+  manualItems: Array<{ medicine_name: string; price: string; quantity: number }>, idempotencyKey: string) {
+  return request<ApiSuccessResponse<{ order_id: string; added: number; items_subtotal: string; currency: 'TJS' }>>(
+    `orders/${encodeURIComponent(orderId)}/manual-items`,
+    { token, method: 'POST', body: { manual_items: manualItems }, idempotencyKey },
+  );
+}
+
 export function listPharmacyPreparationOrders(token: string, values: { cursor?: string; limit?: number } = {}) {
   const params = new URLSearchParams({ limit: String(values.limit ?? 20) });
   if (values.cursor) params.set('cursor', values.cursor);
