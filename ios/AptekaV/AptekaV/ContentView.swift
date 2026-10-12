@@ -7,15 +7,18 @@
 
 import SwiftUI
 
+/// Temporary root: the card-style gallery for design review.
+/// Will be replaced by the real tab-based app shell.
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundColor(.accentColor)
-            Text("Hello, world!")
-        }
-        .padding()
+        #if DEBUG
+        // Launch argument `-cardStyle N` opens option N (used for simulator screenshots).
+        CardGalleryView(
+            initialStyle: MedicineCardStyle(rawValue: UserDefaults.standard.integer(forKey: "cardStyle")) ?? .classic
+        )
+        #else
+        Text("Аптека «Ватан»")
+        #endif
     }
 }
 

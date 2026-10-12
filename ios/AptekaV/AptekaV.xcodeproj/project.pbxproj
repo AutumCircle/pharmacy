@@ -14,6 +14,12 @@
 		8B012B18307D0592005277E3 /* AptekaVTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B17307D0592005277E3 /* AptekaVTests.swift */; };
 		8B012B22307D0593005277E3 /* AptekaVUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B21307D0593005277E3 /* AptekaVUITests.swift */; };
 		8B012B24307D0593005277E3 /* AptekaVUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B23307D0593005277E3 /* AptekaVUITestsLaunchTests.swift */; };
+		8B012B32307D0600005277E3 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B31307D0600005277E3 /* Theme.swift */; };
+		8B012B35307D0600005277E3 /* Medicine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B34307D0600005277E3 /* Medicine.swift */; };
+		8B012B38307D0600005277E3 /* MedicineCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B37307D0600005277E3 /* MedicineCardView.swift */; };
+		8B012B3B307D0600005277E3 /* CardGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B3A307D0600005277E3 /* CardGalleryView.swift */; };
+		8B012B3D307D0600005277E3 /* MedicineCardComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B3C307D0600005277E3 /* MedicineCardComponents.swift */; };
+		8B012B3F307D0600005277E3 /* MedicineCardStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B012B3E307D0600005277E3 /* MedicineCardStyles.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,6 +50,12 @@
 		8B012B1D307D0593005277E3 /* AptekaVUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AptekaVUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B012B21307D0593005277E3 /* AptekaVUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AptekaVUITests.swift; sourceTree = "<group>"; };
 		8B012B23307D0593005277E3 /* AptekaVUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AptekaVUITestsLaunchTests.swift; sourceTree = "<group>"; };
+		8B012B31307D0600005277E3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		8B012B34307D0600005277E3 /* Medicine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Medicine.swift; sourceTree = "<group>"; };
+		8B012B37307D0600005277E3 /* MedicineCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicineCardView.swift; sourceTree = "<group>"; };
+		8B012B3A307D0600005277E3 /* CardGalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardGalleryView.swift; sourceTree = "<group>"; };
+		8B012B3C307D0600005277E3 /* MedicineCardComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicineCardComponents.swift; sourceTree = "<group>"; };
+		8B012B3E307D0600005277E3 /* MedicineCardStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicineCardStyles.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -96,6 +108,9 @@
 			children = (
 				8B012B06307D0592005277E3 /* AptekaVApp.swift */,
 				8B012B08307D0592005277E3 /* ContentView.swift */,
+				8B012B36307D0600005277E3 /* Views */,
+				8B012B33307D0600005277E3 /* Models */,
+				8B012B30307D0600005277E3 /* Theme */,
 				8B012B0A307D0592005277E3 /* Assets.xcassets */,
 				8B012B0C307D0592005277E3 /* Preview Content */,
 			);
@@ -125,6 +140,41 @@
 				8B012B23307D0593005277E3 /* AptekaVUITestsLaunchTests.swift */,
 			);
 			path = AptekaVUITests;
+			sourceTree = "<group>";
+		};
+		8B012B30307D0600005277E3 /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				8B012B31307D0600005277E3 /* Theme.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		8B012B33307D0600005277E3 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				8B012B34307D0600005277E3 /* Medicine.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		8B012B36307D0600005277E3 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				8B012B39307D0600005277E3 /* Cards */,
+				8B012B3A307D0600005277E3 /* CardGalleryView.swift */,
+				8B012B37307D0600005277E3 /* MedicineCardView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		8B012B39307D0600005277E3 /* Cards */ = {
+			isa = PBXGroup;
+			children = (
+				8B012B3C307D0600005277E3 /* MedicineCardComponents.swift */,
+				8B012B3E307D0600005277E3 /* MedicineCardStyles.swift */,
+			);
+			path = Cards;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -258,6 +308,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				8B012B09307D0592005277E3 /* ContentView.swift in Sources */,
+				8B012B3F307D0600005277E3 /* MedicineCardStyles.swift in Sources */,
+				8B012B3D307D0600005277E3 /* MedicineCardComponents.swift in Sources */,
+				8B012B3B307D0600005277E3 /* CardGalleryView.swift in Sources */,
+				8B012B38307D0600005277E3 /* MedicineCardView.swift in Sources */,
+				8B012B35307D0600005277E3 /* Medicine.swift in Sources */,
+				8B012B32307D0600005277E3 /* Theme.swift in Sources */,
 				8B012B07307D0592005277E3 /* AptekaVApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
