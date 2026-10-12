@@ -10,6 +10,8 @@ struct TabBarGalleryView: View {
     @State private var cart: [Int: Int] = [Medicine.sampleLongName.id: 2, Medicine.sampleInStock.id: 1]
     @State private var favorites: Set<Int> = [Medicine.sampleLongName.id, Medicine.sampleWithPhoto.id]
     @State private var showComparison = false
+    @State private var searchBarStyle: SearchBarStyle
+    @State private var showSearchBarComparison = false
 
     private let initialCardStyle: MedicineCardStyle
 
@@ -20,8 +22,13 @@ struct TabBarGalleryView: View {
         .sampleOutOfStock,
     ]
 
-    init(initialStyle: TabBarStyle = .liquidGlass, initialCardStyle: MedicineCardStyle = .classic) {
+    init(
+        initialStyle: TabBarStyle = .liquidGlass,
+        initialCardStyle: MedicineCardStyle = .classic,
+        initialSearchBarStyle: SearchBarStyle = .system
+    ) {
         _style = State(initialValue: initialStyle)
+        _searchBarStyle = State(initialValue: initialSearchBarStyle)
         self.initialCardStyle = initialCardStyle
     }
 
@@ -44,13 +51,30 @@ struct TabBarGalleryView: View {
                         }
                 }
             }
+            .sheet(isPresented: $showSearchBarComparison) {
+                NavigationStack {
+                    SearchBarComparisonView()
+                        .navigationTitle("Все поиски")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Готово") { showSearchBarComparison = false }
+                            }
+                        }
+                }
+            }
     }
 
     @ViewBuilder
     private var tabContent: some View {
         switch selection {
         case .home:
-            HomeView(cart: $cart, favorites: $favorites, trailingToolbarItem: AnyView(styleMenu))
+            HomeView(
+                cart: $cart,
+                favorites: $favorites,
+                trailingToolbarItem: AnyView(homeToolbarMenus),
+                searchBarStyle: searchBarStyle
+            )
         case .catalog:
             CardGalleryView(initialStyle: initialCardStyle)
         case .cart:
@@ -83,9 +107,42 @@ struct TabBarGalleryView: View {
         }
     }
 
-    // MARK: Style menu
+    // MARK: Style menus
+
+    /// The red header style turns the navigation bar red, so its menu icons switch to white.
+    private var homeToolbarMenus: some View {
+        let tint = searchBarStyle.hasBrandNavigationBar ? Color.white : Theme.brandPrimary
+        return HStack(spacing: 0) {
+            searchBarMenu(tint: tint)
+            styleMenu(tint: tint)
+        }
+    }
+
+    private func searchBarMenu(tint: Color) -> some View {
+        Menu {
+            Picker("Вариант поиска", selection: $searchBarStyle) {
+                ForEach(SearchBarStyle.allCases) { option in
+                    Text("\(option.rawValue). \(option.title)").tag(option)
+                }
+            }
+            Button {
+                showSearchBarComparison = true
+            } label: {
+                Label("Сравнить все поиски", systemImage: "square.stack")
+            }
+        } label: {
+            Image(systemName: "rectangle.topthird.inset.filled")
+                .foregroundColor(tint)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel("Вариант поиска")
+    }
 
     private var styleMenu: some View {
+        styleMenu(tint: Theme.brandPrimary)
+    }
+
+    private func styleMenu(tint: Color) -> some View {
         Menu {
             Picker("Вариант панели", selection: $style) {
                 ForEach(TabBarStyle.allCases) { option in
@@ -99,7 +156,7 @@ struct TabBarGalleryView: View {
             }
         } label: {
             Image(systemName: "rectangle.bottomthird.inset.filled")
-                .foregroundColor(Theme.brandPrimary)
+                .foregroundColor(tint)
                 .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityLabel("Вариант панели навигации")

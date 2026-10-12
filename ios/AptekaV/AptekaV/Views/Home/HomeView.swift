@@ -8,19 +8,17 @@ struct HomeView: View {
     @Binding var favorites: Set<Int>
     /// Optional trailing navigation bar item (the design-review shell puts its style menu here).
     var trailingToolbarItem: AnyView?
+    /// Search bar design under review; `.system` is the native `.searchable` field.
+    var searchBarStyle: SearchBarStyle = .system
 
     var body: some View {
         NavigationStack {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.surfacePage.ignoresSafeArea())
+                .background(background)
                 .navigationTitle("Аптека «Ватан»")
                 .navigationBarTitleDisplayMode(.inline)
-                .searchable(
-                    text: $search.query,
-                    placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "Поиск лекарств"
-                )
+                .appSearchBar(style: searchBarStyle, text: $search.query, prompt: "Поиск лекарств")
                 .autocorrectionDisabled()
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
@@ -37,6 +35,15 @@ struct HomeView: View {
                 }
         }
         .tint(Theme.brandPrimary)
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        if searchBarStyle.isGlass {
+            GlassBackdrop()
+        } else {
+            Theme.surfacePage.ignoresSafeArea()
+        }
     }
 
     @ViewBuilder

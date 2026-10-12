@@ -15,10 +15,12 @@ struct ContentView: View {
 
     var body: some View {
         #if DEBUG
-        // Launch arguments `-tabBarStyle N` and `-cardStyle N` open option N (used for simulator screenshots).
+        // Launch arguments `-tabBarStyle N`, `-cardStyle N` and `-searchBarStyle N` open option N
+        // (used for simulator screenshots).
         TabBarGalleryView(
             initialStyle: TabBarStyle(rawValue: UserDefaults.standard.integer(forKey: "tabBarStyle")) ?? .liquidGlass,
-            initialCardStyle: MedicineCardStyle(rawValue: UserDefaults.standard.integer(forKey: "cardStyle")) ?? .classic
+            initialCardStyle: MedicineCardStyle(rawValue: UserDefaults.standard.integer(forKey: "cardStyle")) ?? .classic,
+            initialSearchBarStyle: SearchBarStyle(rawValue: UserDefaults.standard.integer(forKey: "searchBarStyle")) ?? .system
         )
         #else
         HomeView(cart: $cart, favorites: $favorites)
