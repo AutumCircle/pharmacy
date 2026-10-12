@@ -28,6 +28,7 @@ import type {
   AdminNumberedListResponse,
   AdminOrderDetail,
   AdminOrderSummary,
+  DeliveredDayResponse,
   AdminPricingSettings,
   AdminContactSettings,
   AdminNotificationSettings,
@@ -174,6 +175,10 @@ export function listAdminOrders(values: {
 
 export function getAdminOrder(orderId: string): Promise<ApiSuccessResponse<AdminOrderDetail>> {
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}`);
+}
+
+export function listDeliveredAdminOrdersByDay(date: string, cursor?: string): Promise<DeliveredDayResponse> {
+  return request(`/v1/admin/orders/delivered-day${queryString({ date, cursor, limit: 30 })}`);
 }
 
 export function searchAdminOrderMedicines(query: string): Promise<AdminNumberedListResponse<StaffOrderMedicine>> {

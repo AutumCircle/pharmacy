@@ -33,7 +33,7 @@ export default function OrderEarningsPanel({ summary, days, compact = false }: P
         </div>
         <nav className="order-earnings-periods" aria-label="Период финансов">
           {[7, 30, 90].map((period) => (
-            <Link key={period} href={`${compact ? '/admin' : '/admin/orders'}?days=${period}`}
+            <Link key={period} href={compact ? `/admin?days=${period}` : `/admin/orders?view=finance&days=${period}`}
               className={period === days ? 'active' : ''}>{period} дней</Link>
           ))}
         </nav>

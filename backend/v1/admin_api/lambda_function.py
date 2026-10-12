@@ -9,11 +9,12 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote, urlparse
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import boto3
 import psycopg2
@@ -1654,6 +1655,94 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
         row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
         row.pop("id")
     return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
+
+
+DELIVERED_DAY_CTE = """
+    WITH delivery_history AS (
+        SELECT h.order_id, MAX(h.created_at) AS delivered_at
+        FROM order_status_history h
+        JOIN orders existing ON existing.id = h.order_id
+        WHERE h.to_status = 'delivered' AND existing.status = 'delivered'
+          AND existing.deleted_at IS NULL
+        GROUP BY h.order_id
+    ), eligible AS (
+        SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
+               o.address, o.order_total, o.currency, o.created_at, o.order_source,
+               o.created_by_staff_account_id, o.fulfillment_pharmacy_id,
+               COALESCE(h.delivered_at, o.created_at) AS delivered_at
+        FROM orders o
+        LEFT JOIN delivery_history h ON h.order_id = o.id
+        WHERE o.status = 'delivered' AND o.deleted_at IS NULL
+    )
+"""
+
+
+def delivered_orders_by_day(query: dict[str, Any]) -> dict[str, Any]:
+    """One Dushanbe calendar day, counted independently of the paginated list."""
+    if set(query) - {"date", "limit", "cursor"}:
+        raise ContractError("VALIDATION_ERROR", "Неизвестный параметр фильтра")
+    raw_date = query.get("date")
+    if raw_date is None:
+        selected = datetime.now(ZoneInfo("Asia/Dushanbe")).date()
+    elif isinstance(raw_date, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_date):
+        try:
+            selected = date.fromisoformat(raw_date)
+        except ValueError as exc:
+            raise ContractError("VALIDATION_ERROR", "Неверная дата") from exc
+    else:
+        raise ContractError("VALIDATION_ERROR", "Неверная дата")
+    if not 2020 <= selected.year <= 2100:
+        raise ContractError("VALIDATION_ERROR", "Дата вне допустимого диапазона")
+    start = datetime.combine(selected, time.min, tzinfo=ZoneInfo("Asia/Dushanbe"))
+    end = start + timedelta(days=1)
+    limit = min(_limit(query), 50)
+    cursor = _decode_cursor(query.get("cursor"))
+    page_clause = ""
+    page_params: list[Any] = [start, end]
+    if cursor:
+        try:
+            if set(cursor) != {"delivered_at", "id"} or type(cursor["id"]) is not int or cursor["id"] <= 0:
+                raise ValueError()
+            cursor_time = datetime.fromisoformat(cursor["delivered_at"])
+            if cursor_time.tzinfo is None or not start <= cursor_time < end:
+                raise ValueError()
+        except (TypeError, ValueError) as exc:
+            raise ContractError("VALIDATION_ERROR", "Неверная страница") from exc
+        page_clause = "AND (e.delivered_at, e.id) < (%s, %s)"
+        page_params.extend([cursor_time, cursor["id"]])
+    page_params.append(limit + 1)
+    with transaction() as cur:
+        cur.execute(DELIVERED_DAY_CTE + """
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id IS NULL) AS website,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id = 3) AS courier,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id IN (1, 2)) AS pharmacy,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id = 3 AND order_source = 'whatsapp') AS whatsapp,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id = 3 AND order_source = 'instagram') AS instagram,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id = 3 AND order_source = 'phone') AS phone
+            FROM eligible WHERE delivered_at >= %s AND delivered_at < %s
+        """, (start, end))
+        summary = {key: int(value or 0) for key, value in dict(cur.fetchone()).items()}
+        cur.execute(DELIVERED_DAY_CTE + f"""
+            SELECT e.*, sa.username AS created_by_staff_username
+            FROM eligible e
+            LEFT JOIN staff_accounts sa ON sa.account_id = e.created_by_staff_account_id
+            WHERE e.delivered_at >= %s AND e.delivered_at < %s
+            {page_clause}
+            ORDER BY e.delivered_at DESC, e.id DESC LIMIT %s
+        """, tuple(page_params))
+        rows = [dict(row) for row in cur.fetchall()]
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        next_cursor = _encode_cursor({"delivered_at": last["delivered_at"].isoformat(), "id": last["id"]})
+    for row in rows:
+        internal_id = row.pop("id")
+        row["order_id"] = row.pop("public_id") or f"legacy_{internal_id}"
+    return {"date": selected.isoformat(), "time_zone": "Asia/Dushanbe", "summary": summary,
+            "data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
 def get_order(order_id: str) -> dict[str, Any]:
@@ -3505,6 +3594,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(list_medicine_duplicates(query), request=current_request_id)
         if method == "GET" and path.endswith("/admin/orders"):
             return success_document(list_orders(query), request=current_request_id)
+        if method == "GET" and tail == ["orders", "delivered-day"]:
+            return success_document(delivered_orders_by_day(query), request=current_request_id)
         if method == "GET" and len(tail) == 2 and tail[0] == "orders":
             return success(get_order(tail[1]), request=current_request_id)
         if method == "POST" and len(tail) == 3 and tail[0] == "orders" and tail[2] == "items":

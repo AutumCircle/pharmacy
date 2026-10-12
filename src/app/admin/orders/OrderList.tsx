@@ -38,12 +38,9 @@ const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Т�
 export default function OrderList({ initialOrders }: { initialOrders: AdminOrderSummary[] }) {
   const router = useRouter();
   const [orderRows, setOrderRows] = useState(initialOrders);
-  const [filter, setFilter] = useState<'all' | OrderStatus>('all');
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const orders = filter === 'all'
-    ? orderRows
-    : orderRows.filter((order) => order.status === filter);
+  const orders = orderRows;
 
   const changeStatus = async (order: AdminOrderSummary, next: OrderStatus) => {
     let reason: string | undefined;
@@ -68,15 +65,6 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
   return (
     <div>
       {message && <div style={{ color: '#c62828', marginBottom: 16 }}>{message}</div>}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 30, flexWrap: 'wrap' }}>
-        <button onClick={() => setFilter('all')} style={{ padding: '8px 16px' }}>Все</button>
-        {(Object.keys(labels) as OrderStatus[]).map((status) => (
-          <button key={status} onClick={() => setFilter(status)} style={{ padding: '8px 16px' }}>
-            {labels[status]}
-          </button>
-        ))}
-      </div>
-
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {orders.length === 0 && <div style={{ padding: 40, textAlign: 'center' }}>Заказов нет</div>}
         {orders.map((order) => (

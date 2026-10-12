@@ -353,6 +353,32 @@ export type CollectionUtmOrders = {
   orders_total: number | string;
 };
 
+export type DeliveredDayOrder = {
+  order_id: string;
+  order_reference: string | null;
+  customer_name: string | null;
+  phone: string;
+  address: string;
+  order_total: number | string | null;
+  currency: 'TJS';
+  created_at: string;
+  delivered_at: string;
+  order_source: 'instagram' | 'whatsapp' | 'phone' | null;
+  created_by_staff_account_id: 1 | 2 | 3 | null;
+  fulfillment_pharmacy_id: 1 | 2 | null;
+  created_by_staff_username: string | null;
+};
+
+export type DeliveredDayResponse = {
+  date: string;
+  time_zone: 'Asia/Dushanbe';
+  summary: { total: number; website: number; courier: number; pharmacy: number;
+    whatsapp: number; instagram: number; phone: number };
+  data: DeliveredDayOrder[];
+  page: CursorPage;
+  request_id: string;
+};
+
 export type NotificationField = 'order_reference' | 'created_at' | 'source' | 'customer_name' | 'phone' |
   'address' | 'landmark' | 'comment' | 'items' | 'quantity' | 'item_client_total' | 'item_base_total' | 'client_total' |
   'base_total' | 'profit' | 'creator' | 'status';
