@@ -3,9 +3,11 @@ import SwiftUI
 /// Main screen: a search bar that queries the live catalogue through `/api/search`.
 struct HomeView: View {
     @StateObject private var search = SearchViewModel()
-    // Session-only state until the shared cart/favourites stores exist.
-    @State private var cart: [Int: Int] = [:]
-    @State private var favorites: Set<Int> = []
+    // Owned by the app shell until the shared cart/favourites stores exist.
+    @Binding var cart: [Int: Int]
+    @Binding var favorites: Set<Int>
+    /// Optional trailing navigation bar item (the design-review shell puts its style menu here).
+    var trailingToolbarItem: AnyView?
 
     var body: some View {
         NavigationStack {
@@ -20,6 +22,13 @@ struct HomeView: View {
                     prompt: "Поиск лекарств"
                 )
                 .autocorrectionDisabled()
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        if let item = trailingToolbarItem {
+                            item
+                        }
+                    }
+                }
                 .task(id: search.query) {
                     await search.queryChanged()
                 }
@@ -153,6 +162,6 @@ struct HomeView: View {
 
 struct HomeView_Previews: PreviewProvider {
     static var previews: some View {
-        HomeView()
+        HomeView(cart: .constant([:]), favorites: .constant([]))
     }
 }

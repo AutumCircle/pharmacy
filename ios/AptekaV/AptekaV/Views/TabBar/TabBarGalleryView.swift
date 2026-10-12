@@ -2,12 +2,14 @@ import SwiftUI
 
 #if DEBUG
 /// Temporary review shell: pick a bottom navigation style and tap through the tabs.
-/// «Каталог» hosts the card gallery so both reviews stay reachable. Local sample data only.
+/// «Главная» is the real live-search screen; «Каталог» hosts the card gallery so both reviews
+/// stay reachable. The other tabs use local sample data only.
 struct TabBarGalleryView: View {
     @State private var style: TabBarStyle
     @State private var selection: AppTab = .home
     @State private var cart: [Int: Int] = [Medicine.sampleLongName.id: 2, Medicine.sampleInStock.id: 1]
     @State private var favorites: Set<Int> = [Medicine.sampleLongName.id, Medicine.sampleWithPhoto.id]
+    @State private var showComparison = false
 
     private let initialCardStyle: MedicineCardStyle
 
@@ -30,19 +32,25 @@ struct TabBarGalleryView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 AppTabBar(style: style, selection: $selection, cartCount: cartCount)
             }
+            .sheet(isPresented: $showComparison) {
+                NavigationStack {
+                    TabBarComparisonView()
+                        .navigationTitle("Все панели")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Готово") { showComparison = false }
+                            }
+                        }
+                }
+            }
     }
 
     @ViewBuilder
     private var tabContent: some View {
         switch selection {
         case .home:
-            screen("Аптека «Ватан»") {
-                stylePicker
-                Text("Популярное")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(Theme.textPrimary)
-                grid(medicines)
-            }
+            HomeView(cart: $cart, favorites: $favorites, trailingToolbarItem: AnyView(styleMenu))
         case .catalog:
             CardGalleryView(initialStyle: initialCardStyle)
         case .cart:
@@ -75,45 +83,7 @@ struct TabBarGalleryView: View {
         }
     }
 
-    // MARK: Style picker
-
-    private var stylePicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Панель навигации")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(Theme.textSecondary)
-            Picker("Вариант панели", selection: $style.animation(.easeInOut(duration: 0.25))) {
-                ForEach(TabBarStyle.allCases) { option in
-                    Text("\(option.rawValue)").tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Text("\(style.rawValue). \(style.title)")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(Theme.textPrimary)
-            Text(style.summary)
-                .font(.system(size: 14))
-                .foregroundColor(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            NavigationLink {
-                TabBarComparisonView()
-                    .navigationTitle("Все панели")
-                    .navigationBarTitleDisplayMode(.inline)
-            } label: {
-                Label("Сравнить все панели", systemImage: "square.stack")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(Theme.brandPrimary)
-                    .frame(minHeight: 44)
-            }
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(style.isGlass ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Theme.surfaceCard))
-        )
-    }
+    // MARK: Style menu
 
     private var styleMenu: some View {
         Menu {
@@ -121,6 +91,11 @@ struct TabBarGalleryView: View {
                 ForEach(TabBarStyle.allCases) { option in
                     Text("\(option.rawValue). \(option.title)").tag(option)
                 }
+            }
+            Button {
+                showComparison = true
+            } label: {
+                Label("Сравнить все панели", systemImage: "square.stack")
             }
         } label: {
             Image(systemName: "rectangle.bottomthird.inset.filled")

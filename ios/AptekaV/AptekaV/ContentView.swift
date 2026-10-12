@@ -7,9 +7,12 @@
 
 import SwiftUI
 
-/// Temporary root: the tab bar and card style galleries for design review.
-/// Will be replaced by the real tab-based app shell.
+/// Debug: the tab bar design-review shell, whose «Главная» tab is the live-search home screen.
+/// Release: the home screen alone, until the real tab-based app shell replaces both.
 struct ContentView: View {
+    @State private var cart: [Int: Int] = [:]
+    @State private var favorites: Set<Int> = []
+
     var body: some View {
         #if DEBUG
         // Launch arguments `-tabBarStyle N` and `-cardStyle N` open option N (used for simulator screenshots).
@@ -18,7 +21,7 @@ struct ContentView: View {
             initialCardStyle: MedicineCardStyle(rawValue: UserDefaults.standard.integer(forKey: "cardStyle")) ?? .classic
         )
         #else
-        Text("Аптека «Ватан»")
+        HomeView(cart: $cart, favorites: $favorites)
         #endif
     }
 }
