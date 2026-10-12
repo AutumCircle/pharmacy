@@ -60,3 +60,8 @@ next-env.d.ts
 # Development-only banner images and settings, never deploy.
 .local-banners/
 .staff-bootstrap/
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
