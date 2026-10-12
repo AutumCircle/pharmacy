@@ -42,6 +42,7 @@ from backend.v1.shared.order_notification_settings import (
     CHANNELS as NOTIFICATION_CHANNELS, effective_settings, validate_update,
 )
 from backend.v1.shared.order_notification_messages import format_configured_message
+from backend.v1.shared.order_time import absolute_order_time, order_time_dushanbe, order_time_iso
 
 
 DEFAULT_LIMIT = 20
@@ -444,7 +445,7 @@ def preview_order_notifications(payload: dict[str, Any]) -> dict[str, Any]:
     except ValueError as exc:
         raise ContractError("VALIDATION_ERROR", "Неверные настройки предпросмотра") from exc
     sample = {
-        "order_reference": "VAT-1042", "created_at": "11.10.2026 15:30",
+        "order_reference": "VAT-1042", "created_at": "2026-10-11T10:30:00+00:00",
         "order_source": "Сайт", "customer_name": "Пример клиента", "phone": "+992 90 000 00 00",
         "address": "Душанбе, ул. Айни 29", "landmark": "У главного входа",
         "comment": "Позвоните перед доставкой", "created_by_staff_username": "Сайт",
@@ -457,7 +458,7 @@ def preview_order_notifications(payload: dict[str, Any]) -> dict[str, Any]:
                 for channel in NOTIFICATION_CHANNELS[:3]}
     web_labels = {
         "order_reference": ("Заказ", sample["order_reference"]),
-        "created_at": ("Создан", sample["created_at"]),
+        "created_at": ("Создан", order_time_dushanbe(sample["created_at"])),
         "source": ("Источник", sample["order_source"]),
         "customer_name": ("Клиент", sample["customer_name"]),
         "phone": ("Телефон", sample["phone"]),
@@ -529,7 +530,7 @@ def claim_order_notification(payload: dict[str, Any]) -> dict[str, Any]:
             return {"claimed": False, "fields": {}}
         settings = effective_settings(row)
         if recipient == "courier_telegram" and (not settings["courier_enabled"] or
-                row["order_created_at"] < row["courier_enabled_since"]):
+                absolute_order_time(row["order_created_at"]) < row["courier_enabled_since"]):
             return {"claimed": False, "fields": {}}
         cur.execute("""INSERT INTO order_notification_deliveries (event_key, recipient)
                        VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING event_key""",
@@ -630,6 +631,8 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
             (days,),
         )
         recent_orders = [dict(item) for item in cur.fetchall()]
+        for item in recent_orders:
+            item["created_at"] = order_time_iso(item["created_at"])
         cur.execute(
             """
             SELECT
@@ -668,7 +671,10 @@ def dashboard_summary(query: dict[str, Any]) -> dict[str, Any]:
                 SELECT (COALESCE(
                     (SELECT MAX(h.created_at) FROM order_status_history h
                      WHERE h.order_id = o.id AND h.to_status = 'delivered'),
-                    o.delivery_updated_at, o.created_at
+                    o.delivery_updated_at,
+                    CASE WHEN pg_typeof(o.created_at) = 'timestamp without time zone'::regtype
+                         THEN o.created_at::timestamp AT TIME ZONE 'UTC'
+                         ELSE o.created_at::timestamptz END
                 ) AT TIME ZONE 'Asia/Dushanbe')::date AS day,
                 o.delivery_courier_amount
                 FROM orders o
@@ -996,7 +1002,10 @@ def create_staff_order(
                 raise ContractError("IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different request", http_status=409)
             if existing["response_body"] is None:
                 raise ContractError("IDEMPOTENCY_IN_PROGRESS", "Order request is still being processed", http_status=409)
-            return existing["response_body"], int(existing["response_status"]), None
+            saved_response = dict(existing["response_body"])
+            if saved_response.get("created_at"):
+                saved_response["created_at"] = order_time_iso(saved_response["created_at"])
+            return saved_response, int(existing["response_status"]), None
 
         order_items: list[dict[str, Any]] = []
         base_total = Decimal("0")
@@ -1096,7 +1105,7 @@ def create_staff_order(
         )
         response = {
             "order_id": order["public_id"], "order_reference": order_reference,
-            "status": order["status"], "created_at": order["created_at"],
+            "status": order["status"], "created_at": order_time_iso(order["created_at"]),
             "created_by_staff_account_id": account["account_id"],
             "created_by_staff_username": account["username"], "order_source": request["source"],
             "fulfillment_pharmacy_id": pharmacy_id,
@@ -1119,7 +1128,7 @@ def create_staff_order(
         )
         notification = {
             "notification_kind": "staff_manual_order", "admin_order_id": int(order["id"]),
-            "created_at": order["created_at"].isoformat() if hasattr(order["created_at"], "isoformat") else order["created_at"],
+            "created_at": order_time_iso(order["created_at"]),
             "status": "pending",
             "order_reference": order_reference, "customer_name": request["customer_name"],
             "phone": request["phone"], "address": request["address"], "landmark": request["landmark"],
@@ -1188,6 +1197,7 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
     for row in rows:
         row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
         row.pop("id")
+        row["created_at"] = order_time_iso(row["created_at"])
     return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
@@ -1419,6 +1429,7 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
     for row in rows:
         row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
         row.pop("id")
+        row["created_at"] = order_time_iso(row["created_at"])
         row["profit"] = (row["order_total"] or Decimal("0")) - row["base_total"]
         if policy["source"]:
             utm_source = row.pop("utm_source")
@@ -1467,7 +1478,9 @@ def courier_earnings(query: dict[str, Any]) -> dict[str, Any]:
                            (SELECT MAX(h.created_at) FROM order_status_history h
                             WHERE h.order_id = o.id AND h.to_status = 'delivered'),
                            o.delivery_updated_at,
-                           o.created_at
+                           CASE WHEN pg_typeof(o.created_at) = 'timestamp without time zone'::regtype
+                                THEN o.created_at::timestamp AT TIME ZONE 'UTC'
+                                ELSE o.created_at::timestamptz END
                        ) AS earned_at
                 FROM orders o
                 WHERE o.deleted_at IS NULL AND o.status = 'delivered'
@@ -1496,7 +1509,9 @@ def courier_earnings(query: dict[str, Any]) -> dict[str, Any]:
                            (SELECT MAX(h.created_at) FROM order_status_history h
                             WHERE h.order_id = o.id AND h.to_status = 'delivered'),
                            o.delivery_updated_at,
-                           o.created_at
+                           CASE WHEN pg_typeof(o.created_at) = 'timestamp without time zone'::regtype
+                                THEN o.created_at::timestamp AT TIME ZONE 'UTC'
+                                ELSE o.created_at::timestamptz END
                        ) AT TIME ZONE 'Asia/Dushanbe')::date AS earned_day,
                        o.delivery_courier_amount
                 FROM orders o
@@ -1654,6 +1669,7 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
     for row in rows:
         row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
         row.pop("id")
+        row["created_at"] = order_time_iso(row["created_at"])
     return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
@@ -1669,7 +1685,10 @@ DELIVERED_DAY_CTE = """
         SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
                o.address, o.order_total, o.currency, o.created_at, o.order_source,
                o.created_by_staff_account_id, o.fulfillment_pharmacy_id,
-               COALESCE(h.delivered_at, o.created_at) AS delivered_at
+               COALESCE(h.delivered_at,
+                   CASE WHEN pg_typeof(o.created_at) = 'timestamp without time zone'::regtype
+                        THEN o.created_at::timestamp AT TIME ZONE 'UTC'
+                        ELSE o.created_at::timestamptz END) AS delivered_at
         FROM orders o
         LEFT JOIN delivery_history h ON h.order_id = o.id
         WHERE o.status = 'delivered' AND o.deleted_at IS NULL
@@ -1741,6 +1760,7 @@ def delivered_orders_by_day(query: dict[str, Any]) -> dict[str, Any]:
     for row in rows:
         internal_id = row.pop("id")
         row["order_id"] = row.pop("public_id") or f"legacy_{internal_id}"
+        row["created_at"] = order_time_iso(row["created_at"])
     return {"date": selected.isoformat(), "time_zone": "Asia/Dushanbe", "summary": summary,
             "data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
@@ -1791,6 +1811,7 @@ def get_order(order_id: str) -> dict[str, Any]:
     result.pop("id")
     result["items"] = items
     result["status_history"] = history
+    result["created_at"] = order_time_iso(result["created_at"])
     return result
 
 

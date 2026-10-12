@@ -30,6 +30,7 @@ from backend.v1.shared.marketing import (
     validate_utm_link_event,
 )
 from backend.v1.shared.responses import error_response, request_id, success, success_document
+from backend.v1.shared.order_time import order_time_iso
 from backend.v1.shared.search_ranking import did_you_mean, query_variants, rank_candidates, retrieval_terms
 
 
@@ -383,7 +384,7 @@ def _order_response(order: dict[str, Any], items: list[dict[str, Any]]) -> dict[
         "items": items,
         "items_subtotal": int(order["items_subtotal"]),
         "order_total": int(order["order_total"]),
-        "created_at": order["created_at"].isoformat(),
+        "created_at": order_time_iso(order["created_at"]),
     }
 
 
@@ -422,7 +423,10 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
                 raise ContractError("IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different request", http_status=409)
             if existing["response_body"] is None:
                 raise ContractError("IDEMPOTENCY_IN_PROGRESS", "Order request is still being processed", http_status=409)
-            return existing["response_body"], int(existing["response_status"]), None
+            saved_response = dict(existing["response_body"])
+            if saved_response.get("created_at"):
+                saved_response["created_at"] = order_time_iso(saved_response["created_at"])
+            return saved_response, int(existing["response_status"]), None
 
         medicine_ids = [item["medicine_id"] for item in request["items"]]
         cur.execute(
@@ -530,7 +534,7 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
         )
         notification = {
             "admin_order_id": int(order["id"]),
-            "created_at": order["created_at"].isoformat() if hasattr(order["created_at"], "isoformat") else order["created_at"],
+            "created_at": order_time_iso(order["created_at"]),
             "status": "pending",
             "order_source": "Сайт" + (f" · {attribution['utm_source']}" if attribution.get("utm_source") else ""),
             "fulfillment_pharmacy_id": 1,

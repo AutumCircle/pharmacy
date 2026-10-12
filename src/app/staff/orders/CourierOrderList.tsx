@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import type { CourierOrder, CourierOrderStatus, StaffOrderMedicine } from '@/lib/api-v1/staff-types';
+import { formatOrderDateTime } from '@/lib/order-time';
 
 const labels: Record<CourierOrderStatus, string> = {
   pending: 'Новый', confirmed: 'Собирается', delivering: 'В пути',
@@ -150,7 +151,7 @@ function OrderCard({ order }: { order: CourierOrder }) {
   return <article className="courier-order-card">
     <div className="courier-order-heading">
       <div><strong>Заказ {order.order_reference || order.order_id}</strong>
-        <small>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</small></div>
+        <small>{formatOrderDateTime(order.created_at)}</small></div>
       <div className="courier-order-pay"><strong>{Number(amount || 0).toLocaleString('ru-RU')} с.</strong>
         <small>заработок курьера</small><span className={`courier-order-status ${status}`}>{labels[status]}</span></div>
     </div>

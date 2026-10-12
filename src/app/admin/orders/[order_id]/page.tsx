@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { requireAdminSession } from '@/lib/admin-auth';
 import { getAdminOrder } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
+import { formatOrderDateTime } from '@/lib/order-time';
 import OrderStatusControl from './OrderStatusControl';
 import OrderItemPriceEditor from './OrderItemPriceEditor';
 import OrderDeliveryEditor from './OrderDeliveryEditor';
@@ -47,7 +48,7 @@ export default async function AdminOrderDetailPage({
         <p><strong>Адрес:</strong> {order.address}</p>
         {order.landmark && <p><strong>Ориентир:</strong> {order.landmark}</p>}
         <p><strong>Комментарий:</strong> {order.notes || 'Не указан'}</p>
-        <p><strong>Создан:</strong> {new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</p>
+        <p><strong>Создан:</strong> {formatOrderDateTime(order.created_at)}</p>
         <p><strong>Статус:</strong></p>
         <OrderStatusControl orderId={order.order_id} currentStatus={order.status} />
         {(order.status === 'pending' || order.status === 'cancelled') && (
@@ -100,7 +101,7 @@ export default async function AdminOrderDetailPage({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {order.status_history.map((entry, index) => (
           <div key={`${entry.created_at}-${index}`} style={{ background: 'white', padding: 14, borderRadius: 8 }}>
-            {entry.from_status || 'создан'} → {entry.to_status} · {new Date(entry.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}
+            {entry.from_status || 'создан'} → {entry.to_status} · {formatOrderDateTime(entry.created_at)}
             {entry.actor_id ? ` · ${entry.actor_type}: ${entry.actor_id}` : ''}
             {entry.reason ? ` · ${entry.reason}` : ''}
           </div>

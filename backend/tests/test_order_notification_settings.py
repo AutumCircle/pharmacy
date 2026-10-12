@@ -79,6 +79,16 @@ class NotificationSettingsTests(unittest.TestCase):
         self.assertFalse(result['claimed'])
         self.assertEqual(cursor.execute.call_count, 1)
 
+    def test_legacy_naive_utc_order_time_compares_with_aware_setting(self):
+        now = datetime.now(timezone.utc)
+        cursor = Mock()
+        cursor.fetchone.return_value = {'courier_enabled': True, 'courier_enabled_since': now,
+            'order_created_at': (now - timedelta(minutes=5)).replace(tzinfo=None),
+            'policies': {}, 'revision': 2}
+        with self._transaction(cursor):
+            result = claim_order_notification({'event_key': 'order:17:created', 'recipient': 'courier_telegram'})
+        self.assertFalse(result['claimed'])
+
     def test_duplicate_delivery_claim_is_rejected(self):
         now = datetime.now(timezone.utc)
         cursor = Mock()

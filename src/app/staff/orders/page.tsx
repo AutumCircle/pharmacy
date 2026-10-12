@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { requireStaffSession } from '@/lib/staff-auth';
 import { getCourierEarnings, listCourierOrders, listPharmacyPreparationOrders } from '@/lib/api-v1/staff-server';
 import type { CourierOrderStatus } from '@/lib/api-v1/staff-types';
+import { formatOrderDateTime } from '@/lib/order-time';
 import CourierOrderList from './CourierOrderList';
 
 export const dynamic = 'force-dynamic';
@@ -30,7 +31,7 @@ export default async function CourierOrdersPage({ searchParams }: {
       {response.data.length === 0 ? <div className="staff-order-form">Сейчас заказов на сборку нет.</div>
         : <div className="courier-order-list">{response.data.map((order) => <article className="courier-order-card" key={order.order_id}>
           <div className="courier-order-heading"><div><strong>Заказ {order.order_reference || order.order_id}</strong>
-            {order.created_at && <small>{new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</small>}</div>
+            {order.created_at && <small>{formatOrderDateTime(order.created_at)}</small>}</div>
             {order.status && <span className={`courier-order-status ${order.status}`}>{order.status === 'pending' ? 'Новый' : 'Собирается'}</span>}</div>
           {order.source && <p>Источник: {order.source}</p>}
           {order.customer_name && <p>Клиент: {order.customer_name}</p>}

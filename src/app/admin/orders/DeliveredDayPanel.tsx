@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { DeliveredDayResponse } from '@/lib/api-v1/admin-types';
+import { formatOrderDateTime } from '@/lib/order-time';
 
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефон' } as const;
 
@@ -55,7 +56,7 @@ export default function DeliveredDayPanel({ report, today, yesterday }: {
     {report.data.length === 0 ? <p className="admin-delivery-day-empty">В этот день доставленных заказов нет. Выберите другую дату.</p>
       : <div className="admin-delivery-day-list">{report.data.map((order) => <article key={order.order_id}>
         <div><Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`}>Заказ {order.order_reference || order.order_id}</Link>
-          <time dateTime={order.delivered_at}>Доставлен {new Date(order.delivered_at).toLocaleString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</time></div>
+          <time dateTime={order.delivered_at}>Доставлен {formatOrderDateTime(order.delivered_at)}</time></div>
         <div><strong>{order.created_by_staff_account_id === null ? 'Клиент сайта' : order.created_by_staff_account_id === 3
           ? 'Внёс курьер' : `Сотрудник аптеки ${order.created_by_staff_account_id}`}</strong>
           {order.order_source && <span> · {sourceLabels[order.order_source]}</span>}

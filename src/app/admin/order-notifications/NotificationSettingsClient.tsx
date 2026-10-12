@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { AdminNotificationPreview, AdminNotificationSettings, NotificationChannel, NotificationField } from '@/lib/api-v1/admin-types';
+import { formatOrderDateTime } from '@/lib/order-time';
 import { previewNotificationSettings, saveNotificationSettings } from './actions';
 
 const channels: Array<{ key: NotificationChannel; label: string }> = [
@@ -128,6 +129,6 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
       {busy ? 'Сохраняем…' : 'Сохранить настройки'}</button>
       <button type="button" disabled={busy} onClick={() => { setDraft(saved); setPreviewBusy(true); setMessage('Изменения отменены.'); }}>Сбросить изменения</button></div>
     {message && <p role="status" className={message.startsWith('Ошибка') ? 'error' : 'success'}>{message}</p>}
-    <small>Последнее изменение: {saved.updated_at ? new Date(saved.updated_at).toLocaleString('ru-RU') : 'по умолчанию'}{saved.updated_by ? ` · ${saved.updated_by}` : ''}</small>
+    <small>Последнее изменение: {saved.updated_at ? formatOrderDateTime(saved.updated_at) : 'по умолчанию'}{saved.updated_by ? ` · ${saved.updated_by}` : ''}</small>
   </div>;
 }

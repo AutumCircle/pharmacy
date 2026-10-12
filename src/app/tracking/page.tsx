@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { PublicOrder } from '@/lib/api-v1/types';
 import { trackOrdersClient } from '@/lib/api-v1/client-reads';
 import { parseTrackingPhone, TRACKING_PHONE_ERROR } from '@/lib/tracking-phone';
+import { formatOrderDate, formatOrderDateTime, parseOrderTime } from '@/lib/order-time';
 
 export default function TrackingPage() {
   const [phone, setPhone] = useState('');
@@ -21,7 +22,7 @@ export default function TrackingPage() {
     try {
       const data = await trackOrdersClient(phoneNumber, force);
       const newestFirst = [...(data.data || [])].sort((left, right) => {
-        const dateDifference = new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+        const dateDifference = parseOrderTime(right.created_at).getTime() - parseOrderTime(left.created_at).getTime();
         return dateDifference || right.order_id.localeCompare(left.order_id);
       });
       setOrders(newestFirst);
@@ -201,7 +202,7 @@ export default function TrackingPage() {
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                             <span style={{ fontWeight: 'bold', fontSize: '15px', color: '#313131' }}>Заказ #{o.order_reference}</span>
-                            <span style={{ fontSize: '12px', color: '#888' }}>{new Date(o.created_at).toLocaleDateString('ru-RU')}</span>
+                            <span style={{ fontSize: '12px', color: '#888' }}>{formatOrderDate(o.created_at)}</span>
                           </div>
                           <div style={{ fontSize: '13px', color: isActive ? 'var(--primary)' : '#666', display: 'flex', alignItems: 'center', gap: '5px' }}>
                             Смотреть детали <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
@@ -228,7 +229,7 @@ export default function TrackingPage() {
                         Заказ #{selectedOrder.order_reference}
                       </h2>
                       <div style={{ color: '#888', fontSize: '14px' }}>
-                        Оформлен: {new Date(selectedOrder.created_at).toLocaleString('ru-RU')}
+                        Оформлен: {formatOrderDateTime(selectedOrder.created_at)}
                       </div>
                     </div>
                   </div>

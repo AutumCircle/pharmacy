@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from backend.v1.shared.order_notification_settings import CHANNELS, FIELDS
+from backend.v1.shared.order_time import order_time_dushanbe
 
 
 def _money(value: Any) -> str:
@@ -38,6 +39,8 @@ def format_configured_message(event: dict[str, Any], fields: dict[str, bool], ch
         if not fields[field]:
             continue
         value = event.get(key)
+        if field == "created_at" and value:
+            value = order_time_dushanbe(value)
         if field == "source" and not value:
             value = "Сайт"
         if field == "creator" and not value:

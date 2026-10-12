@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { formatOrderDateTime } from '@/lib/order-time';
 import { updateOrderStatus } from './actions';
 import OrderDeleteButton from './OrderDeleteButton';
 import type { AdminOrderSummary } from '@/lib/api-v1/admin-types';
@@ -72,7 +73,7 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'center' }}>
               <div>
                 <h3 style={{ margin: '0 0 8px' }}>Заказ {order.order_reference || order.order_id}</h3>
-                <div>{new Date(order.created_at).toLocaleString('ru-RU')} · {order.customer_name || 'Имя не указано'}</div>
+                <div>{formatOrderDateTime(order.created_at)} · {order.customer_name || 'Имя не указано'}</div>
                 <div style={{ color: '#666', marginTop: 4 }}>{order.phone} · {order.address}</div>
                 {order.created_by_staff_account_id && <div style={{ color: '#a4141b', marginTop: 6, fontWeight: 650 }}>
                   {order.created_by_staff_account_id === 3

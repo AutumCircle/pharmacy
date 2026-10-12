@@ -20,8 +20,10 @@ class DeliveredDayOrderTests(unittest.TestCase):
             'pharmacy': 0, 'whatsapp': 1, 'instagram': 1, 'phone': 0}
         delivered = datetime(2026, 10, 12, 8, 30, tzinfo=timezone.utc)
         cursor.fetchall.return_value = [
-            {'id': 20, 'public_id': 'ord_' + 'a' * 32, 'delivered_at': delivered},
-            {'id': 19, 'public_id': 'ord_' + 'b' * 32, 'delivered_at': delivered},
+            {'id': 20, 'public_id': 'ord_' + 'a' * 32, 'delivered_at': delivered,
+             'created_at': datetime(2026, 10, 12, 3, 30)},
+            {'id': 19, 'public_id': 'ord_' + 'b' * 32, 'delivered_at': delivered,
+             'created_at': datetime(2026, 10, 12, 3, 30)},
         ]
         with self._transaction(cursor):
             result = delivered_orders_by_day({'date': '2026-10-12', 'limit': '1'})
