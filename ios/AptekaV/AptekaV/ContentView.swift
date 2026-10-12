@@ -11,7 +11,7 @@ import UIKit
 // MARK: - Tabs
 
 enum AppTab: Int, CaseIterable, Identifiable {
-    case home, catalog, cart, orders, favorites
+    case home, catalog, cart, favorites, profile
 
     var id: Int { rawValue }
 
@@ -20,8 +20,8 @@ enum AppTab: Int, CaseIterable, Identifiable {
         case .home: return "Главная"
         case .catalog: return "Каталог"
         case .cart: return "Корзина"
-        case .orders: return "Мои заказы"
         case .favorites: return "Избранное"
+        case .profile: return "Профиль"
         }
     }
 
@@ -30,8 +30,8 @@ enum AppTab: Int, CaseIterable, Identifiable {
         case .home: return "house"
         case .catalog: return "square.grid.2x2"
         case .cart: return "cart"
-        case .orders: return "shippingbox"
         case .favorites: return "heart"
+        case .profile: return "person"
         }
     }
 
@@ -240,8 +240,10 @@ private struct TabScreen: View {
                         Text("Стоимость доставки рассчитывается и оплачивается напрямую курьеру при доставке.")
                             .font(.footnote)
                             .foregroundColor(.secondary)
-                    case .orders:
-                        ProductGrid(products: Array(sampleProducts.suffix(4)), onAdd: onAddToCart)
+                    case .profile:
+                        ProfileContent()
+                        Text("Заказать снова").font(.title2.bold())
+                        ProductGrid(products: Array(sampleProducts.prefix(4)), onAdd: onAddToCart)
                     case .favorites:
                         ProductGrid(products: [2, 3, 7, 5, 1, 6].map { sampleProducts[$0] }, onAdd: onAddToCart)
                     }
@@ -253,6 +255,109 @@ private struct TabScreen: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle(tab == .home ? "Аптека «Ватан»" : tab.title)
         }
+    }
+}
+
+private struct ProfileContent: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 14) {
+                Text("М")
+                    .font(.title2.bold())
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(
+                        Circle().fill(
+                            LinearGradient(
+                                colors: [Color(red: 1, green: 0.42, blue: 0.36), .vatanRed],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Мадина").font(.headline)
+                    Text("+992 90 123 45 67")
+                        .font(.subheadline)
+                        .monospacedDigit()
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundColor(.secondary)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
+
+            ProfileSection(rows: [
+                ProfileRow(icon: "shippingbox.fill", tint: .red, title: "Мои заказы", subtitle: "Заказ № 1042 · 61 TJS", trailing: "Подтверждён"),
+                ProfileRow(icon: "heart.fill", tint: .orange, title: "Избранное", subtitle: "6 товаров", trailing: nil),
+                ProfileRow(icon: "mappin.and.ellipse", tint: .blue, title: "Адреса доставки", subtitle: "ул. Рудаки, 45", trailing: nil)
+            ])
+
+            ProfileSection(rows: [
+                ProfileRow(icon: "bell.fill", tint: .green, title: "Уведомления", subtitle: "Статус заказа", trailing: nil),
+                ProfileRow(icon: "globe", tint: .purple, title: "Язык", subtitle: nil, trailing: "Русский"),
+                ProfileRow(icon: "phone.fill", tint: .teal, title: "Связаться с аптекой", subtitle: "Телефон и адреса", trailing: nil)
+            ])
+
+            Text("Заказы находятся по номеру телефона, регистрация не нужна.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct ProfileRow: Identifiable {
+    let id = UUID()
+    let icon: String
+    let tint: Color
+    let title: String
+    let subtitle: String?
+    let trailing: String?
+}
+
+private struct ProfileSection: View {
+    let rows: [ProfileRow]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(rows) { row in
+                HStack(spacing: 12) {
+                    Image(systemName: row.icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(row.tint))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.title)
+                        if let subtitle = row.subtitle {
+                            Text(subtitle).font(.footnote).foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if let trailing = row.trailing {
+                        Text(trailing).font(.subheadline).foregroundColor(.secondary)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(Color(.tertiaryLabel))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+                if row.id != rows.last?.id {
+                    Divider().padding(.leading, 58)
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
     }
 }
 
