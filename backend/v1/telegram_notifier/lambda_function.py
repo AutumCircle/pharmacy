@@ -40,6 +40,14 @@ def _money(value: Any) -> str:
         return "—"
 
 
+def _quantity(value: Any) -> str:
+    try:
+        quantity = Decimal(str(value)).quantize(Decimal("0.01"))
+        return format(quantity.normalize(), "f")
+    except (InvalidOperation, ValueError):
+        return "—"
+
+
 def _identity(event: dict[str, Any]) -> tuple[str, str, str, str]:
     reference = html.escape(str(event.get("order_reference") or "—"))
     customer = html.escape(str(event.get("customer_name") or "—"))
@@ -55,7 +63,7 @@ def _item_lines(event: dict[str, Any], price_key: str) -> list[str]:
         if not isinstance(item, dict):
             continue
         name = html.escape(str(item.get("medicine_name") or "Товар"))
-        quantity = int(item.get("quantity") or 0)
+        quantity = _quantity(item.get("quantity"))
         price = item.get(price_key)
         line = f"• {name} × {quantity} — {_money(price)}"
         if sum(len(part) + 1 for part in lines) + len(line) > 3200:
@@ -70,7 +78,7 @@ def _medicine_lines(event: dict[str, Any]) -> list[str]:
     for item in event.get("items") or []:
         if not isinstance(item, dict):
             continue
-        line = f"• {html.escape(str(item.get('medicine_name') or 'Товар'))} × {int(item.get('quantity') or 0)}"
+        line = f"• {html.escape(str(item.get('medicine_name') or 'Товар'))} × {_quantity(item.get('quantity'))}"
         if sum(len(part) + 1 for part in lines) + len(line) > 2900:
             lines.append("• …остальные товары смотрите в панели заказов")
             break
@@ -108,7 +116,7 @@ def format_owner_message(event: dict[str, Any]) -> str:
                 if not isinstance(item, dict):
                     continue
                 name = html.escape(str(item.get("medicine_name") or "Товар"))
-                quantity = int(item.get("quantity") or 0)
+                quantity = _quantity(item.get("quantity"))
                 lines.append(
                     f"• {name} × {quantity} — {_money(item.get('base_line_total'))} / {_money(item.get('line_total'))}"
                 )

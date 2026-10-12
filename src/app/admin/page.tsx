@@ -45,7 +45,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
       pharmacy_2_orders: 0, instagram_orders: 0, whatsapp_orders: 0,
       phone_orders: 0, unspecified_source_orders: 0,
     },
-    recent_orders: [], courier_daily: [],
+    recent_orders: [], courier_daily: [], delivery_origin_daily: [],
     delivered_orders: [], currency: 'TJS' as const,
   };
   const categories = categoriesResult.status === 'fulfilled' ? categoriesResult.value.data : [];

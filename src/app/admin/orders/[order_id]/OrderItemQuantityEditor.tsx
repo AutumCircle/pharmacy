@@ -26,10 +26,10 @@ export default function OrderItemQuantityEditor({ orderId, itemId, name, initial
   }
 
   return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-    <input aria-label={`Количество: ${name}`} type="number" min={1} max={99} value={quantity}
+    <input aria-label={`Количество: ${name}`} type="number" min={0.5} max={99} step={0.5} value={quantity}
       onChange={(event) => setQuantity(Number(event.target.value))} disabled={busy}
       style={{ width: 66, minHeight: 40, padding: 6 }} />
-    <button type="button" disabled={busy || !Number.isInteger(quantity) || quantity < 1 || quantity > 99 || quantity === initialQuantity}
+    <button type="button" disabled={busy || !Number.isFinite(quantity) || quantity < 0.5 || quantity > 99 || !Number.isInteger(quantity * 2) || quantity === initialQuantity}
       onClick={() => void change(quantity)}>Сохранить</button>
     <button type="button" disabled={busy} onClick={() => void change(0)} aria-label={`Удалить ${name} из заказа`}>Удалить</button>
     {error && <small role="alert" style={{ color: '#c62828', flexBasis: '100%' }}>{error}</small>}

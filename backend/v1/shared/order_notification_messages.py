@@ -64,7 +64,11 @@ def format_configured_message(event: dict[str, Any], fields: dict[str, bool], ch
             name = html.escape(str(item.get("medicine_name") or "Товар")[:200])
             line = f"• {name}"
             if fields["quantity"]:
-                line += f" × {int(item.get('quantity') or 0)}"
+                try:
+                    quantity = Decimal(str(item.get("quantity") or 0)).quantize(Decimal("0.01"))
+                    line += f" × {format(quantity.normalize(), 'f')}"
+                except (InvalidOperation, ValueError):
+                    line += " × —"
             prices = []
             if fields["item_client_total"]:
                 prices.append(_money(item.get("line_total")))

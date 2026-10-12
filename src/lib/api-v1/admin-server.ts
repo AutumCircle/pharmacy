@@ -177,6 +177,13 @@ export function getAdminOrder(orderId: string): Promise<ApiSuccessResponse<Admin
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}`);
 }
 
+export function updateAdminOrderCustomer(orderId: string, body: {
+  customer_name: string; phone: string; address: string; landmark: string | null;
+  comment: string | null; expected_revision: number;
+}): Promise<ApiSuccessResponse<{ order_id: string; edit_revision: number }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}`, { method: 'PATCH', body });
+}
+
 export function listDeliveredAdminOrdersByDay(date: string, cursor?: string): Promise<DeliveredDayResponse> {
   return request(`/v1/admin/orders/delivered-day${queryString({ date, cursor, limit: 30 })}`);
 }

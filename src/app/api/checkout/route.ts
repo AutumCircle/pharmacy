@@ -18,7 +18,8 @@ function isCreateOrderRequest(value: unknown): value is CreateOrderRequest {
     const fields = item as Record<string, unknown>;
     return Object.keys(fields).every((key) => key === 'medicine_id' || key === 'quantity')
       && Number.isInteger(fields.medicine_id)
-      && Number.isInteger(fields.quantity);
+      && typeof fields.quantity === 'number' && Number.isFinite(fields.quantity)
+      && fields.quantity >= 0.5 && fields.quantity <= 99 && Number.isInteger(fields.quantity * 2);
   });
 }
 

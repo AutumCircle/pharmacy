@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/admin-auth';
-import { addAdminManualOrderItems, addAdminOrderItems, adjustAdminOrderItem, deleteAdminOrder, searchAdminOrderMedicines, updateAdminOrderDelivery, updateAdminOrderItemPrice, updateAdminOrderStatus } from '@/lib/api-v1/admin-server';
+import { addAdminManualOrderItems, addAdminOrderItems, adjustAdminOrderItem, deleteAdminOrder, searchAdminOrderMedicines, updateAdminOrderCustomer, updateAdminOrderDelivery, updateAdminOrderItemPrice, updateAdminOrderStatus } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import type { OrderStatus } from '@/lib/api-v1/types';
 
@@ -16,12 +16,33 @@ export async function searchOrderMedicines(query: string) {
   }
 }
 
+export async function updateOrderCustomer(orderId: string, fields: {
+  customer_name: string; phone: string; address: string; landmark: string | null;
+  comment: string | null; expected_revision: number;
+}) {
+  try {
+    await requireAdminSession();
+    if (!Number.isInteger(fields.expected_revision) || fields.expected_revision < 1
+      || !/^\d{9}$/.test(fields.phone.replace(/\D/g, ''))
+      || fields.customer_name.trim().length < 2 || fields.customer_name.trim().length > 120
+      || fields.address.trim().length < 3 || fields.address.trim().length > 500
+      || (fields.landmark?.trim().length ?? 0) > 300 || (fields.comment?.trim().length ?? 0) > 500) {
+      throw new Error('Проверьте имя, 9 цифр телефона, адрес и комментарий');
+    }
+    await updateAdminOrderCustomer(orderId, fields);
+    revalidatePath('/admin'); revalidatePath('/admin/orders'); revalidatePath(`/admin/orders/${orderId}`);
+    return { success: true as const };
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : 'Не удалось сохранить данные клиента' };
+  }
+}
+
 export async function addOrderMedicines(orderId: string, items: Array<{ medicine_id: number; quantity: number }>, idempotencyKey: string) {
   try {
     await requireAdminSession();
     if (!Array.isArray(items) || items.length < 1 || items.length > 20 ||
       items.some((item) => !Number.isInteger(item.medicine_id) || item.medicine_id <= 0 ||
-        !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99)) throw new Error('Проверьте лекарства и количество');
+        !Number.isFinite(item.quantity) || item.quantity < 0.5 || item.quantity > 99 || !Number.isInteger(item.quantity * 2))) throw new Error('Количество — от 0,5 до 99 с шагом 0,5');
     const response = await addAdminOrderItems(orderId, items, idempotencyKey);
     revalidatePath('/admin');
     revalidatePath('/admin/orders');
@@ -38,7 +59,7 @@ export async function addManualOrderMedicine(orderId: string, item: { medicine_n
     const price = Number(item.price);
     if (item.medicine_name.trim().length < 2 || item.medicine_name.trim().length > 200 ||
       !/^\d{1,6}(?:\.\d{1,2})?$/.test(item.price) || price <= 0 ||
-      !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99) {
+      !Number.isFinite(item.quantity) || item.quantity < 0.5 || item.quantity > 99 || !Number.isInteger(item.quantity * 2)) {
       throw new Error('Проверьте название, цену и количество');
     }
     const response = await addAdminManualOrderItems(orderId, [item], idempotencyKey);
@@ -54,8 +75,9 @@ export async function addManualOrderMedicine(orderId: string, item: { medicine_n
 export async function setOrderItemQuantity(orderId: string, orderItemId: number, expectedQuantity: number, quantity: number) {
   try {
     await requireAdminSession();
-    if (!Number.isInteger(orderItemId) || orderItemId <= 0 || !Number.isInteger(expectedQuantity)
-      || expectedQuantity < 1 || expectedQuantity > 99 || !Number.isInteger(quantity) || quantity < 0 || quantity > 99) {
+    if (!Number.isInteger(orderItemId) || orderItemId <= 0 || !Number.isFinite(expectedQuantity)
+      || expectedQuantity < 0.5 || expectedQuantity > 99 || !Number.isInteger(expectedQuantity * 2)
+      || !Number.isFinite(quantity) || quantity < 0 || quantity > 99 || (quantity !== 0 && !Number.isInteger(quantity * 2))) {
       throw new Error('Проверьте количество');
     }
     await adjustAdminOrderItem(orderId, orderItemId, expectedQuantity, quantity);

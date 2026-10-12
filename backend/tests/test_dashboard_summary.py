@@ -35,6 +35,8 @@ class DashboardSummaryTests(unittest.TestCase):
                 "created_by_staff_account_id": 2, "order_source": "whatsapp",
             }],
             [{"date": "2026-09-29", "amount": Decimal("12.00"), "orders_count": 1}],
+            [{"date": "2026-09-29", "website_orders": 1, "courier_orders": 0, "pharmacy_orders": 0,
+              "website_sales": Decimal("120.00"), "courier_sales": Decimal("0"), "pharmacy_sales": Decimal("0")}],
         ]
 
         @contextmanager
@@ -53,9 +55,10 @@ class DashboardSummaryTests(unittest.TestCase):
         self.assertEqual(result["online_profit_total"], Decimal("35.00"))
         self.assertEqual(result["delivered_orders"][0]["owner_total"], Decimal("28.00"))
         self.assertEqual(result["courier_daily"][0]["amount"], Decimal("12.00"))
-        financial_sql = cursor.execute.call_args_list[-2].args[0]
+        self.assertEqual(result["delivery_origin_daily"][0]["website_sales"], Decimal("120.00"))
+        financial_sql = cursor.execute.call_args_list[-3].args[0]
         self.assertIn("created_by_staff_account_id IS NULL", financial_sql)
-        self.assertIn("to_status = 'delivered'", cursor.execute.call_args_list[-1].args[0])
+        self.assertIn("to_status = 'delivered'", cursor.execute.call_args_list[-2].args[0])
         self.assertTrue(all(call.args[1] == (30,) for call in cursor.execute.call_args_list[1:]))
 
 

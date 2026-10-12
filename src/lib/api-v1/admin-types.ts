@@ -41,6 +41,8 @@ export type AdminDashboardSummary = {
   delivery_owner_total: number | string;
   delivery_courier_total: number | string;
   courier_daily: Array<{ date: string; amount: number | string; orders_count: number }>;
+  delivery_origin_daily: Array<{ date: string; website_orders: number; courier_orders: number; pharmacy_orders: number;
+    website_sales: number | string; courier_sales: number | string; pharmacy_sales: number | string }>;
   origin_counts: {
     total_orders: number;
     client_orders: number;
@@ -267,6 +269,7 @@ export type AdminStatusHistory = {
 };
 
 export type AdminOrderDetail = AdminOrderSummary & {
+  edit_revision: number;
   items: AdminOrderItem[];
   status_history: AdminStatusHistory[];
 };

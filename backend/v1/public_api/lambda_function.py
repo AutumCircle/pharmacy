@@ -448,22 +448,23 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             raise ContractError("ORDER_ITEMS_UNAVAILABLE", "One or more medicines are unavailable", http_status=409)
 
         order_items: list[dict[str, Any]] = []
-        subtotal = 0
+        subtotal = Decimal("0")
         base_total = Decimal("0")
         profit = Decimal("0")
         for item in request["items"]:
             medicine = medicines[item["medicine_id"]]
-            selling_price = int(medicine["selling_unit_price"])
-            line_total = selling_price * item["quantity"]
+            selling_price = Decimal(str(medicine["selling_unit_price"]))
+            quantity = Decimal(str(item["quantity"]))
+            line_total = selling_price * quantity
             subtotal += line_total
             base_price = Decimal(str(medicine["price"]))
-            base_line_total = base_price * item["quantity"]
+            base_line_total = base_price * quantity
             base_total += base_line_total
-            profit += (Decimal(selling_price) - base_price) * item["quantity"]
+            profit += (selling_price - base_price) * quantity
             order_items.append({
                 "medicine_id": medicine["id"],
                 "medicine_name": medicine["name"],
-                "quantity": item["quantity"],
+                "quantity": str(quantity),
                 "base_unit_price": base_price,
                 "base_line_total": base_line_total,
                 "selling_unit_price": selling_price,

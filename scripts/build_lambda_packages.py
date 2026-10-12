@@ -224,6 +224,17 @@ def build() -> Path:
         "sha256": hashlib.sha256(notification_migration_payload).hexdigest(),
         "size_bytes": len(notification_migration_payload),
     })
+    order_editing_migration_destination = OUTPUT / "migration-0022-order-editing-once.zip"
+    _write_deterministic_zip(order_editing_migration_destination, [
+        ("lambda_function.py", ROOT / "backend" / "operations" / "order_editing_migration_once" / "lambda_function.py"),
+        ("migration.sql", ROOT / "backend" / "operations" / "order_editing_migration_once" / "migration.sql"),
+    ])
+    order_editing_migration_payload = order_editing_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": order_editing_migration_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(order_editing_migration_payload).hexdigest(),
+        "size_bytes": len(order_editing_migration_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

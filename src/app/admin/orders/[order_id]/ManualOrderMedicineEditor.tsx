@@ -22,7 +22,7 @@ export default function ManualOrderMedicineEditor({ orderId, status }: { orderId
     const normalizedPrice = price.replace(',', '.').trim();
     if (name.trim().length < 2 || name.trim().length > 200 ||
       !/^\d{1,6}(?:\.\d{1,2})?$/.test(normalizedPrice) || Number(normalizedPrice) <= 0 ||
-      !Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+      !Number.isFinite(quantity) || quantity < 0.5 || quantity > 99 || !Number.isInteger(quantity * 2)) {
       setError('Проверьте название, цену и количество'); return;
     }
     if (delivered && !window.confirm('Позиция добавится в доставленный заказ. Его сумма изменится задним числом, плата за доставку не изменится. Продолжить?')) return;
@@ -50,7 +50,7 @@ export default function ManualOrderMedicineEditor({ orderId, status }: { orderId
           style={inputStyle} value={name} onChange={(event) => { setName(event.target.value); requestKey.current = null; }} />
         <input aria-label="Цена лекарства в сомони" type="number" inputMode="decimal" min="0.01" max="999999.99" step="0.01"
           style={inputStyle} placeholder="Цена, с." value={price} onChange={(event) => { setPrice(event.target.value); requestKey.current = null; }} />
-        <input aria-label="Количество лекарства" type="number" min={1} max={99} value={quantity}
+        <input aria-label="Количество лекарства" type="number" min={0.5} max={99} step={0.5} value={quantity}
           style={inputStyle} onChange={(event) => { setQuantity(Number(event.target.value)); requestKey.current = null; }} />
       </div>
       <button type="button" className="admin-primary-button" disabled={busy} onClick={save} style={{ marginTop: 12, minHeight: 44 }}>

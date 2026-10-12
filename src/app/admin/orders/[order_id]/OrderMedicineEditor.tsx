@@ -71,8 +71,8 @@ export default function OrderMedicineEditor({ orderId, status, pharmacyId }: { o
     </label>}
     {selected.length > 0 && <div className="staff-selected-items">{selected.map((item) => <div key={item.medicine_id}>
       <span><strong>{item.medicine_name}</strong></span>
-      <input type="number" aria-label={`Количество: ${item.medicine_name}`} min={1} max={99} value={item.quantity}
-        onChange={(event) => { const quantity = Math.min(99, Math.max(1, Number(event.target.value) || 1));
+      <input type="number" aria-label={`Количество: ${item.medicine_name}`} min={0.5} max={99} step={0.5} value={item.quantity}
+        onChange={(event) => { const quantity = Math.min(99, Math.max(0.5, Number(event.target.value) || 0.5));
           setSelected((items) => items.map((entry) => entry.medicine_id === item.medicine_id ? { ...entry, quantity } : entry)); requestKey.current = null; }} />
       <button type="button" onClick={() => { setSelected((items) => items.filter((entry) => entry.medicine_id !== item.medicine_id)); requestKey.current = null; }}>Убрать</button>
     </div>)}</div>}

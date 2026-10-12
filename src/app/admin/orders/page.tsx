@@ -5,6 +5,7 @@ import type { OrderStatus } from '@/lib/api-v1/types';
 import OrderList from './OrderList';
 import OrderEarningsPanel from './OrderEarningsPanel';
 import DeliveredDayPanel from './DeliveredDayPanel';
+import DeliveryOriginDailyChart from './DeliveryOriginDailyChart';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,8 +45,9 @@ export default async function AdminOrdersPage({ searchParams }: {
       ? requested : today;
     const yesterday = new Date(`${today}T12:00:00Z`);
     yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-    const report = await listDeliveredAdminOrdersByDay(selected, params.cursor);
+    const [report, summary] = await Promise.all([listDeliveredAdminOrdersByDay(selected, params.cursor), getAdminDashboardSummary(30)]);
     return <div><h1>Заказы по дням доставки</h1><OrdersViews selected="day" />
+      <DeliveryOriginDailyChart daily={summary.data.delivery_origin_daily} />
       <DeliveredDayPanel report={report} today={today} yesterday={yesterday.toISOString().slice(0, 10)} /></div>;
   }
   const days = ([7, 30, 90].includes(Number(params.days)) ? Number(params.days) : 30) as 7 | 30 | 90;

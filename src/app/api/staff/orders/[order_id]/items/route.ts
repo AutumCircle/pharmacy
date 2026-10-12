@@ -23,8 +23,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const fields = item as Record<string, unknown>;
         return Object.keys(fields).length === 2 && Number.isInteger(fields.medicine_id)
-          && Number(fields.medicine_id) > 0 && Number.isInteger(fields.quantity)
-          && Number(fields.quantity) >= 1 && Number(fields.quantity) <= 99;
+          && Number(fields.medicine_id) > 0 && typeof fields.quantity === 'number' && Number.isFinite(fields.quantity)
+          && fields.quantity >= 0.5 && fields.quantity <= 99 && Number.isInteger(fields.quantity * 2);
       })) {
       return NextResponse.json({ error: { message: 'Проверьте лекарства и количество' } }, { status: 400 });
     }

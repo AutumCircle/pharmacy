@@ -25,15 +25,16 @@ function isRequest(value: unknown): value is CreateStaffOrderRequest {
         return Object.keys(fields).length === 3 && typeof fields.medicine_name === 'string' &&
           fields.medicine_name.trim().length >= 2 && fields.medicine_name.trim().length <= 200 &&
           typeof fields.price === 'string' && /^\d{1,6}(?:\.\d{1,2})?$/.test(fields.price) &&
-          Number(fields.price) > 0 && Number.isInteger(fields.quantity) &&
-          Number(fields.quantity) >= 1 && Number(fields.quantity) <= 99;
+          Number(fields.price) > 0 && typeof fields.quantity === 'number' && Number.isFinite(fields.quantity) &&
+          fields.quantity >= 0.5 && fields.quantity <= 99 && Number.isInteger(fields.quantity * 2);
       }))
     && body.items.every((item) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
       const fields = item as Record<string, unknown>;
       return Object.keys(fields).length === 2
         && Number.isInteger(fields.medicine_id) && Number(fields.medicine_id) > 0
-        && Number.isInteger(fields.quantity) && Number(fields.quantity) >= 1 && Number(fields.quantity) <= 99;
+        && typeof fields.quantity === 'number' && Number.isFinite(fields.quantity)
+        && fields.quantity >= 0.5 && fields.quantity <= 99 && Number.isInteger(fields.quantity * 2);
     });
 }
 

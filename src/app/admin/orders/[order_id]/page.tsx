@@ -11,6 +11,7 @@ import OrderMedicineEditor from './OrderMedicineEditor';
 import ManualOrderMedicineEditor from './ManualOrderMedicineEditor';
 import OrderDeleteButton from '../OrderDeleteButton';
 import OrderItemQuantityEditor from './OrderItemQuantityEditor';
+import OrderCustomerEditor from './OrderCustomerEditor';
 import { formatOrderSource } from '@/lib/collections';
 
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Телефонный звонок' } as const;
@@ -37,6 +38,8 @@ export default async function AdminOrderDetailPage({
     <div>
       <Link href="/admin/orders">← Назад к заказам</Link>
       <h1 style={{ margin: '24px 0' }}>Заказ {order.order_reference || order.order_id}</h1>
+      <OrderCustomerEditor orderId={order.order_id} revision={order.edit_revision} customerName={order.customer_name || ''}
+        phone={order.phone || ''} address={order.address || ''} landmark={order.landmark} comment={order.notes} />
       <section style={{ background: 'white', padding: 20, borderRadius: 12, marginBottom: 20 }}>
         {order.created_by_staff_account_id && <p><strong>Ввёл заказ:</strong> {order.created_by_staff_account_id === 3
           ? `Доставщик ${order.created_by_staff_username} · аптека ${order.fulfillment_pharmacy_id}`
