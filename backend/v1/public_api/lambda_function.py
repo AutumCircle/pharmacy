@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -29,10 +30,13 @@ from backend.v1.shared.marketing import (
     validate_collection_slug,
     validate_utm_link_event,
 )
-from backend.v1.shared.responses import error_response, request_id, success, success_document
+from backend.v1.shared.responses import ResponseEncoder, error_response, request_id, success, success_document
 from backend.v1.shared.order_time import order_time_iso
 from backend.v1.shared.search_ranking import did_you_mean, query_variants, rank_candidates, retrieval_terms
 
+
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.INFO)
 
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
@@ -531,7 +535,7 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
                 completed_at = CURRENT_TIMESTAMP
             WHERE idempotency_key = %s
             """,
-            (order["id"], json.dumps(response), normalized_key),
+            (order["id"], json.dumps(response, cls=ResponseEncoder), normalized_key),
         )
         notification = {
             "admin_order_id": int(order["id"]),
@@ -837,7 +841,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
     except ContractError as exc:
         return error_response(exc, request=current_request_id)
-    except psycopg2.Error:
+    except psycopg2.Error as exc:
+        LOGGER.error(
+            "Public API database error request_id=%s method=%s path=%s pgcode=%s detail=%s",
+            current_request_id, method, path, exc.pgcode, getattr(exc.diag, "message_primary", None),
+        )
         return error_response(ContractError("INTERNAL_ERROR", "Internal server error", http_status=500), request=current_request_id)
     except Exception:
+        LOGGER.exception("Public API unexpected error request_id=%s method=%s path=%s", current_request_id, method, path)
         return error_response(ContractError("INTERNAL_ERROR", "Internal server error", http_status=500), request=current_request_id)
