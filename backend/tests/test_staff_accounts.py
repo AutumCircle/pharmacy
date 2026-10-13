@@ -178,13 +178,51 @@ class StaffTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_staff_order_request({**payload, 'comment': 'x' * 501})
 
-    def test_courier_requires_pharmacy_and_pharmacy_two_cannot_use_pharmacy_one_catalog(self):
+    def test_courier_must_choose_pharmacy(self):
         courier = {**self.account, 'account_id': 3}
         base = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
                 'landmark': 'напротив школы', 'source': 'phone', 'items': []}
-        for payload in (base, {**base, 'pharmacy_id': 2, 'items': [{'medicine_id': 44, 'quantity': 1}]}):
+        with self.assertRaises(ContractError):
+            create_staff_order(base, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+
+    def test_pharmacy_two_order_uses_catalogue_with_courier_client_price(self):
+        courier = {**self.account, 'account_id': 3, 'username': 'courier', 'role': 'courier'}
+        order_cursor = Mock()
+        order_cursor.fetchone.side_effect = [
+            {'id': 1}, {'id': 12, 'public_id': 'ord_test', 'status': 'pending',
+                        'created_at': '2026-10-10T10:00:00Z'},
+        ]
+        order_cursor.fetchall.return_value = [
+            {'id': 44, 'name': 'NOW D3', 'price': '10.00', 'selling_unit_price': 12, 'in_stock': True},
+            {'id': 45, 'name': 'Omega', 'price': '20.00', 'selling_unit_price': 23, 'in_stock': True},
+        ]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            response, _, notification = create_staff_order({
+                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone', 'pharmacy_id': 2,
+                'items': [{'medicine_id': 44, 'quantity': 2, 'unit_price': '12.5'},
+                          {'medicine_id': 45, 'quantity': 1}],
+            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+        self.assertEqual(response['fulfillment_pharmacy_id'], 2)
+        self.assertEqual(response['items'][0]['selling_unit_price'], '12.50')
+        self.assertEqual(response['items'][0]['base_unit_price'], '10.00')
+        self.assertEqual(response['items'][1]['selling_unit_price'], '20.00')
+        self.assertEqual(response['order_total'], '45.00')
+        self.assertEqual(notification['profit'], '5.00')
+
+    def test_staff_order_item_price_is_validated(self):
+        base = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone'}
+        self.assertEqual(validate_staff_order_request({**base, 'items': [
+            {'medicine_id': 44, 'quantity': 1, 'unit_price': 7}]})['items'][0]['unit_price'], '7.00')
+        for price in ('0', 'x', '1.001', None):
             with self.assertRaises(ContractError):
-                create_staff_order(payload, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+                validate_staff_order_request({**base, 'items': [{'medicine_id': 44, 'quantity': 1, 'unit_price': price}]})
 
     def test_employee_without_catalog_cannot_read_catalog(self):
         without_catalog = {**self.account, 'account_id': 1, 'catalog_access': False}

@@ -6,12 +6,14 @@ import html
 import hmac
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from backend.v1.shared.order_notification_messages import format_configured_message
+from backend.v1.shared.order_notification_settings import default_policies
 
 
 def _authorizer_response(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -235,6 +237,7 @@ def _send_message(
     event: dict[str, Any],
     *,
     include_admin_link: bool = True,
+    buttons: list[dict[str, str]] | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
@@ -244,7 +247,9 @@ def _send_message(
     }
     base_url = os.environ.get("ADMIN_ORDER_BASE_URL", "").strip().rstrip("/")
     order_id = event.get("admin_order_id")
-    if include_admin_link and base_url.startswith("https://") and isinstance(order_id, int):
+    if buttons:
+        payload["reply_markup"] = {"inline_keyboard": [buttons]}
+    elif include_admin_link and base_url.startswith("https://") and isinstance(order_id, int):
         payload["reply_markup"] = {
             "inline_keyboard": [[{"text": "Открыть заказ", "url": f"{base_url}/{order_id}"}]],
         }
@@ -261,6 +266,32 @@ def _send_message(
         raise RuntimeError("Telegram delivery failed") from exc
     if not body.get("ok"):
         raise RuntimeError("Telegram rejected the notification")
+
+
+def courier_buttons(event: dict[str, Any]) -> list[dict[str, str]]:
+    """Open the order in the courier cabinet and dial the client (Telegram buttons cannot use tel: links)."""
+    site = os.environ.get("STAFF_SITE_BASE_URL", "").strip().rstrip("/")
+    if not site.startswith("https://"):
+        return []
+    buttons = []
+    public_id = str(event.get("order_id") or "")
+    if re.fullmatch(r"ord_[0-9a-f]{32}", public_id):
+        buttons.append({"text": "📦 Открыть заказ", "url": f"{site}/staff/orders/{public_id}"})
+    digits = "".join(character for character in str(event.get("phone") or "") if character.isdigit())
+    if len(digits) == 9:
+        digits = f"992{digits}"
+    if re.fullmatch(r"992[0-9]{9}", digits):
+        buttons.append({"text": "📞 Позвонить", "url": f"{site}/call/{digits}"})
+    return buttons
+
+
+def format_courier_assembly_message(event: dict[str, Any]) -> str:
+    """Copy of the pharmacy picking list the courier can forward to the pharmacy."""
+    fields = default_policies()["pharmacy_telegram"]
+    text = format_configured_message(event, fields, "pharmacy_telegram")
+    first, _, rest = text.partition("\n")
+    pharmacy = html.escape(str(event.get("fulfillment_pharmacy_id") or 1))
+    return f"{first}\n🏥 Аптека {pharmacy} · переслать в аптеку\n{rest}"
 
 
 def _notification_event(event: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -295,12 +326,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     order_id = notification.get("admin_order_id")
     if type(order_id) is not int or order_id <= 0:
         raise RuntimeError("Notification order ID is missing")
-    is_staff = notification.get("notification_kind") == "staff_manual_order"
-    is_courier_created = notification.get("created_by_staff_account_id") == 3
+    # Pharmacy and courier are notified only about website orders; staff orders are entered by them.
+    is_website_order = notification.get("notification_kind") != "staff_manual_order"
     recipients = [("owner_telegram", token, owner_chat_id, True)]
-    if not is_staff and pharmacy_chat_id:
+    if is_website_order and pharmacy_chat_id:
         recipients.append(("pharmacy_telegram", token, pharmacy_chat_id, False))
-    if not is_courier_created and delivery_chat_id:
+    if is_website_order and delivery_chat_id:
         recipients.append(("courier_telegram", delivery_token, delivery_chat_id, False))
     messages_sent = 0
     for recipient, message_token, chat_id, include_admin_link in recipients:
@@ -311,8 +342,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if not isinstance(fields, dict):
             raise RuntimeError("Notification policy is missing")
         _send_message(message_token, chat_id, format_configured_message(notification, fields, recipient),
-                      notification, include_admin_link=include_admin_link)
+                      notification, include_admin_link=include_admin_link,
+                      buttons=courier_buttons(notification) if recipient == "courier_telegram" else None)
         messages_sent += 1
+        if recipient == "courier_telegram":
+            _send_message(message_token, chat_id, format_courier_assembly_message(notification),
+                          notification, include_admin_link=False)
+            messages_sent += 1
     result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": messages_sent}
     if is_api_gateway:
         return {

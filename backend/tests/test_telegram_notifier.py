@@ -4,7 +4,9 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from backend.v1.telegram_notifier.lambda_function import (
+    courier_buttons,
     format_configured_message,
+    format_courier_assembly_message,
     format_delivery_message,
     format_owner_message,
     format_pharmacy_message,
@@ -120,7 +122,7 @@ class TelegramDispatchTests(unittest.TestCase):
 
     @patch("backend.v1.telegram_notifier.lambda_function._claim_delivery")
     @patch("backend.v1.telegram_notifier.lambda_function._send_message")
-    def test_api_gateway_payload_sends_three_messages(self, send_message, claim):
+    def test_website_order_goes_to_owner_pharmacy_and_twice_to_courier(self, send_message, claim):
         claim.side_effect = lambda key, channel: {'claimed': True, 'fields': default_policies()[channel]}
         event = {
             "requestContext": {"requestId": "test"},
@@ -132,9 +134,13 @@ class TelegramDispatchTests(unittest.TestCase):
         }):
             response = lambda_handler(event, None)
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(send_message.call_count, 3)
-        self.assertEqual([call.args[1] for call in send_message.call_args_list], ["owner", "pharmacy", "courier"])
+        self.assertEqual(send_message.call_count, 4)
+        self.assertEqual([call.args[1] for call in send_message.call_args_list],
+                         ["owner", "pharmacy", "courier", "courier"])
         self.assertFalse(send_message.call_args_list[1].kwargs["include_admin_link"])
+        self.assertIn("Новая доставка", send_message.call_args_list[2].args[2])
+        self.assertIn("переслать в аптеку", send_message.call_args_list[3].args[2])
+        self.assertEqual(json.loads(response["body"])["data"]["messages_sent"], 4)
 
     @patch("backend.v1.telegram_notifier.lambda_function._claim_delivery")
     @patch("backend.v1.telegram_notifier.lambda_function._send_message")
@@ -198,15 +204,41 @@ class TelegramDispatchTests(unittest.TestCase):
 
     @patch("backend.v1.telegram_notifier.lambda_function._claim_delivery")
     @patch("backend.v1.telegram_notifier.lambda_function._send_message")
-    def test_pharmacy_created_order_goes_to_owner_and_courier(self, send_message, claim):
+    def test_staff_created_order_goes_to_owner_only(self, send_message, claim):
         claim.side_effect = lambda key, channel: {'claimed': True, 'fields': default_policies()[channel]}
         event = {'admin_order_id': 18, 'notification_kind': 'staff_manual_order',
                  'created_by_staff_account_id': 1, 'order_reference': '1234-018', 'items': []}
         with patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'token', 'TELEGRAM_OWNER_CHAT_ID': 'owner',
+                                    'TELEGRAM_PHARMACY_CHAT_ID': 'pharmacy',
                                     'TELEGRAM_DELIVERY_CHAT_ID': 'courier'}, clear=True):
             result = lambda_handler(event, None)
-        self.assertEqual(result['messages_sent'], 2)
-        self.assertEqual([call.args[1] for call in send_message.call_args_list], ['owner', 'courier'])
+        self.assertEqual(result['messages_sent'], 1)
+        self.assertEqual([call.args[1] for call in send_message.call_args_list], ['owner'])
+
+    def test_courier_buttons_open_order_and_call_client(self):
+        event = {'order_id': 'ord_' + 'a' * 32, 'phone': '+992 917-12-34-56'}
+        with patch.dict('os.environ', {'STAFF_SITE_BASE_URL': 'https://vatan.example/'}):
+            buttons = courier_buttons(event)
+        self.assertEqual(buttons, [
+            {'text': '📦 Открыть заказ', 'url': 'https://vatan.example/staff/orders/ord_' + 'a' * 32},
+            {'text': '📞 Позвонить', 'url': 'https://vatan.example/call/992917123456'},
+        ])
+        with patch.dict('os.environ', {'STAFF_SITE_BASE_URL': 'http://insecure'}):
+            self.assertEqual(courier_buttons(event), [])
+        with patch.dict('os.environ', {'STAFF_SITE_BASE_URL': 'https://vatan.example'}):
+            self.assertEqual(courier_buttons({'order_id': '../x', 'phone': '12'}), [])
+
+    def test_assembly_message_lists_items_without_client_data(self):
+        text = format_courier_assembly_message({
+            'order_reference': '1234-001', 'customer_name': 'Секрет', 'phone': '+992917123456',
+            'items': [{'medicine_name': 'Парацетамол', 'quantity': '2', 'base_line_total': '36'}],
+            'base_total': '36', 'fulfillment_pharmacy_id': 1,
+        })
+        self.assertIn('Заказ на сборку 1234-001', text)
+        self.assertIn('Аптека 1', text)
+        self.assertIn('Парацетамол × 2', text)
+        self.assertNotIn('Секрет', text)
+        self.assertNotIn('917123456', text)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import { createStaffOrder, getStaffSession, listCourierOrders } from '@/lib/api-
 import { sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 import type { CreateStaffOrderRequest } from '@/lib/api-v1/staff-types';
+import { isCatalogOrderItem, isManualOrderItem } from '@/lib/staff-order-items';
 
 function isRequest(value: unknown): value is CreateStaffOrderRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -19,23 +20,8 @@ function isRequest(value: unknown): value is CreateStaffOrderRequest {
     && (body.pharmacy_id === undefined || body.pharmacy_id === 1 || body.pharmacy_id === 2)
     && Array.isArray(body.items) && body.items.length <= 50
     && (body.manual_items === undefined || Array.isArray(body.manual_items) && body.manual_items.length <= 20 &&
-      body.manual_items.every((item: unknown) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-        const fields = item as Record<string, unknown>;
-        return Object.keys(fields).length === 3 && typeof fields.medicine_name === 'string' &&
-          fields.medicine_name.trim().length >= 2 && fields.medicine_name.trim().length <= 200 &&
-          typeof fields.price === 'string' && /^\d{1,6}(?:\.\d{1,2})?$/.test(fields.price) &&
-          Number(fields.price) > 0 && typeof fields.quantity === 'number' && Number.isFinite(fields.quantity) &&
-          fields.quantity >= 0.5 && fields.quantity <= 99 && Number.isInteger(fields.quantity * 2);
-      }))
-    && body.items.every((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-      const fields = item as Record<string, unknown>;
-      return Object.keys(fields).length === 2
-        && Number.isInteger(fields.medicine_id) && Number(fields.medicine_id) > 0
-        && typeof fields.quantity === 'number' && Number.isFinite(fields.quantity)
-        && fields.quantity >= 0.5 && fields.quantity <= 99 && Number.isInteger(fields.quantity * 2);
-    });
+      body.manual_items.every(isManualOrderItem))
+    && body.items.every(isCatalogOrderItem);
 }
 
 export async function GET(request: Request) {
@@ -68,8 +54,7 @@ export async function POST(request: Request) {
     const idempotencyKey = request.headers.get('idempotency-key');
     if (!idempotencyKey) return NextResponse.json({ error: 'Повторите отправку' }, { status: 400 });
     const body: unknown = await request.json();
-    if (!isRequest(body) || body.pharmacy_id === undefined
-      || (body.pharmacy_id === 2 && body.items.length > 0)) {
+    if (!isRequest(body) || body.pharmacy_id === undefined) {
       return NextResponse.json({ error: 'Проверьте заполнение полей' }, { status: 400 });
     }
     const response = await createStaffOrder(token, body, idempotencyKey);

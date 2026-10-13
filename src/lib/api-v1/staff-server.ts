@@ -1,13 +1,13 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { CourierEarnings, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
+import type { CourierEarnings, CourierOrder, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
 type StaffRequestOptions = {
   token?: string;
-  method?: 'GET' | 'POST' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   idempotencyKey?: string;
 };
@@ -87,7 +87,7 @@ export function listCourierOrders(token: string, values: { status?: CourierOrder
 }
 
 export function addCourierOrderItems(token: string, orderId: string,
-  items: Array<{ medicine_id: number; quantity: number }>, idempotencyKey: string) {
+  items: Array<{ medicine_id: number; quantity: number; unit_price?: string }>, idempotencyKey: string) {
   return request<ApiSuccessResponse<{ order_id: string; added: number; quantity_increased: number;
     items_subtotal: string; currency: 'TJS' }>>(
     `orders/${encodeURIComponent(orderId)}/items`,
@@ -120,6 +120,27 @@ export function updateCourierOrderStatus(token: string, orderId: string, body: {
 }) {
   return request<ApiSuccessResponse<{ order_id: string; status: CourierOrderStatus; changed_at: string }>>(
     `orders/${encodeURIComponent(orderId)}/status`, { token, method: 'PATCH', body },
+  );
+}
+
+export type CourierCustomerFields = { customer_name: string; phone: string; address: string; landmark: string };
+
+export function updateCourierOrderCustomer(token: string, orderId: string, body: CourierCustomerFields) {
+  return request<ApiSuccessResponse<{ order_id: string } & CourierCustomerFields>>(
+    `orders/${encodeURIComponent(orderId)}/customer`, { token, method: 'PATCH', body },
+  );
+}
+
+export function getCourierOrder(token: string, orderId: string) {
+  return request<ApiSuccessResponse<CourierOrder>>(`orders/${encodeURIComponent(orderId)}`, { token });
+}
+
+export function updateCourierOrderItem(token: string, orderId: string, itemId: number,
+  body: { quantity?: number; unit_price?: string } | null) {
+  return request<ApiSuccessResponse<{ order_id: string; order_item_id: number; removed: boolean;
+    order_total: string; currency: 'TJS' }>>(
+    `orders/${encodeURIComponent(orderId)}/items/${itemId}`,
+    body === null ? { token, method: 'DELETE' } : { token, method: 'PATCH', body },
   );
 }
 

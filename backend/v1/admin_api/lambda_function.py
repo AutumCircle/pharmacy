@@ -28,6 +28,7 @@ from backend.v1.shared.contract import (
     validate_manual_order_items,
     validate_order_quantity,
     validate_staff_order_request,
+    validate_unit_price,
     validate_status_transition,
 )
 from backend.v1.shared.authorization import require_admin_identity, require_notification_claim_identity
@@ -831,6 +832,7 @@ def search_staff_order_medicines(query: dict[str, Any]) -> dict[str, Any]:
         cur.execute(
             """
             SELECT id AS medicine_id, name AS medicine_name, price AS base_unit_price,
+                   vatan_selling_unit_price(price) AS selling_unit_price,
                    source_sku, country, vendor, in_stock
             FROM medicines
             WHERE in_stock IS TRUE
@@ -982,11 +984,12 @@ def list_medicine_duplicates(query: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _order_lookup(order_id: str) -> tuple[str, tuple[Any, ...]]:
+def _order_lookup(order_id: str, alias: str = "") -> tuple[str, tuple[Any, ...]]:
+    prefix = f"{alias}." if alias else ""
     if order_id.startswith("legacy_"):
         legacy_id = _positive_int(order_id.removeprefix("legacy_"), "order_id")
-        return "id = %s AND public_id IS NULL", (legacy_id,)
-    return "public_id = %s", (order_id,)
+        return f"{prefix}id = %s AND {prefix}public_id IS NULL", (legacy_id,)
+    return f"{prefix}public_id = %s", (order_id,)
 
 
 def create_staff_order(
@@ -1000,8 +1003,6 @@ def create_staff_order(
         raise ContractError("FORBIDDEN", "Заказы создаёт только доставщик", http_status=403)
     if request.get("pharmacy_id") not in (1, 2):
         raise ContractError("VALIDATION_ERROR", "Доставщик должен выбрать аптеку")
-    if request["items"] and request["pharmacy_id"] != 1:
-        raise ContractError("VALIDATION_ERROR", "Каталог лекарств доступен только для аптеки 1")
     pharmacy_id = request["pharmacy_id"]
     normalized_key = validate_idempotency_key(idempotency_key)
     request_hash = hashlib.sha256(
@@ -1058,8 +1059,10 @@ def create_staff_order(
                 medicine = medicines[requested_item["medicine_id"]]
                 quantity = Decimal(str(requested_item["quantity"]))
                 base_price = Decimal(str(medicine["price"]))
-                # Courier-entered orders use the pharmacy's base price, never the public markup.
-                selling_price = base_price
+                # Courier-entered orders default to the pharmacy's base price, never the public markup;
+                # the courier may set the client price explicitly.
+                selling_price = (Decimal(requested_item["unit_price"]) if "unit_price" in requested_item
+                                 else base_price)
                 base_line_total = base_price * quantity
                 selling_line_total = selling_price * quantity
                 base_total += base_line_total
@@ -1170,8 +1173,53 @@ def create_staff_order(
         return response, 201, notification
 
 
+_COURIER_ORDER_SELECT = """
+    SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
+           o.address, o.landmark, o.notes, o.order_source, o.status, o.created_at,
+           o.delivery_courier_amount, o.order_total,
+           o.created_by_staff_account_id IS NULL AS website_order,
+           COALESCE(o.created_by_staff_account_id = 3, false) AS own_order,
+           COALESCE(items.medicines, '[]'::json) AS medicines,
+           COALESCE(o.fulfillment_pharmacy_id,
+               CASE WHEN o.created_by_staff_account_id IN (1, 2)
+                    THEN o.created_by_staff_account_id ELSE 1 END) AS pharmacy_id
+    FROM orders o
+    LEFT JOIN LATERAL (
+        SELECT json_agg(json_build_object('order_item_id', oi.id, 'medicine_id', oi.medicine_id,
+            'medicine_name', oi.medicine_name, 'quantity', oi.quantity,
+            'base_unit_price', COALESCE(oi.base_unit_price, oi.price),
+            'selling_unit_price', COALESCE(oi.selling_unit_price, oi.price),
+            'line_total', oi.line_total) ORDER BY oi.id) AS medicines
+        FROM order_items oi WHERE oi.order_id = o.id
+    ) items ON true
+"""
+
+
+def _courier_order_row(row: dict[str, Any]) -> dict[str, Any]:
+    row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
+    row.pop("id")
+    row["created_at"] = order_time_iso(row["created_at"])
+    return row
+
+
+def _require_courier_own_order(order: dict[str, Any]) -> None:
+    """Couriers change content only in orders they entered; website orders belong to the admin."""
+    if order.get("created_by_staff_account_id") != 3:
+        raise ContractError("FORBIDDEN", "Заказ с сайта может изменить только администратор", http_status=403)
+
+
+def get_courier_order(order_id: str) -> dict[str, Any]:
+    lookup, lookup_values = _order_lookup(order_id, "o")
+    with transaction() as cur:
+        cur.execute(f"{_COURIER_ORDER_SELECT} WHERE {lookup} AND o.deleted_at IS NULL", lookup_values)
+        row = cur.fetchone()
+    if not row:
+        raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+    return _courier_order_row(dict(row))
+
+
 def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
-    """Delivery-only projection: no catalogue prices, payment or admin fields."""
+    """Delivery projection with the order's own client prices; no admin or payment fields."""
     if set(query) - {"limit", "cursor", "status"}:
         raise ContractError("VALIDATION_ERROR", "Unknown order filter")
     limit = min(_limit(query), 50)
@@ -1197,20 +1245,7 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
     params.append(limit + 1)
     with transaction() as cur:
         cur.execute(
-            f"""SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
-                       o.address, o.landmark, o.notes, o.order_source, o.status, o.created_at,
-                       o.delivery_courier_amount,
-                       COALESCE(items.medicines, '[]'::json) AS medicines,
-                       COALESCE(o.fulfillment_pharmacy_id,
-                           CASE WHEN o.created_by_staff_account_id IN (1, 2)
-                                THEN o.created_by_staff_account_id ELSE 1 END) AS pharmacy_id
-                FROM orders o
-                LEFT JOIN LATERAL (
-                    SELECT json_agg(json_build_object('medicine_id', oi.medicine_id,
-                        'medicine_name', oi.medicine_name, 'quantity', oi.quantity,
-                        'base_unit_price', COALESCE(oi.base_unit_price, oi.price)) ORDER BY oi.id) AS medicines
-                    FROM order_items oi WHERE oi.order_id = o.id
-                ) items ON true
+            f"""{_COURIER_ORDER_SELECT}
                 WHERE {' AND '.join(clauses)}
                 ORDER BY o.created_at DESC, o.id DESC LIMIT %s""",
             tuple(params),
@@ -1222,11 +1257,8 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
     if has_more and rows:
         last = rows[-1]
         next_cursor = _encode_cursor({"created_at": last["created_at"].isoformat(), "id": last["id"]})
-    for row in rows:
-        row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
-        row.pop("id")
-        row["created_at"] = order_time_iso(row["created_at"])
-    return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
+    return {"data": [_courier_order_row(row) for row in rows],
+            "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
 def add_courier_order_items(
@@ -1234,22 +1266,28 @@ def add_courier_order_items(
     actor_id: str = "staff:3",
     allow_cancelled: bool = False,
 ) -> dict[str, Any]:
-    """Atomically add catalogue medicines to a non-cancelled pharmacy-1 order."""
+    """Atomically add catalogue medicines to a non-cancelled order of either pharmacy.
+
+    Both pharmacies share one catalogue price list; an optional unit_price sets the client price.
+    """
     if not isinstance(payload, dict) or set(payload) != {"items"} or not isinstance(payload["items"], list):
         raise ContractError("VALIDATION_ERROR", "Укажите лекарства для добавления")
-    requested = payload["items"]
-    if not 1 <= len(requested) <= 20:
+    if not 1 <= len(payload["items"]) <= 20:
         raise ContractError("VALIDATION_ERROR", "Можно добавить от 1 до 20 лекарств за раз")
+    requested: list[dict[str, Any]] = []
     seen: set[int] = set()
-    for item in requested:
-        if (not isinstance(item, dict) or set(item) != {"medicine_id", "quantity"}
+    for item in payload["items"]:
+        if (not isinstance(item, dict) or not {"medicine_id", "quantity"} <= set(item) <= {"medicine_id", "quantity", "unit_price"}
                 or type(item["medicine_id"]) is not int or item["medicine_id"] <= 0
                 or item["medicine_id"] in seen):
             raise ContractError("VALIDATION_ERROR", "Проверьте лекарства и количество")
         try:
-            item["quantity"] = str(validate_order_quantity(item["quantity"]))
+            normalized = {"medicine_id": item["medicine_id"], "quantity": str(validate_order_quantity(item["quantity"]))}
         except ContractError as exc:
             raise ContractError("VALIDATION_ERROR", "Проверьте лекарства и количество") from exc
+        if "unit_price" in item:
+            normalized["unit_price"] = str(validate_unit_price(item["unit_price"]))
+        requested.append(normalized)
         seen.add(item["medicine_id"])
     normalized_key = validate_idempotency_key(idempotency_key)
     request_hash = hashlib.sha256(json.dumps({"order_id": order_id, "items": requested},
@@ -1266,8 +1304,8 @@ def add_courier_order_items(
             raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
         if order["status"] == "cancelled" and not allow_cancelled:
             raise ContractError("ORDER_STATUS_CONFLICT", "Отменённый заказ нельзя изменить", http_status=409)
-        if order["pharmacy_id"] != 1:
-            raise ContractError("PHARMACY_CATALOG_UNAVAILABLE", "Каталог аптеки 2 пока не подключён", http_status=409)
+        if actor_id == "staff:3":
+            _require_courier_own_order(order)
         cur.execute("""INSERT INTO order_idempotency (idempotency_key, request_hash)
                        VALUES (%s, %s) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id""",
                     (normalized_key, request_hash))
@@ -1303,20 +1341,27 @@ def add_courier_order_items(
                 quantity = Decimal(str(existing_item["quantity"])) + Decimal(item["quantity"])
                 if quantity > 99:
                     raise ContractError("VALIDATION_ERROR", "Количество одного лекарства не может превышать 99")
-                updates.append({"order_item_id": int(existing_item["id"]), "quantity": str(quantity)})
+                updates.append({"order_item_id": int(existing_item["id"]), "quantity": str(quantity),
+                                "unit_price": item.get("unit_price")})
             else:
                 medicine = medicines[medicine_id]
                 base_price = Decimal(str(medicine["price"]))
-                selling_price = (base_price if order["created_by_staff_account_id"] is not None
-                                 else Decimal(str(medicine["selling_unit_price"])))
+                if "unit_price" in item:
+                    selling_price = Decimal(item["unit_price"])
+                else:
+                    selling_price = (base_price if order["created_by_staff_account_id"] is not None
+                                     else Decimal(str(medicine["selling_unit_price"])))
                 inserts.append({"medicine_id": medicine_id, "medicine_name": medicine["name"],
                     "quantity": item["quantity"], "base_unit_price": str(base_price),
                     "selling_unit_price": str(selling_price),
-                    "line_total": str(selling_price * Decimal(item["quantity"]))})
+                    "line_total": str((selling_price * Decimal(item["quantity"])).quantize(Decimal("0.01")))})
         if updates:
             cur.execute("""UPDATE order_items oi SET quantity = data.quantity,
-                           line_total = data.quantity * COALESCE(oi.selling_unit_price, oi.price)
-                           FROM jsonb_to_recordset(%s::jsonb) AS data(order_item_id bigint, quantity numeric)
+                           selling_unit_price = COALESCE(data.unit_price, oi.selling_unit_price),
+                           price = COALESCE(data.unit_price, oi.price),
+                           line_total = data.quantity * COALESCE(data.unit_price, oi.selling_unit_price, oi.price)
+                           FROM jsonb_to_recordset(%s::jsonb) AS data(order_item_id bigint, quantity numeric,
+                                                                      unit_price numeric)
                            WHERE oi.id = data.order_item_id AND oi.order_id = %s""",
                         (json.dumps(updates), order["id"]))
         if inserts:
@@ -1361,13 +1406,15 @@ def add_manual_order_items(
         sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
     lookup, lookup_values = _order_lookup(order_id)
     with transaction() as cur:
-        cur.execute(f"""SELECT id, status, items_subtotal FROM orders
+        cur.execute(f"""SELECT id, status, items_subtotal, created_by_staff_account_id FROM orders
                        WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
         order = cur.fetchone()
         if not order:
             raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
         if order["status"] == "cancelled" and not allow_cancelled:
             raise ContractError("ORDER_STATUS_CONFLICT", "Отменённый заказ нельзя изменить", http_status=409)
+        if actor_id == "staff:3":
+            _require_courier_own_order(order)
         cur.execute("""INSERT INTO order_idempotency (idempotency_key, request_hash)
                        VALUES (%s, %s) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id""",
                     (normalized_key, request_hash))
@@ -1544,11 +1591,13 @@ def courier_earnings(query: dict[str, Any]) -> dict[str, Any]:
                                 THEN o.created_at::timestamp AT TIME ZONE 'UTC'
                                 ELSE o.created_at::timestamptz END
                        ) AT TIME ZONE 'Asia/Dushanbe')::date AS earned_day,
-                       o.delivery_courier_amount
+                       o.delivery_courier_amount, o.created_by_staff_account_id
                 FROM orders o
                 WHERE o.deleted_at IS NULL AND o.status = 'delivered'
             )
             SELECT earned_day AS date, COUNT(*) AS orders_count,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id = 3) AS courier_orders_count,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id IS NULL) AS website_orders_count,
                    COALESCE(SUM(delivery_courier_amount), 0) AS amount
             FROM earned
             {cursor_clause}
@@ -1891,6 +1940,112 @@ def update_order_customer(order_id: str, payload: dict[str, Any], actor_id: str,
             details={"previous": {"customer_name": order["customer_name"], "phone": order["phone"], "address": order["address"], "landmark": order["landmark"], "comment": order["notes"]},
                 "current": {"customer_name": customer_name, "phone": phone, "address": address, "landmark": landmark, "comment": comment}, "revision": new_revision})
     return {"order_id": order_id, "edit_revision": new_revision}
+
+
+def _courier_text(value: Any, label: str, minimum: int, maximum: int) -> str:
+    if not isinstance(value, str):
+        raise ContractError("VALIDATION_ERROR", f"Укажите {label}")
+    text = " ".join(value.split())
+    if not minimum <= len(text) <= maximum or "\x00" in text:
+        raise ContractError("VALIDATION_ERROR",
+                            f"Поле «{label}»: от {minimum} до {maximum} символов" if minimum else
+                            f"Поле «{label}»: не длиннее {maximum} символов")
+    return text
+
+
+def update_courier_order_customer(order_id: str, payload: dict[str, Any], current_request_id: str) -> dict[str, Any]:
+    """Courier fixes typos in an order they entered; allowed in every status, never in website orders."""
+    fields = {"customer_name", "phone", "address", "landmark"}
+    if not isinstance(payload, dict) or set(payload) != fields:
+        raise ContractError("VALIDATION_ERROR", "Укажите имя, телефон, адрес и ориентир")
+    customer_name = _courier_text(payload["customer_name"], "имя", 0, 120)
+    try:
+        phone = normalize_phone(payload["phone"])
+    except ContractError as exc:
+        raise ContractError("VALIDATION_ERROR", "Телефон должен содержать 9 цифр после +992") from exc
+    address = _courier_text(payload["address"], "адрес", 3, 500)
+    landmark = _courier_text(payload["landmark"], "ориентир", 2, 300)
+    lookup, lookup_values = _order_lookup(order_id)
+    with transaction() as cur:
+        cur.execute(f"""SELECT id, customer_name, phone, address, landmark, created_by_staff_account_id
+                        FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
+        order = cur.fetchone()
+        if not order:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        _require_courier_own_order(order)
+        # Bumping edit_revision makes an admin form opened earlier refuse to overwrite this change.
+        cur.execute("""UPDATE orders SET customer_name = %s, phone = %s, phone_normalized = %s,
+                       address = %s, landmark = %s, edit_revision = edit_revision + 1 WHERE id = %s""",
+                    (customer_name, phone, phone, address, landmark, order["id"]))
+        previous = {key: order[key] for key in ("customer_name", "phone", "address", "landmark")}
+        current = {"customer_name": customer_name, "phone": phone, "address": address, "landmark": landmark}
+        _write_admin_audit(cur, actor_id="staff:3", action="courier.order.customer_updated",
+                           resource_type="order", resource_id=order_id, request=current_request_id,
+                           details={"previous": previous, "current": current})
+    return {"order_id": order_id, **current}
+
+
+def update_courier_order_item(
+    order_id: str, order_item_id: int, payload: dict[str, Any] | None, current_request_id: str,
+) -> dict[str, Any]:
+    """Courier changes quantity/client price of one line, or removes it (payload None)."""
+    quantity: Decimal | None = None
+    unit_price: Decimal | None = None
+    if payload is not None:
+        if (not isinstance(payload, dict) or not payload
+                or set(payload) - {"quantity", "unit_price"}):
+            raise ContractError("VALIDATION_ERROR", "Укажите количество или цену")
+        if "quantity" in payload:
+            try:
+                quantity = validate_order_quantity(payload["quantity"])
+            except ContractError as exc:
+                raise ContractError("VALIDATION_ERROR", "Количество: от 0,5 до 99 с шагом 0,5") from exc
+        if "unit_price" in payload:
+            unit_price = validate_unit_price(payload["unit_price"])
+    lookup, lookup_values = _order_lookup(order_id)
+    with transaction() as cur:
+        cur.execute(f"""SELECT id, status, items_subtotal, created_by_staff_account_id FROM orders
+                        WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
+        order = cur.fetchone()
+        if not order:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        if order["status"] == "cancelled":
+            raise ContractError("ORDER_STATUS_CONFLICT", "Отменённый заказ нельзя изменить", http_status=409)
+        _require_courier_own_order(order)
+        cur.execute("""SELECT id, medicine_id, medicine_name, quantity, selling_unit_price, price
+                       FROM order_items WHERE id = %s AND order_id = %s FOR UPDATE""",
+                    (order_item_id, order["id"]))
+        item = cur.fetchone()
+        if not item:
+            raise ContractError("ORDER_ITEM_NOT_FOUND", "Товар уже удалён из заказа", http_status=404)
+        previous_price = Decimal(str(item["selling_unit_price"] if item["selling_unit_price"] is not None else item["price"]))
+        if payload is None:
+            cur.execute("DELETE FROM order_items WHERE id = %s AND order_id = %s", (item["id"], order["id"]))
+        else:
+            new_quantity = quantity if quantity is not None else Decimal(str(item["quantity"]))
+            new_price = unit_price if unit_price is not None else previous_price
+            cur.execute("""UPDATE order_items SET quantity = %s, selling_unit_price = %s, price = %s, line_total = %s
+                           WHERE id = %s AND order_id = %s""",
+                        (new_quantity, new_price, new_price, (new_quantity * new_price).quantize(Decimal("0.01")),
+                         item["id"], order["id"]))
+        cur.execute("SELECT COALESCE(SUM(line_total), 0) AS total FROM order_items WHERE order_id = %s", (order["id"],))
+        total = cur.fetchone()["total"]
+        if total > Decimal("99999999.99"):
+            raise ContractError("VALIDATION_ERROR", "Сумма заказа слишком велика")
+        cur.execute("UPDATE orders SET items_subtotal = %s, order_total = %s, total_price = %s WHERE id = %s",
+                    (total, total, total, order["id"]))
+        _write_admin_audit(
+            cur, actor_id="staff:3",
+            action="courier.order.item_removed" if payload is None else "courier.order.item_updated",
+            resource_type="order_item", resource_id=str(item["id"]), request=current_request_id,
+            details={"order_id": order_id, "medicine_id": item["medicine_id"], "medicine_name": item["medicine_name"],
+                     "status": order["status"], "previous_quantity": str(item["quantity"]),
+                     "previous_price": str(previous_price), "new_quantity": None if quantity is None else str(quantity),
+                     "new_price": None if unit_price is None else str(unit_price),
+                     "previous_subtotal": str(order["items_subtotal"]), "new_subtotal": str(total)},
+        )
+    return {"order_id": order_id, "order_item_id": item["id"], "removed": payload is None,
+            "order_total": str(total), "currency": "TJS"}
 
 
 def update_order_status(order_id: str, payload: dict[str, Any], actor_id: str) -> dict[str, Any]:
@@ -3627,6 +3782,23 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
                 return success(add_manual_order_items(manual_match.group(1), _body(event),
                     str(headers.get("idempotency-key") or ""), current_request_id, "staff:3"), request=current_request_id)
+            order_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)", staff_path)
+            if staff_method == "GET" and order_match:
+                staff_accounts.session_account(event, courier=True)
+                return success(get_courier_order(order_match.group(1)), request=current_request_id)
+            item_match = re.fullmatch(
+                r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/items/([1-9][0-9]{0,17})", staff_path)
+            if staff_method in {"PATCH", "DELETE"} and item_match:
+                staff_accounts.session_account(event, courier=True)
+                return success(update_courier_order_item(
+                    item_match.group(1), int(item_match.group(2)),
+                    _body(event) if staff_method == "PATCH" else None, current_request_id,
+                ), request=current_request_id)
+            customer_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/customer", staff_path)
+            if staff_method == "PATCH" and customer_match:
+                staff_accounts.session_account(event, courier=True)
+                return success(update_courier_order_customer(customer_match.group(1), _body(event),
+                    current_request_id), request=current_request_id)
             status_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/status", staff_path)
             if staff_method == "PATCH" and status_match:
                 staff_accounts.session_account(event, courier=True)

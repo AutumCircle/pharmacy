@@ -103,6 +103,7 @@ Telegram notifier variables are configured only in AWS, never in Git:
 - `NOTIFIER_BEARER_TOKEN`, `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_OWNER_CHAT_ID`, `TELEGRAM_PHARMACY_CHAT_ID`, `TELEGRAM_DELIVERY_CHAT_ID`
 - optional `TELEGRAM_CHAT_ID` fallback and `ADMIN_ORDER_BASE_URL`
+- optional `STAFF_SITE_BASE_URL` (e.g. `https://<site>`): adds «📦 Открыть заказ» (`/staff/orders/{order_id}`) and «📞 Позвонить» (`/call/992XXXXXXXXX`, opens the phone dialer) buttons to the courier message. Pharmacy and courier receive only website orders; the courier gets two messages: his delivery card and a picking list to forward to the pharmacy.
 
 ## 6. Pharmacy PC catalogue sync
 
