@@ -37,12 +37,16 @@ export async function updateOrderCustomer(orderId: string, fields: {
   }
 }
 
-export async function addOrderMedicines(orderId: string, items: Array<{ medicine_id: number; quantity: number }>, idempotencyKey: string) {
+export async function addOrderMedicines(orderId: string,
+  items: Array<{ medicine_id: number; quantity: number; unit_price?: string }>, idempotencyKey: string) {
   try {
     await requireAdminSession();
     if (!Array.isArray(items) || items.length < 1 || items.length > 20 ||
       items.some((item) => !Number.isInteger(item.medicine_id) || item.medicine_id <= 0 ||
-        !Number.isFinite(item.quantity) || item.quantity < 0.5 || item.quantity > 99 || !Number.isInteger(item.quantity * 2))) throw new Error('Количество — от 0,5 до 99 с шагом 0,5');
+        !Number.isFinite(item.quantity) || item.quantity < 0.5 || item.quantity > 99 || !Number.isInteger(item.quantity * 2)
+        || (item.unit_price !== undefined && (!/^\d{1,6}(?:\.\d{1,2})?$/.test(item.unit_price) || Number(item.unit_price) <= 0)))) {
+      throw new Error('Проверьте количество (0,5–99) и цену');
+    }
     const response = await addAdminOrderItems(orderId, items, idempotencyKey);
     revalidatePath('/admin');
     revalidatePath('/admin/orders');

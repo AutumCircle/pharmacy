@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { StaffOrderMedicine } from '@/lib/api-v1/staff-types';
 import { money, parsePrice, priceInput } from '../format';
 import QuantityStepper from './QuantityStepper';
+import './picker.css';
 
 export type PickerLine = {
   key: string;
@@ -18,7 +19,16 @@ type Props = {
   onChange: (lines: PickerLine[]) => void;
   /** Client price suggested for a catalogue medicine; the courier can still change it. */
   defaultPrice: (medicine: StaffOrderMedicine) => number | string;
+  /** Catalogue search; defaults to the courier API. The admin passes a server action. */
+  search?: (query: string, signal: AbortSignal) => Promise<StaffOrderMedicine[]>;
 };
+
+async function staffSearch(query: string, signal: AbortSignal): Promise<StaffOrderMedicine[]> {
+  const response = await fetch(`/api/staff/order-medicines?q=${encodeURIComponent(query)}`, { cache: 'no-store', signal });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result?.error?.message || 'search failed');
+  return result.data || [];
+}
 
 export function lineTotal(lines: PickerLine[]): number {
   return lines.reduce((sum, line) => sum + (Number(parsePrice(line.price) ?? 0) * line.quantity), 0);
@@ -56,7 +66,7 @@ function ManualForm({ initialName, onSave, onCancel }: {
   </div>;
 }
 
-export default function MedicinePicker({ lines, onChange, defaultPrice }: Props) {
+export default function MedicinePicker({ lines, onChange, defaultPrice, search = staffSearch }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StaffOrderMedicine[]>([]);
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
@@ -69,18 +79,16 @@ export default function MedicinePicker({ lines, onChange, defaultPrice }: Props)
     const timer = window.setTimeout(async () => {
       setState('loading');
       try {
-        const response = await fetch(`/api/staff/order-medicines?q=${encodeURIComponent(text)}`,
-          { cache: 'no-store', signal: controller.signal });
-        const result = await response.json();
-        if (!response.ok) throw new Error();
-        setResults(result.data || []);
+        const found = await search(text, controller.signal);
+        if (controller.signal.aborted) return;
+        setResults(found);
         setState('done');
       } catch {
         if (!controller.signal.aborted) setState('error');
       }
     }, 300);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [query]);
+  }, [query, search]);
 
   function addCatalog(medicine: StaffOrderMedicine) {
     if (lines.some((line) => line.medicine_id === medicine.medicine_id)) return;

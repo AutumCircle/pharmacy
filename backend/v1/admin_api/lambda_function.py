@@ -1765,6 +1765,7 @@ DELIVERED_DAY_CTE = """
         SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
                o.address, o.order_total, o.currency, o.created_at, o.order_source,
                o.created_by_staff_account_id, o.fulfillment_pharmacy_id,
+               o.delivery_courier_amount, o.delivery_owner_amount,
                COALESCE(h.delivered_at,
                    CASE WHEN pg_typeof(o.created_at) = 'timestamp without time zone'::regtype
                         THEN o.created_at::timestamp AT TIME ZONE 'UTC'
@@ -1774,6 +1775,154 @@ DELIVERED_DAY_CTE = """
         WHERE o.status = 'delivered' AND o.deleted_at IS NULL
     )
 """
+
+
+_ORDER_CREATED_TZ = """CASE WHEN pg_typeof(o.created_at) = 'timestamp without time zone'::regtype
+                          THEN o.created_at::timestamp AT TIME ZONE 'UTC'
+                          ELSE o.created_at::timestamptz END"""
+
+
+def orders_insights(query: dict[str, Any]) -> dict[str, Any]:
+    """Everything the admin orders overview needs in one call, in Dushanbe calendar days."""
+    if set(query) - {"days"}:
+        raise ContractError("VALIDATION_ERROR", "Неизвестный параметр")
+    try:
+        days = int(query.get("days") or 7)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("VALIDATION_ERROR", "days must be 1, 7, 30 or 90") from exc
+    if days not in {1, 7, 30, 90}:
+        raise ContractError("VALIDATION_ERROR", "days must be 1, 7, 30 or 90")
+    zone = ZoneInfo("Asia/Dushanbe")
+    today = datetime.now(zone).date()
+    first_day = today - timedelta(days=days - 1)
+    since = datetime.combine(first_day, time.min, tzinfo=zone)
+    with transaction() as cur:
+        cur.execute("""SELECT COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                              COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
+                              COUNT(*) FILTER (WHERE status = 'delivering') AS delivering
+                       FROM orders WHERE deleted_at IS NULL""")
+        live = {key: int(value or 0) for key, value in dict(cur.fetchone()).items()}
+        cur.execute(f"""SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone, o.address,
+                               o.order_total, o.created_by_staff_account_id, o.fulfillment_pharmacy_id,
+                               o.order_source, {_ORDER_CREATED_TZ} AS created_at
+                        FROM orders o WHERE o.deleted_at IS NULL AND o.status = 'pending'
+                        ORDER BY o.created_at DESC, o.id DESC LIMIT 12""")
+        new_orders = [dict(row) for row in cur.fetchall()]
+        cur.execute(f"""SELECT COUNT(*) FILTER (WHERE o.status <> 'cancelled') AS ordered_count,
+                               COALESCE(SUM(o.order_total) FILTER (WHERE o.status <> 'cancelled'), 0) AS ordered_sum,
+                               COUNT(*) FILTER (WHERE o.status <> 'cancelled' AND o.created_by_staff_account_id IS NULL)
+                                   AS website_ordered_count,
+                               COUNT(*) FILTER (WHERE o.status = 'cancelled') AS cancelled_count
+                        FROM orders o WHERE o.deleted_at IS NULL AND {_ORDER_CREATED_TZ} >= %s""", (since,))
+        ordered = dict(cur.fetchone())
+        cur.execute(DELIVERED_DAY_CTE + """
+            , delivered AS (
+                SELECT e.id, e.created_by_staff_account_id, e.delivery_courier_amount, e.delivery_owner_amount,
+                       (e.delivered_at AT TIME ZONE 'Asia/Dushanbe')::date AS day,
+                       COALESCE(items.sales, e.order_total, 0) AS sales, COALESCE(items.base, 0) AS base
+                FROM eligible e
+                LEFT JOIN LATERAL (
+                    SELECT SUM(oi.line_total) AS sales, SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity) AS base
+                    FROM order_items oi WHERE oi.order_id = e.id
+                ) items ON true
+                WHERE e.delivered_at >= %s
+            )
+            SELECT day,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id IS NULL) AS website_orders,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id = 3) AS courier_orders,
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id IN (1, 2)) AS pharmacy_orders,
+                   COALESCE(SUM(sales) FILTER (WHERE created_by_staff_account_id IS NULL), 0) AS website_sales,
+                   COALESCE(SUM(sales) FILTER (WHERE created_by_staff_account_id = 3), 0) AS courier_sales,
+                   COALESCE(SUM(sales) FILTER (WHERE created_by_staff_account_id IN (1, 2)), 0) AS pharmacy_sales,
+                   COALESCE(SUM(sales - base), 0) AS profit,
+                   COALESCE(SUM(delivery_courier_amount), 0) AS courier_fee,
+                   COALESCE(SUM(delivery_owner_amount), 0) AS owner_fee,
+                   COUNT(*) FILTER (WHERE delivery_owner_amount > 0 AND delivery_courier_amount = 0) AS owner_delivered
+            FROM delivered GROUP BY day ORDER BY day
+        """, (since,))
+        by_day = {row["day"]: dict(row) for row in cur.fetchall()}
+        cur.execute(DELIVERED_DAY_CTE + """
+            SELECT oi.medicine_name, SUM(oi.quantity) AS quantity, COALESCE(SUM(oi.line_total), 0) AS sales,
+                   COUNT(DISTINCT oi.order_id) AS orders
+            FROM eligible e JOIN order_items oi ON oi.order_id = e.id
+            WHERE e.delivered_at >= %s
+            GROUP BY oi.medicine_name ORDER BY sales DESC, orders DESC LIMIT 10
+        """, (since,))
+        top_medicines = [dict(row) for row in cur.fetchall()]
+        cur.execute(f"""SELECT EXTRACT(HOUR FROM ({_ORDER_CREATED_TZ}) AT TIME ZONE 'Asia/Dushanbe')::int AS hour,
+                               COUNT(*) AS orders
+                        FROM orders o WHERE o.deleted_at IS NULL AND o.status <> 'cancelled'
+                          AND {_ORDER_CREATED_TZ} >= %s
+                        GROUP BY 1""", (since,))
+        hours = {int(row["hour"]): int(row["orders"]) for row in cur.fetchall()}
+        cur.execute(f"""WITH period AS (
+                            SELECT DISTINCT o.phone_normalized FROM orders o
+                            WHERE o.deleted_at IS NULL AND o.status <> 'cancelled' AND o.phone_normalized IS NOT NULL
+                              AND {_ORDER_CREATED_TZ} >= %s
+                        ), first_seen AS (
+                            SELECT o.phone_normalized, MIN({_ORDER_CREATED_TZ}) AS first_at
+                            FROM orders o JOIN period p ON p.phone_normalized = o.phone_normalized
+                            WHERE o.deleted_at IS NULL GROUP BY o.phone_normalized
+                        )
+                        SELECT COUNT(*) FILTER (WHERE first_at >= %s) AS new_clients,
+                               COUNT(*) FILTER (WHERE first_at < %s) AS returning_clients
+                        FROM first_seen""", (since, since, since))
+        clients = {key: int(value or 0) for key, value in dict(cur.fetchone()).items()}
+        cur.execute(DELIVERED_DAY_CTE + """
+            SELECT e.id, e.public_id, e.order_reference, e.customer_name, e.delivered_at,
+                   e.created_by_staff_account_id, e.delivery_courier_amount, e.delivery_owner_amount,
+                   COALESCE(items.sales, e.order_total, 0) AS sales, COALESCE(items.base, 0) AS base
+            FROM eligible e
+            LEFT JOIN LATERAL (
+                SELECT SUM(oi.line_total) AS sales, SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity) AS base
+                FROM order_items oi WHERE oi.order_id = e.id
+            ) items ON true
+            WHERE e.delivered_at >= %s
+            ORDER BY e.delivered_at DESC, e.id DESC LIMIT 200
+        """, (since,))
+        delivered_orders = [dict(row) for row in cur.fetchall()]
+    for row in delivered_orders:
+        internal_id = row.pop("id")
+        row["order_id"] = row.pop("public_id") or f"legacy_{internal_id}"
+        row["delivered_at"] = order_time_iso(row["delivered_at"])
+        row["profit"] = row["sales"] - row["base"]
+        row["owner_total"] = row["profit"] + row["delivery_owner_amount"]
+    daily = []
+    for offset in range(days):
+        day = first_day + timedelta(days=offset)
+        row = by_day.get(day, {})
+        daily.append({
+            "date": day.isoformat(),
+            **{key: int(row.get(key) or 0) for key in ("website_orders", "courier_orders", "pharmacy_orders", "owner_delivered")},
+            **{key: row.get(key) or Decimal("0") for key in
+               ("website_sales", "courier_sales", "pharmacy_sales", "profit", "courier_fee", "owner_fee")},
+        })
+    delivered_count = sum(d["website_orders"] + d["courier_orders"] + d["pharmacy_orders"] for d in daily)
+    delivered_sum = sum((d["website_sales"] + d["courier_sales"] + d["pharmacy_sales"] for d in daily), Decimal("0"))
+    for row in new_orders:
+        internal_id = row.pop("id")
+        row["order_id"] = row.pop("public_id") or f"legacy_{internal_id}"
+        row["created_at"] = order_time_iso(row["created_at"])
+    return {
+        "period_days": days, "from": first_day.isoformat(), "to": today.isoformat(), "currency": "TJS",
+        "live": {**live, "new_orders": new_orders},
+        "totals": {
+            "ordered_count": int(ordered["ordered_count"] or 0), "ordered_sum": ordered["ordered_sum"],
+            "website_ordered_count": int(ordered["website_ordered_count"] or 0),
+            "cancelled_count": int(ordered["cancelled_count"] or 0),
+            "delivered_count": delivered_count, "delivered_sum": delivered_sum,
+            "average_check": (delivered_sum / delivered_count).quantize(Decimal("0.01")) if delivered_count else Decimal("0"),
+            "profit": sum((d["profit"] for d in daily), Decimal("0")),
+            "courier_fee": sum((d["courier_fee"] for d in daily), Decimal("0")),
+            "owner_fee": sum((d["owner_fee"] for d in daily), Decimal("0")),
+            "owner_delivered": sum(d["owner_delivered"] for d in daily),
+        },
+        "daily": daily,
+        "top_medicines": top_medicines,
+        "hours": [{"hour": hour, "orders": hours.get(hour, 0)} for hour in range(24)],
+        "clients": clients,
+        "delivered_orders": delivered_orders,
+    }
 
 
 def delivered_orders_by_day(query: dict[str, Any]) -> dict[str, Any]:
@@ -1818,10 +1967,18 @@ def delivered_orders_by_day(query: dict[str, Any]) -> dict[str, Any]:
                    COUNT(*) FILTER (WHERE created_by_staff_account_id IN (1, 2)) AS pharmacy,
                    COUNT(*) FILTER (WHERE created_by_staff_account_id = 3 AND order_source = 'whatsapp') AS whatsapp,
                    COUNT(*) FILTER (WHERE created_by_staff_account_id = 3 AND order_source = 'instagram') AS instagram,
-                   COUNT(*) FILTER (WHERE created_by_staff_account_id = 3 AND order_source = 'phone') AS phone
+                   COUNT(*) FILTER (WHERE created_by_staff_account_id = 3 AND order_source = 'phone') AS phone,
+                   COUNT(*) FILTER (WHERE delivery_owner_amount > 0 AND delivery_courier_amount = 0) AS owner_delivered,
+                   COALESCE(SUM(order_total), 0) AS total_sales,
+                   COALESCE(SUM(order_total) FILTER (WHERE created_by_staff_account_id IS NULL), 0) AS website_sales,
+                   COALESCE(SUM(order_total) FILTER (WHERE created_by_staff_account_id = 3), 0) AS courier_sales,
+                   COALESCE(SUM(order_total) FILTER (WHERE created_by_staff_account_id IN (1, 2)), 0) AS pharmacy_sales,
+                   COALESCE(SUM(delivery_courier_amount), 0) AS courier_fee,
+                   COALESCE(SUM(delivery_owner_amount), 0) AS owner_fee
             FROM eligible WHERE delivered_at >= %s AND delivered_at < %s
         """, (start, end))
-        summary = {key: int(value or 0) for key, value in dict(cur.fetchone()).items()}
+        summary = {key: value if key.endswith(("_sales", "_fee")) else int(value or 0)
+                   for key, value in dict(cur.fetchone()).items()}
         cur.execute(DELIVERED_DAY_CTE + f"""
             SELECT e.*, sa.username AS created_by_staff_username
             FROM eligible e
@@ -3868,6 +4025,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(list_medicine_duplicates(query), request=current_request_id)
         if method == "GET" and path.endswith("/admin/orders"):
             return success_document(list_orders(query), request=current_request_id)
+        if method == "GET" and tail == ["orders", "insights"]:
+            return success(orders_insights(query), request=current_request_id)
         if method == "GET" and tail == ["orders", "delivered-day"]:
             return success_document(delivered_orders_by_day(query), request=current_request_id)
         if method == "GET" and len(tail) == 2 and tail[0] == "orders":
