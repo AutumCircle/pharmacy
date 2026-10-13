@@ -12,10 +12,13 @@ export async function GET() {
   }
 
   try {
-    const orders = (await listAdminOrders({ limit: 100 })).data;
-    const activeCount = orders.filter((order) => order.status !== 'delivered' && order.status !== 'cancelled').length;
-    return NextResponse.json({ activeCount });
+    const orders = (await listAdminOrders({ status: 'active', limit: 100 })).data;
+    const pending = orders.filter((order) => order.status === 'pending').map((order) => ({
+      order_id: order.order_id, order_reference: order.order_reference, customer_name: order.customer_name,
+      order_total: order.order_total, website: order.created_by_staff_account_id === null,
+    }));
+    return NextResponse.json({ activeCount: orders.length, pending }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
-    return NextResponse.json({ activeCount: 0 });
+    return NextResponse.json({ activeCount: 0, pending: [] });
   }
 }

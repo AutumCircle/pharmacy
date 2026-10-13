@@ -1,0 +1,65 @@
+/* Shared order-entry controls (courier cabinet and admin). Tokens fall back when used outside the staff shell. */
+.mp, .c-btn, .c-error, .c-row-actions {
+  --c-brand: #c4161c; --c-brand-dark: #9f1117; --c-brand-soft: #fdecec; --c-ink: #14201a; --c-muted: #66706a;
+  --c-line: #e3e8e4; --c-ok: #187a3c; --c-ok-soft: #e8f6ed; --c-amber: #8a5a00; --c-amber-soft: #fff4dc;
+}
+.mp *, .c-btn, .c-row-actions * { box-sizing: border-box; }
+.c-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 46px; padding: 0 18px; border-radius: 12px; border: 1px solid transparent; font: inherit; font-size: 15px; font-weight: 700; text-decoration: none; cursor: pointer; transition: background .15s, transform .05s; }
+.c-btn:active:not(:disabled) { transform: scale(.98); }
+.c-btn:disabled { opacity: .55; cursor: default; }
+.c-btn-primary { background: var(--c-brand); color: #fff; }
+.c-btn-primary:hover:not(:disabled) { background: var(--c-brand-dark); }
+.c-btn-outline { background: #fff; border-color: #d5dbd7; color: var(--c-ink); }
+.c-btn-ghost { background: transparent; color: var(--c-muted); }
+.c-btn-danger { background: #fff; border-color: var(--c-brand); color: var(--c-brand-dark); }
+.c-btn-wide { width: 100%; }
+.c-error { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--c-brand-soft); color: var(--c-brand-dark); font-size: 14px; }
+.c-row-actions { display: flex; gap: 8px; }
+.c-row-actions .c-btn-primary { flex: 1; }
+.c-row-actions .c-btn-ghost { flex: none; padding: 0 12px; }
+.mp { display: grid; grid-template-columns: minmax(0,1fr); gap: 10px; }
+.mp-search { position: relative; display: flex; align-items: center; border: 1px solid #d5dbd7; border-radius: 12px; background: #fff; }
+.mp-search:focus-within { border-color: var(--c-brand); box-shadow: 0 0 0 3px rgba(196,22,28,.12); }
+.mp-search svg { width: 20px; height: 20px; margin-left: 12px; fill: #8a948e; flex: none; }
+.mp-search input { flex: 1; min-width: 0; min-height: 48px; padding: 0 10px; border: 0 !important; box-shadow: none !important; background: none; font: inherit; font-size: 16px; outline: none; }
+.mp-clear { width: 40px; height: 40px; border: 0; background: none; color: #8a948e; font-size: 24px; cursor: pointer; }
+.mp-results { display: grid; gap: 2px; max-height: 340px; overflow-y: auto; padding: 4px; border: 1px solid var(--c-line); border-radius: 12px; background: #fff; }
+.mp-hint { margin: 0; padding: 12px; color: var(--c-muted); font-size: 14px; }
+.mp-hint-error { color: var(--c-brand-dark); }
+.mp-result-name { display: grid; gap: 2px; min-width: 0; }
+.mp-result-name strong { font-weight: 650; font-size: 15px; overflow-wrap: anywhere; }
+.mp-result-name small { color: var(--c-muted); font-size: 12px; }
+.mp-lines { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0,1fr); gap: 8px; }
+.mp-line { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--c-line); border-radius: 12px; background: #fff; }
+.mp-line-head { display: flex; align-items: flex-start; gap: 8px; }
+.mp-line-name { flex: 1; min-width: 0; display: grid; justify-items: start; gap: 4px; }
+.mp-line-name strong { font-weight: 650; overflow-wrap: break-word; }
+.mp-tag { flex: none; padding: 3px 7px; border-radius: 6px; background: var(--c-amber-soft); color: var(--c-amber); font-size: 11px; font-weight: 700; }
+.mp-remove { flex: none; width: 30px; height: 30px; margin: -4px -4px 0 0; border: 0; border-radius: 8px; background: none; color: #8a948e; font-size: 22px; cursor: pointer; }
+.mp-line-body { display: flex; align-items: center; gap: 8px; }
+.mp-stepper { display: flex; align-items: center; border: 1px solid #d5dbd7; border-radius: 10px; overflow: hidden; }
+.mp-stepper button { width: 38px; height: 40px; border: 0; background: #f4f6f5; font: inherit; font-size: 20px; cursor: pointer; }
+.mp-stepper button:disabled { color: #b8bfba; cursor: default; }
+.mp-stepper output { min-width: 34px; text-align: center; font-weight: 750; }
+.mp-line-total { margin-left: auto; font-weight: 750; white-space: nowrap; }
+.mp-total { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 2px; }
+.mp-total strong { font-size: 18px; }
+  .mp-line-body { flex-wrap: wrap; }
+.c-btn-danger-text { margin-left: auto; background: none; color: var(--c-brand-dark); padding: 0 8px; }
+.mp-result { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; min-height: 56px; padding: 8px 6px 8px 10px; border-radius: 10px; }
+.mp-result + .mp-result { border-top: 1px solid #eef1ef; }
+.mp-result-name small { color: var(--c-ink); font-weight: 650; }
+.mp-add { min-height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--c-brand); color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.mp-add-on { background: var(--c-ok-soft); color: var(--c-ok); cursor: default; }
+.mp-nothing { display: grid; gap: 8px; padding: 10px; }
+.mp-nothing p { margin: 0; color: var(--c-muted); font-size: 14px; }
+.mp-manual-form { display: grid; gap: 10px; padding: 14px; border: 1.5px solid var(--c-brand); border-radius: 12px; background: #fff; }
+.mp-manual-form label { display: grid; gap: 6px; font-size: 14px; font-weight: 700; }
+.mp-manual-form > label > input { min-height: 46px; padding: 0 12px; border: 1px solid #d5dbd7; border-radius: 12px; font: inherit; font-size: 16px; outline: none; }
+.mp-manual-form > label > input:focus { border-color: var(--c-brand); box-shadow: 0 0 0 3px rgba(196,22,28,.12); }
+.mp-money { display: flex; align-items: center; width: 112px; border: 1px solid #d5dbd7; border-radius: 10px; padding-right: 10px; background: #fff; }
+.mp-money:focus-within { border-color: var(--c-brand); box-shadow: 0 0 0 3px rgba(196,22,28,.12); }
+.mp-money input { flex: 1; min-width: 0; width: 100%; min-height: 42px; padding: 0 10px; border: 0 !important; box-shadow: none !important; background: none; font: inherit; font-size: 16px; font-weight: 700; outline: none; }
+.mp-money span { color: var(--c-muted); font-size: 13px; }
+.mp-manual-form .mp-money { width: 100%; }
+.mp-money-invalid { border-color: var(--c-brand); background: var(--c-brand-soft); }

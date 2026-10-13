@@ -2,6 +2,8 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import NewOrderAlerts, { type AlertOrder } from '@/components/NewOrderAlerts';
+import type { CourierOrder } from '@/lib/api-v1/staff-types';
 
 const icons = {
   orders: 'M4 5h16v2H4V5Zm0 6h16v2H4v-2Zm0 6h10v2H4v-2Z',
@@ -11,6 +13,18 @@ const icons = {
 
 function Icon({ path }: { path: string }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d={path} /></svg>;
+}
+
+async function loadWebsiteOrders(): Promise<AlertOrder[]> {
+  const response = await fetch('/api/staff/orders?status=pending', { cache: 'no-store' });
+  if (!response.ok) throw new Error('orders unavailable');
+  const data: { data?: CourierOrder[] } = await response.json();
+  return (data.data ?? []).filter((order) => order.website_order).map((order) => ({
+    id: order.order_id,
+    title: `Новый заказ с сайта № ${order.order_reference || order.order_id.slice(-6)}`,
+    detail: `${order.customer_name || 'Без имени'} · ${order.address}`,
+    href: `/staff/orders/${order.order_id}`,
+  }));
 }
 
 export default function StaffShell({ children, role }: { children: React.ReactNode; role: 'pharmacy' | 'courier' | null }) {
@@ -44,6 +58,7 @@ export default function StaffShell({ children, role }: { children: React.ReactNo
         <button type="button" className="staff-logout" onClick={logout}>Выйти</button>
       </header>
       <main className="staff-main">{children}</main>
+      <NewOrderAlerts load={loadWebsiteOrders} enabled={role === 'courier'} />
     </div>
   );
 }

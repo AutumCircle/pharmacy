@@ -372,11 +372,43 @@ export type DeliveredDayOrder = {
   created_by_staff_username: string | null;
 };
 
+export type OrdersInsightsPeriod = 1 | 7 | 30 | 90;
+
+export type OrdersInsightsNewOrder = {
+  order_id: string; order_reference: string | null; customer_name: string | null; phone: string; address: string;
+  order_total: number | string | null; created_by_staff_account_id: 1 | 2 | 3 | null;
+  fulfillment_pharmacy_id: 1 | 2 | null; order_source: 'instagram' | 'whatsapp' | 'phone' | null; created_at: string;
+};
+
+export type OrdersInsightsDay = {
+  date: string; website_orders: number; courier_orders: number; pharmacy_orders: number; owner_delivered: number;
+  website_sales: number | string; courier_sales: number | string; pharmacy_sales: number | string;
+  profit: number | string; courier_fee: number | string; owner_fee: number | string;
+};
+
+export type OrdersInsights = {
+  period_days: OrdersInsightsPeriod; from: string; to: string; currency: 'TJS';
+  live: { pending: number; confirmed: number; delivering: number; new_orders: OrdersInsightsNewOrder[] };
+  totals: { ordered_count: number; ordered_sum: number | string; website_ordered_count: number; cancelled_count: number;
+    delivered_count: number; delivered_sum: number | string; average_check: number | string; profit: number | string;
+    courier_fee: number | string; owner_fee: number | string; owner_delivered: number };
+  daily: OrdersInsightsDay[];
+  top_medicines: Array<{ medicine_name: string; quantity: number | string; sales: number | string; orders: number }>;
+  hours: Array<{ hour: number; orders: number }>;
+  clients: { new_clients: number; returning_clients: number };
+  delivered_orders: Array<{ order_id: string; order_reference: string | null; customer_name: string | null;
+    delivered_at: string; created_by_staff_account_id: 1 | 2 | 3 | null; delivery_courier_amount: number | string;
+    delivery_owner_amount: number | string; sales: number | string; base: number | string; profit: number | string;
+    owner_total: number | string }>;
+};
+
 export type DeliveredDayResponse = {
   date: string;
   time_zone: 'Asia/Dushanbe';
   summary: { total: number; website: number; courier: number; pharmacy: number;
-    whatsapp: number; instagram: number; phone: number };
+    whatsapp: number; instagram: number; phone: number; owner_delivered?: number;
+    total_sales?: number | string; website_sales?: number | string; courier_sales?: number | string;
+    pharmacy_sales?: number | string; courier_fee?: number | string; owner_fee?: number | string };
   data: DeliveredDayOrder[];
   page: CursorPage;
   request_id: string;

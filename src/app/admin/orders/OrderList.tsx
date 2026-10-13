@@ -12,18 +12,10 @@ import { formatOrderSource } from '@/lib/collections';
 
 const labels: Record<OrderStatus, string> = {
   pending: 'Новый',
-  confirmed: 'Подтверждён',
+  confirmed: 'Собирается',
   delivering: 'В пути',
   delivered: 'Доставлен',
   cancelled: 'Отменён',
-};
-
-const colors: Record<OrderStatus, string> = {
-  pending: '#fbc02d',
-  confirmed: '#29b6f6',
-  delivering: '#0288d1',
-  delivered: '#388e3c',
-  cancelled: '#d32f2f',
 };
 
 const transitions: Record<OrderStatus, OrderStatus[]> = {
@@ -65,56 +57,43 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
 
   return (
     <div>
-      {message && <div style={{ color: '#c62828', marginBottom: 16 }}>{message}</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {orders.length === 0 && <div style={{ padding: 40, textAlign: 'center' }}>Заказов нет</div>}
-        {orders.map((order) => (
-          <article key={order.order_id} style={{ background: 'white', padding: 20, borderRadius: 12, border: '1px solid #E8E8E8' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'center' }}>
-              <div>
-                <h3 style={{ margin: '0 0 8px' }}>Заказ {order.order_reference || order.order_id}</h3>
-                <div>{formatOrderDateTime(order.created_at)} · {order.customer_name || 'Имя не указано'}</div>
-                <div style={{ color: '#666', marginTop: 4 }}>{order.phone} · {order.address}</div>
-                {order.created_by_staff_account_id && <div style={{ color: '#a4141b', marginTop: 6, fontWeight: 650 }}>
-                  {order.created_by_staff_account_id === 3
-                    ? `Доставщик ${order.created_by_staff_username} · аптека ${order.fulfillment_pharmacy_id}`
-                    : `Аптека ${order.created_by_staff_account_id} · ${order.created_by_staff_username}`}
-                  {order.order_source ? ` · ${sourceLabels[order.order_source]}` : ''}
-                </div>}
-                {formatOrderSource(order) && <div style={{ color: '#1565c0', marginTop: 6, fontWeight: 600 }}>{formatOrderSource(order)}</div>}
-                <div style={{ marginTop: 8, fontWeight: 700 }}>
-                  {Number(order.order_total || 0).toFixed(2)} {order.currency}
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end' }}>
-                <span style={{ color: 'white', background: colors[order.status], padding: '5px 12px', borderRadius: 20 }}>
-                  {labels[order.status]}
-                </span>
-                {transitions[order.status].length > 0 && (
-                  <select
-                    defaultValue=""
-                    disabled={loadingId === order.order_id}
-                    onChange={(event) => changeStatus(order, event.target.value as OrderStatus)}
-                  >
-                    <option value="" disabled>Изменить статус</option>
-                    {transitions[order.status].map((status) => (
-                      <option key={status} value={status}>{labels[status]}</option>
-                    ))}
-                  </select>
-                )}
-                <Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`}>Открыть заказ</Link>
-                {(order.status === 'pending' || order.status === 'cancelled') && (
-                  <OrderDeleteButton
-                    orderId={order.order_id}
-                    orderReference={order.order_reference || order.order_id}
-                    onDeleted={() => setOrderRows((current) => current.filter((item) => item.order_id !== order.order_id))}
-                  />
-                )}
-              </div>
+      {message && <p className="ao-alert" role="alert">{message}</p>}
+      {orders.length === 0 ? <div className="ao-empty-card">Заказов не найдено</div> : <ul className="ao-work-list">
+        {orders.map((order) => {
+          const from = order.created_by_staff_account_id === null ? { key: 'website', label: 'Сайт' }
+            : order.created_by_staff_account_id === 3 ? { key: 'courier', label: 'Курьер' }
+              : { key: 'pharmacy', label: `Аптека ${order.created_by_staff_account_id}` };
+          return <li key={order.order_id} className={`ao-work-card ao-st-${order.status}`}>
+            <Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`} className="ao-work-main">
+              <span className="ao-work-top">
+                <strong>№ {order.order_reference || order.order_id.slice(-6)}</strong>
+                <span className={`ao-status ao-status-${order.status}`}>{labels[order.status]}</span>
+              </span>
+              <span className="ao-work-who">{order.customer_name || 'Имя не указано'} · {order.phone}</span>
+              <span className="ao-work-where">{order.address}</span>
+              <span className="ao-work-meta">
+                <span className={`ao-origin ao-origin-${from.key}`}>{from.label}</span>
+                {order.order_source && <span>{sourceLabels[order.order_source]}</span>}
+                {formatOrderSource(order) && <span>{formatOrderSource(order)}</span>}
+                <span>Аптека {order.fulfillment_pharmacy_id ?? 1}</span>
+                <span>{formatOrderDateTime(order.created_at)}</span>
+              </span>
+            </Link>
+            <div className="ao-work-side">
+              <b>{Number(order.order_total || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} с.</b>
+              {transitions[order.status].length > 0 && <div className="ao-work-actions">
+                {transitions[order.status].map((next) => <button key={next} type="button"
+                  className={next === 'cancelled' ? 'ao-btn ao-btn-ghost' : 'ao-btn ao-btn-primary'}
+                  disabled={loadingId === order.order_id} onClick={() => changeStatus(order, next)}>
+                  {next === 'cancelled' ? 'Отменить' : `→ ${labels[next]}`}</button>)}
+              </div>}
+              {(order.status === 'pending' || order.status === 'cancelled') && <OrderDeleteButton
+                orderId={order.order_id} orderReference={order.order_reference || order.order_id}
+                onDeleted={() => setOrderRows((current) => current.filter((item) => item.order_id !== order.order_id))} />}
             </div>
-          </article>
-        ))}
-      </div>
+          </li>;
+        })}
+      </ul>}
     </div>
   );
 }

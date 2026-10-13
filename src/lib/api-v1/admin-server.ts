@@ -3,6 +3,8 @@ import { listLocalAdminBanners, withLocalBanners } from '@/lib/local-banners';
 
 import type { ApiErrorResponse, ApiSuccessResponse, OrderStatus } from './types';
 import type {
+  OrdersInsights,
+  OrdersInsightsPeriod,
   AdminApiListResponse,
   AdminCatalogStats,
   AdminCategory,
@@ -184,6 +186,10 @@ export function updateAdminOrderCustomer(orderId: string, body: {
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}`, { method: 'PATCH', body });
 }
 
+export function getAdminOrdersInsights(days: OrdersInsightsPeriod): Promise<ApiSuccessResponse<OrdersInsights>> {
+  return request(`/v1/admin/orders/insights${queryString({ days })}`);
+}
+
 export function listDeliveredAdminOrdersByDay(date: string, cursor?: string): Promise<DeliveredDayResponse> {
   return request(`/v1/admin/orders/delivered-day${queryString({ date, cursor, limit: 30 })}`);
 }
@@ -192,7 +198,7 @@ export function searchAdminOrderMedicines(query: string): Promise<AdminNumberedL
   return request(`/v1/admin/order-medicines${queryString({ q: query })}`);
 }
 
-export function addAdminOrderItems(orderId: string, items: Array<{ medicine_id: number; quantity: number }>, idempotencyKey: string): Promise<ApiSuccessResponse<{ added: number; quantity_increased: number }>> {
+export function addAdminOrderItems(orderId: string, items: Array<{ medicine_id: number; quantity: number; unit_price?: string }>, idempotencyKey: string): Promise<ApiSuccessResponse<{ added: number; quantity_increased: number }>> {
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/items`, {
     method: 'POST', body: { items }, headers: { 'Idempotency-Key': idempotencyKey },
   });

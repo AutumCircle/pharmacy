@@ -339,6 +339,19 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
 - `GET /v1/staff/earnings`: в каждом дне `daily[]` есть `courier_orders_count` (создал курьер) и `website_orders_count` (заказы с сайта), помимо `orders_count` и `amount`.
 - Все новые маршруты покрыты существующим `ANY /v1/staff/{proxy+}`, менять API Gateway не нужно.
 
+### 8.1.3 Обзор заказов для администратора
+
+- `GET /v1/admin/orders/insights?days=1|7|30|90` (по умолчанию 7, календарные дни Душанбе). Возвращает:
+  - `live` — сколько заказов сейчас новых, собирается и в пути, и до 12 новых заказов;
+  - `totals` — за период: заказано (шт. и сумма), доставлено (шт. и сумма), средний чек, прибыль (цена клиента − цена аптеки), отменено, часть доставки курьера и владельца, сколько доставок сделал владелец (`delivery_owner_amount > 0` и `delivery_courier_amount = 0`);
+  - `daily` — по каждому дню периода, включая пустые: доставки сайта, курьера и аптек (шт. и суммы), прибыль и доли доставки;
+  - `top_medicines` — 10 лекарств с наибольшей суммой;
+  - `hours` — заказы по часам;
+  - `clients` — новые и постоянные номера;
+  - `delivered_orders` — до 200 доставленных заказов с прибылью и долями доставки.
+- `GET /v1/admin/orders/delivered-day` дополнительно отдаёт в `summary` поля `total_sales`, `website_sales`, `courier_sales`, `pharmacy_sales`, `courier_fee`, `owner_fee`, `owner_delivered`.
+- Только чтение. Новые маршруты покрыты `ANY /v1/admin/{proxy+}`.
+
 ### 8.2 Categories
 
 - Create fields: `slug`, `name`, optional `icon`, `color`.
