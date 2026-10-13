@@ -539,6 +539,7 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
         )
         notification = {
             "admin_order_id": int(order["id"]),
+            "order_id": public_id,
             "created_at": order_time_iso(order["created_at"]),
             "status": "pending",
             "order_source": "Сайт" + (f" · {attribution['utm_source']}" if attribution.get("utm_source") else ""),
