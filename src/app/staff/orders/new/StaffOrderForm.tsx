@@ -1,197 +1,139 @@
 'use client';
 
+import Link from 'next/link';
 import { useRef, useState } from 'react';
-import type { StaffOrderMedicine, StaffOrderSource } from '@/lib/api-v1/staff-types';
+import type { StaffOrderSource } from '@/lib/api-v1/staff-types';
+import { money, parsePrice } from '../../format';
+import MedicinePicker, { invalidLine, lineTotal, type PickerLine } from '../MedicinePicker';
 
 const sources: Array<{ value: StaffOrderSource; label: string }> = [
-  { value: 'instagram', label: 'Instagram' },
+  { value: 'phone', label: 'Звонок' },
   { value: 'whatsapp', label: 'WhatsApp' },
-  { value: 'phone', label: 'Телефонный звонок' },
+  { value: 'instagram', label: 'Instagram' },
 ];
 
-export default function StaffOrderForm({ accountId, username }: { accountId: 1 | 2 | 3; username: string }) {
-  const isCourier = accountId === 3;
+type Created = { reference: string; notified: boolean };
+
+export default function StaffOrderForm() {
+  const [pharmacyId, setPharmacyId] = useState<1 | 2 | null>(null);
+  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [landmark, setLandmark] = useState('');
+  const [comment, setComment] = useState('');
+  const [source, setSource] = useState<StaffOrderSource | null>(null);
+  const [lines, setLines] = useState<PickerLine[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [created, setCreated] = useState('');
-  const [notificationSent, setNotificationSent] = useState(true);
-  const [formKey, setFormKey] = useState(0);
-  const [pharmacyId, setPharmacyId] = useState<1 | 2 | null>(null);
-  const [query, setQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<StaffOrderMedicine[]>([]);
-  const [items, setItems] = useState<Array<StaffOrderMedicine & { quantity: number }>>([]);
-  const [manualItems, setManualItems] = useState<Array<{ medicine_name: string; price: string; quantity: number }>>([]);
-  const [manualName, setManualName] = useState('');
-  const [manualPrice, setManualPrice] = useState('');
-  const [manualQuantity, setManualQuantity] = useState(1);
-  const pendingRequest = useRef<{ payload: string; key: string } | null>(null);
+  const [created, setCreated] = useState<Created | null>(null);
+  const pending = useRef<{ payload: string; key: string } | null>(null);
 
-  async function searchMedicines() {
-    if (query.trim().length < 2) { setError('Введите минимум 2 символа для поиска лекарства'); return; }
-    setSearching(true); setError('');
-    try {
-      const response = await fetch(`/api/staff/order-medicines?q=${encodeURIComponent(query.trim())}`, { cache: 'no-store' });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result?.error?.message || 'Не удалось выполнить поиск');
-      setResults(result.data || []);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Не удалось выполнить поиск');
-    } finally { setSearching(false); }
+  function reset() {
+    setPharmacyId(null); setPhone(''); setName(''); setAddress(''); setLandmark(''); setComment('');
+    setSource(null); setLines([]); setError(''); setCreated(null); pending.current = null;
   }
 
-  function addMedicine(medicine: StaffOrderMedicine) {
-    setItems((current) => current.some((item) => item.medicine_id === medicine.medicine_id)
-      ? current : [...current, { ...medicine, quantity: 1 }]);
+  function problem(): string | null {
+    if (!pharmacyId) return 'Выберите аптеку';
+    if (!/^\d{9}$/.test(phone)) return 'Телефон — 9 цифр после +992';
+    if (address.trim().length < 3) return 'Укажите адрес';
+    if (landmark.trim().length < 2) return 'Укажите ориентир';
+    const broken = invalidLine(lines);
+    if (broken) return `Укажите цену: ${broken.medicine_name}`;
+    if (!source) return 'Отметьте, откуда пришёл заказ';
+    return null;
   }
-
-  function addManualMedicine() {
-    const price = manualPrice.replace(',', '.').trim();
-    if (manualName.trim().length < 2 || manualName.trim().length > 200 ||
-      !/^\d{1,6}(?:\.\d{1,2})?$/.test(price) || Number(price) <= 0 ||
-      !Number.isInteger(manualQuantity) || manualQuantity < 1 || manualQuantity > 99) {
-      setError('Проверьте название, цену и количество'); return;
-    }
-    if (manualItems.length >= 20) { setError('Не более 20 ручных позиций'); return; }
-    setManualItems((current) => [...current, { medicine_name: manualName.trim(), price, quantity: manualQuantity }]);
-    setManualName(''); setManualPrice(''); setManualQuantity(1); setError('');
-  }
-
-  const pharmacyTotal = items.reduce(
-    (total, item) => total + Number(item.base_unit_price) * item.quantity, 0,
-  ) + manualItems.reduce((total, item) => total + Number(item.price) * item.quantity, 0);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (manualName.trim() || manualPrice.trim()) {
-      setError('Нажмите «+ Добавить» для ручного лекарства перед созданием заказа'); return;
-    }
-    setSubmitting(true); setError(''); setCreated('');
-    const data = new FormData(event.currentTarget);
-    const payload = {
-      customer_name: String(data.get('customer_name') || '').trim(),
-      phone: String(data.get('phone') || '').trim(),
-      address: String(data.get('address') || '').trim(),
-      landmark: String(data.get('landmark') || '').trim(),
-      comment: String(data.get('comment') || '').trim(),
-      source: String(data.get('source') || ''),
-      items: items.map((item) => ({ medicine_id: item.medicine_id, quantity: item.quantity })),
-      ...(manualItems.length ? { manual_items: manualItems } : {}),
-      ...(isCourier ? { pharmacy_id: Number(data.get('pharmacy_id')) } : {}),
-    };
-    const serialized = JSON.stringify(payload);
-    if (!pendingRequest.current || pendingRequest.current.payload !== serialized) {
-      pendingRequest.current = { payload: serialized, key: crypto.randomUUID() };
-    }
+    const issue = problem();
+    if (issue) { setError(issue); return; }
+    setSubmitting(true); setError('');
+    const catalog = lines.filter((line) => line.medicine_id !== null);
+    const manual = lines.filter((line) => line.medicine_id === null);
+    const payload = JSON.stringify({
+      pharmacy_id: pharmacyId, phone, customer_name: name.trim(), address: address.trim(), landmark: landmark.trim(),
+      ...(comment.trim() ? { comment: comment.trim() } : {}), source,
+      items: catalog.map((line) => ({ medicine_id: line.medicine_id, quantity: line.quantity, unit_price: parsePrice(line.price) })),
+      ...(manual.length ? { manual_items: manual.map((line) => ({
+        medicine_name: line.medicine_name, price: parsePrice(line.price), quantity: line.quantity })) } : {}),
+    });
+    if (!pending.current || pending.current.payload !== payload) pending.current = { payload, key: crypto.randomUUID() };
     try {
       const response = await fetch('/api/staff/orders', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': pendingRequest.current.key },
-        body: serialized,
+        method: 'POST', body: payload,
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': pending.current.key },
       });
-      const result = await response.json();
+      const result = await response.json().catch(() => null);
       if (!response.ok) throw new Error(result?.error?.message || result?.error || 'Не удалось сохранить заказ');
-      setCreated(result.data.order_reference);
-      pendingRequest.current = null;
-      setNotificationSent(result.data.notification_sent === true);
-      setFormKey((value) => value + 1);
-      setItems([]); setManualItems([]); setResults([]); setQuery(''); setPharmacyId(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Не удалось сохранить заказ');
+      setCreated({ reference: result.data.order_reference, notified: result.data.notification_sent === true });
+      pending.current = null;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Не удалось сохранить заказ');
     } finally { setSubmitting(false); }
   }
 
-  return (
-    <section className="staff-order-page">
-      <div className="staff-title-row">
-        <div><h1>Новый заказ</h1><p>{isCourier ? `Доставщик · ${username}` : `Аптека ${accountId} · ${username}`}</p></div>
+  if (created) {
+    return <section className="c-page c-done">
+      <div className="c-done-icon" aria-hidden="true">✓</div>
+      <h1>Заказ № {created.reference} создан</h1>
+      <p>{created.notified ? 'Владелец получил уведомление.' : 'Уведомление не отправилось — сообщите владельцу.'}</p>
+      <div className="c-done-actions">
+        <button type="button" className="c-btn c-btn-primary c-btn-wide" onClick={reset}>Создать ещё заказ</button>
+        <Link className="c-btn c-btn-outline c-btn-wide" href="/staff/orders">К списку заказов</Link>
       </div>
-      {created && <div className={notificationSent ? 'staff-order-success' : 'staff-order-warning'}>
-        Заказ {created} сохранён. {notificationSent ? 'Владелец получил уведомление.' : 'Уведомление не отправлено — сообщите администратору.'}
-      </div>}
-      {error && <div className="staff-login-error">{error}</div>}
-      <form key={formKey} className="staff-order-form" onSubmit={submit}>
-        {isCourier && <label>Аптека
-          <select name="pharmacy_id" required value={pharmacyId ?? ''} onChange={(event) => {
-            const selected = Number(event.target.value) as 1 | 2;
-            setPharmacyId(selected); setItems([]); setManualItems([]); setResults([]); setQuery('');
-          }}>
-            <option value="" disabled>Выберите аптеку</option>
-            <option value="1">Аптека 1</option>
-            <option value="2">Аптека 2</option>
-          </select>
-        </label>}
-        {pharmacyId === 2 ? (
-          <fieldset className="staff-medicine-picker">
-            <legend>Лекарства</legend>
-            <p>Найдите название в общем каталоге, затем введите цену аптеки 2 ниже. Цена аптеки 1 не используется.</p>
-            <div className="staff-search">
-              <input aria-label="Название лекарства для поиска" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название лекарства" />
-              <button type="button" disabled={searching || query.trim().length < 2} onClick={searchMedicines}>{searching ? 'Поиск…' : 'Найти'}</button>
-            </div>
-            {results.length > 0 && <div className="staff-picker-results">{results.map((medicine) => <div key={medicine.medicine_id}>
-              <span><strong>{medicine.medicine_name}</strong></span>
-              <button type="button" onClick={() => { setManualName(medicine.medicine_name); setManualPrice(''); setError(''); }}>
-                Указать свою цену
-              </button>
-            </div>)}</div>}
-          </fieldset>
-        ) : pharmacyId === 1 ? (
-          <fieldset className="staff-medicine-picker">
-            <legend>Лекарства</legend>
-            <div className="staff-search">
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название лекарства" />
-              <button type="button" disabled={searching} onClick={searchMedicines}>{searching ? 'Поиск…' : 'Найти'}</button>
-            </div>
-            {results.length > 0 && <div className="staff-picker-results">
-              {results.map((medicine) => <div key={medicine.medicine_id}>
-                <span><strong>{medicine.medicine_name}</strong><small>{Number(medicine.base_unit_price).toFixed(2)} TJS</small></span>
-                <button type="button" onClick={() => addMedicine(medicine)} disabled={items.some((item) => item.medicine_id === medicine.medicine_id)}>
-                  {items.some((item) => item.medicine_id === medicine.medicine_id) ? 'Добавлено' : 'Добавить'}
-                </button>
-              </div>)}
-            </div>}
-            {items.length > 0 && <div className="staff-selected-items">
-              <h3>Добавлено в заказ</h3>
-              {items.map((item) => <div key={item.medicine_id}>
-                <span><strong>{item.medicine_name}</strong><small>{Number(item.base_unit_price).toFixed(2)} TJS × {item.quantity}</small></span>
-                <input aria-label={`Количество ${item.medicine_name}`} type="number" min={1} max={99} value={item.quantity} onChange={(event) => {
-                  const quantity = Math.min(99, Math.max(1, Number(event.target.value) || 1));
-                  setItems((current) => current.map((entry) => entry.medicine_id === item.medicine_id ? { ...entry, quantity } : entry));
-                }} />
-                <button type="button" onClick={() => setItems((current) => current.filter((entry) => entry.medicine_id !== item.medicine_id))}>Убрать</button>
-              </div>)}
-              <div className="staff-pharmacy-total"><span>Сумма</span><strong>{pharmacyTotal.toFixed(2)} TJS</strong></div>
-            </div>}
-          </fieldset>
-        ) : null}
-        {pharmacyId !== null && <fieldset className="staff-medicine-picker">
-          <legend>Лекарство вне каталога</legend>
-          <p>Ручная позиция сохраняется только в заказе · цена без наценки</p>
-          <div className="staff-manual-entry">
-            <input aria-label="Название лекарства вне каталога" placeholder="Название лекарства" maxLength={200}
-              value={manualName} onChange={(event) => setManualName(event.target.value)} />
-            <input aria-label="Цена лекарства в сомони" type="number" inputMode="decimal" min="0.01" max="999999.99" step="0.01"
-              placeholder="Цена, с." value={manualPrice} onChange={(event) => setManualPrice(event.target.value)} />
-            <input aria-label="Количество лекарства" type="number" min={1} max={99} value={manualQuantity}
-              onChange={(event) => setManualQuantity(Number(event.target.value))} />
-            <button type="button" onClick={addManualMedicine}>+ Добавить</button>
-          </div>
-          {manualItems.length > 0 && <div className="staff-selected-items">
-            {manualItems.map((item, index) => <div key={`${item.medicine_name}-${index}`}>
-              <span><strong>{item.medicine_name}</strong><small>{Number(item.price).toFixed(2)} с. × {item.quantity}</small></span>
-              <button type="button" onClick={() => setManualItems((current) => current.filter((_, position) => position !== index))}>Убрать</button>
-            </div>)}
-            <div className="staff-pharmacy-total"><span>Сумма лекарств</span><strong>{pharmacyTotal.toFixed(2)} с.</strong></div>
-          </div>}
-        </fieldset>}
-        <label>Имя клиента<input name="customer_name" maxLength={120} autoComplete="name" /></label>
-        <label>Телефон <span>ровно 9 цифр</span><div className="staff-phone"><b>+992</b><input name="phone" required inputMode="numeric" pattern="[0-9]{9}" minLength={9} maxLength={9} placeholder="917123456" autoComplete="tel-national" /></div></label>
-        <label>Адрес<input name="address" required minLength={3} maxLength={500} autoComplete="street-address" /></label>
-        <label>Ориентир<textarea name="landmark" required minLength={2} maxLength={300} rows={3} placeholder="Например: рядом со школой №…" /></label>
-        <label>Комментарий к заказу<textarea name="comment" maxLength={500} rows={3} placeholder="Что важно знать о заказе или доставке" /></label>
-        <fieldset><legend>Откуда поступил заказ</legend><div className="staff-source-options">{sources.map((source) => <label key={source.value}><input type="radio" name="source" value={source.value} required /> <span>{source.label}</span></label>)}</div></fieldset>
-        <button className="staff-submit" disabled={submitting} type="submit">{submitting ? 'Сохраняем…' : 'Создать заказ'}</button>
-      </form>
-    </section>
-  );
+    </section>;
+  }
+
+  const total = lineTotal(lines);
+  return <section className="c-page c-form-page">
+    <div className="c-page-head"><h1>Новый заказ</h1></div>
+    <form className="c-form" onSubmit={submit} noValidate>
+      <fieldset className="c-section">
+        <legend><span>1</span> Аптека</legend>
+        <div className="c-segment">
+          {([1, 2] as const).map((id) => <button key={id} type="button" aria-pressed={pharmacyId === id}
+            className={pharmacyId === id ? 'active' : ''} onClick={() => setPharmacyId(id)}>Аптека {id}</button>)}
+        </div>
+      </fieldset>
+
+      <fieldset className="c-section">
+        <legend><span>2</span> Клиент</legend>
+        <label>Телефон<div className="c-phone"><b>+992</b><input value={phone} inputMode="numeric" maxLength={9}
+          autoComplete="tel-national" placeholder="917123456"
+          onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 9))} /></div></label>
+        <label>Имя <small>необязательно</small><input value={name} maxLength={120} autoComplete="off"
+          onChange={(event) => setName(event.target.value)} placeholder="Например: Фарход" /></label>
+        <label>Адрес<input value={address} maxLength={500} autoComplete="off"
+          onChange={(event) => setAddress(event.target.value)} placeholder="Улица, дом, квартира" /></label>
+        <label>Ориентир<input value={landmark} maxLength={300} autoComplete="off"
+          onChange={(event) => setLandmark(event.target.value)} placeholder="Например: рядом со школой №5" /></label>
+      </fieldset>
+
+      <fieldset className="c-section">
+        <legend><span>3</span> Товары <small>можно добавить позже</small></legend>
+        <MedicinePicker lines={lines} onChange={(next) => { setLines(next); setError(''); }}
+          defaultPrice={(medicine) => medicine.base_unit_price} />
+      </fieldset>
+
+      <fieldset className="c-section">
+        <legend><span>4</span> Откуда заказ</legend>
+        <div className="c-segment c-segment-3">
+          {sources.map((item) => <button key={item.value} type="button" aria-pressed={source === item.value}
+            className={source === item.value ? 'active' : ''} onClick={() => setSource(item.value)}>{item.label}</button>)}
+        </div>
+        <label>Комментарий <small>необязательно</small><textarea value={comment} rows={2} maxLength={500}
+          onChange={(event) => setComment(event.target.value)} placeholder="Что важно знать о заказе" /></label>
+      </fieldset>
+
+      <div className="c-submit-bar">
+        {error && <p className="c-error" role="alert">{error}</p>}
+        <div className="c-submit-row">
+          <span className="c-submit-total"><small>Итого</small><strong>{money(total)}</strong></span>
+          <button type="submit" className="c-btn c-btn-primary" disabled={submitting}>{submitting ? 'Сохраняем…' : 'Создать заказ'}</button>
+        </div>
+      </div>
+    </form>
+  </section>;
 }

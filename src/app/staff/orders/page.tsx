@@ -4,6 +4,7 @@ import { getCourierEarnings, listCourierOrders, listPharmacyPreparationOrders } 
 import type { CourierOrderStatus } from '@/lib/api-v1/staff-types';
 import { formatOrderDateTime } from '@/lib/order-time';
 import CourierOrderList from './CourierOrderList';
+import { money } from '../format';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,22 +64,23 @@ export default async function CourierOrdersPage({ searchParams }: {
     ...(status ? { status } : {}), cursor: next,
   })}` : null;
 
-  return <section className="courier-orders-page">
-    <div className="staff-title-row">
-      <div><h1>Заказы</h1><p>Все заказы для доставки</p></div>
-      <Link className="courier-new-order" href="/staff/orders/new">+ Новый заказ</Link>
+  return <section className="c-page">
+    <div className="c-page-head">
+      <h1>Заказы</h1>
+      <Link className="c-btn c-btn-primary" href="/staff/orders/new">+ Новый заказ</Link>
     </div>
-    <section className="courier-earnings-summary">
-      <article><span>Заработано всего</span><strong>{Number(earningsResponse?.data.total ?? 0).toLocaleString('ru-RU')} с.</strong></article>
-      <article><span>Сегодня</span><strong>{Number(earningsResponse?.data.today ?? 0).toLocaleString('ru-RU')} с.</strong></article>
-      <article><span>Вчера</span><strong>{Number(earningsResponse?.data.yesterday ?? 0).toLocaleString('ru-RU')} с.</strong></article>
-      <Link href="/staff/earnings">Вся история по дням →</Link>
-    </section>
-    <nav className="staff-filters" aria-label="Фильтр заказов">
+    <Link className="c-earn" href="/staff/earnings">
+      <span><small>Сегодня</small><strong>{money(earningsResponse?.data.today)}</strong></span>
+      <span><small>Вчера</small><strong>{money(earningsResponse?.data.yesterday)}</strong></span>
+      <span><small>Всего</small><strong>{money(earningsResponse?.data.total)}</strong></span>
+      <i aria-hidden="true">›</i>
+    </Link>
+    <nav className="c-tabs" aria-label="Фильтр заказов">
       {filters.map((filter) => <Link key={filter.value} className={status === filter.value ? 'active' : ''}
+        aria-current={status === filter.value ? 'page' : undefined}
         href={filter.value ? `/staff/orders?status=${filter.value}` : '/staff/orders'}>{filter.label}</Link>)}
     </nav>
-    <CourierOrderList orders={response.data} />
-    {nextHref && <div className="staff-pagination"><Link href={nextHref}>Следующие заказы →</Link></div>}
+    <CourierOrderList key={`${status}-${cursor ?? ''}`} orders={response.data} />
+    {nextHref && <Link className="c-btn c-btn-outline c-btn-wide c-more" href={nextHref}>Показать ещё</Link>}
   </section>;
 }

@@ -1,3 +1,4 @@
+import json
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from decimal import Decimal
 
 from backend.v1.admin_api.lambda_function import (
     add_courier_order_items, add_manual_order_items, courier_earnings, list_courier_orders, update_courier_order_status,
-    update_order_delivery, update_order_item_price,
+    update_courier_order_customer, update_order_delivery, update_order_item_price,
 )
 from backend.v1.shared.contract import ContractError
 
@@ -63,16 +64,51 @@ class CourierOrderTests(unittest.TestCase):
         self.assertIn('UPDATE orders SET items_subtotal', sql)
         self.assertIn('courier.order.items_added', str(cursor.execute.call_args_list))
 
-    def test_add_items_rejects_cancelled_and_wrong_pharmacy_orders(self):
-        for status, pharmacy_id in [('cancelled', 1), ('pending', 2)]:
+    def test_add_items_rejects_cancelled_order(self):
+        cursor = Mock()
+        cursor.fetchone.return_value = {'id': 7, 'status': 'cancelled', 'pharmacy_id': 1,
+            'created_by_staff_account_id': 3, 'items_subtotal': Decimal('0')}
+        with self._tx(cursor), self.assertRaises(ContractError):
+            add_courier_order_items('ord_' + 'a' * 32,
+                {'items': [{'medicine_id': 44, 'quantity': 1}]},
+                '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req_test')
+        self.assertEqual(cursor.execute.call_count, 1)
+
+    def test_pharmacy_two_order_uses_shared_catalogue_and_courier_client_price(self):
+        cursor = Mock()
+        cursor.fetchone.side_effect = [
+            {'id': 7, 'status': 'pending', 'items_subtotal': Decimal('0'),
+             'created_by_staff_account_id': 3, 'pharmacy_id': 2},
+            {'id': 99}, {'total': Decimal('31.00')},
+        ]
+        cursor.fetchall.side_effect = [
+            [{'id': 44, 'name': 'NOW D3', 'price': Decimal('10'), 'selling_unit_price': 12, 'in_stock': True},
+             {'id': 55, 'name': 'Old', 'price': Decimal('5'), 'selling_unit_price': 6, 'in_stock': True}],
+            [{'id': 81, 'medicine_id': 55, 'quantity': Decimal('1')}],
+        ]
+        with self._tx(cursor):
+            result = add_courier_order_items('ord_' + 'a' * 32, {'items': [
+                {'medicine_id': 44, 'quantity': 2, 'unit_price': '11,50'},
+                {'medicine_id': 55, 'quantity': 1, 'unit_price': '4'},
+            ]}, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req_test')
+        self.assertEqual((result['added'], result['quantity_increased']), (1, 1))
+        calls = cursor.execute.call_args_list
+        insert = next(call for call in calls if 'INSERT INTO order_items' in call.args[0])
+        inserted = json.loads(insert.args[1][1])[0]
+        self.assertEqual((inserted['base_unit_price'], inserted['selling_unit_price'], inserted['line_total']),
+                         ('10', '11.50', '23.00'))
+        update = next(call for call in calls if 'UPDATE order_items oi' in call.args[0])
+        self.assertIn('COALESCE(data.unit_price', update.args[0])
+        self.assertEqual(json.loads(update.args[1][0])[0]['unit_price'], '4.00')
+
+    def test_add_items_rejects_invalid_client_price_before_database(self):
+        for price in ('0', '-1', 'abc', '1.234', True):
             cursor = Mock()
-            cursor.fetchone.return_value = {'id': 7, 'status': status, 'pharmacy_id': pharmacy_id,
-                'created_by_staff_account_id': 3, 'items_subtotal': Decimal('0')}
             with self._tx(cursor), self.assertRaises(ContractError):
                 add_courier_order_items('ord_' + 'a' * 32,
-                    {'items': [{'medicine_id': 44, 'quantity': 1}]},
+                    {'items': [{'medicine_id': 44, 'quantity': 1, 'unit_price': price}]},
                     '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', 'req_test')
-            self.assertEqual(cursor.execute.call_count, 1)
+            cursor.execute.assert_not_called()
 
     def test_add_items_to_delivered_order_preserves_delivery_amount(self):
         cursor = Mock()
@@ -100,7 +136,8 @@ class CourierOrderTests(unittest.TestCase):
         import json
         order_id = 'ord_' + 'a' * 32
         payload = {'items': [{'medicine_id': 44, 'quantity': 1}]}
-        request_hash = hashlib.sha256(json.dumps({'order_id': order_id, 'items': payload['items']},
+        normalized = [{'medicine_id': 44, 'quantity': '1.00'}]
+        request_hash = hashlib.sha256(json.dumps({'order_id': order_id, 'items': normalized},
             sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         saved = {'order_id': order_id, 'added': 1, 'quantity_increased': 0,
                  'items_subtotal': '12.00', 'currency': 'TJS'}
@@ -117,7 +154,7 @@ class CourierOrderTests(unittest.TestCase):
         self.assertEqual(result, saved)
         self.assertEqual(cursor.execute.call_count, 3)
 
-    def test_list_is_paginated_and_omits_prices(self):
+    def test_list_is_paginated_and_shows_client_prices(self):
         cursor = Mock()
         cursor.fetchall.return_value = [{
             'id': 7, 'public_id': 'ord_' + 'a' * 32, 'order_reference': '3456-007',
@@ -135,11 +172,12 @@ class CourierOrderTests(unittest.TestCase):
             result = list_courier_orders({'status': 'pending', 'limit': '20'})
         self.assertEqual(result['data'][0]['pharmacy_id'], 2)
         self.assertNotIn('id', result['data'][0])
-        self.assertNotIn('order_total', result['data'][0])
         sql, args = cursor.execute.call_args.args
         self.assertIn('ORDER BY o.created_at DESC, o.id DESC LIMIT %s', sql)
         self.assertIn("o.status <> 'cancelled'", sql)
-        self.assertNotIn('selling_unit_price', sql)
+        self.assertIn("'selling_unit_price'", sql)
+        self.assertIn('o.order_total', sql)
+        self.assertNotIn('delivery_owner_amount', sql)
         self.assertEqual(args, ('pending', 21))
 
     def test_delivered_orders_are_visible_but_cancelled_filter_is_rejected(self):
@@ -273,6 +311,29 @@ class CourierOrderTests(unittest.TestCase):
         self.assertEqual(result['base_unit_price'], Decimal('25.00'))
         self.assertEqual(result['selling_unit_price'], Decimal('30.00'))
         self.assertEqual(result['line_total'], Decimal('60.00'))
+
+    def test_courier_updates_customer_name_and_phone_in_any_status(self):
+        cursor = Mock()
+        cursor.fetchone.return_value = {'id': 7, 'customer_name': 'Старое', 'phone': '+992900000000'}
+        with self._tx(cursor):
+            result = update_courier_order_customer('ord_' + 'a' * 32,
+                {'customer_name': '  Анвар   Каримов ', 'phone': '917 12 34 56'}, 'req')
+        self.assertEqual(result, {'order_id': 'ord_' + 'a' * 32, 'customer_name': 'Анвар Каримов',
+                                  'phone': '+992917123456'})
+        sql, args = cursor.execute.call_args_list[1].args
+        self.assertIn('edit_revision = edit_revision + 1', sql)
+        self.assertNotIn('status', sql)
+        self.assertEqual(args, ('Анвар Каримов', '+992917123456', '+992917123456', 7))
+        self.assertIn('courier.order.customer_updated', str(cursor.execute.call_args_list))
+
+    def test_courier_customer_update_accepts_only_name_and_phone(self):
+        for payload in ({'customer_name': 'A', 'phone': '917123456', 'address': 'x'},
+                        {'customer_name': 'A', 'phone': '12345'}, {'customer_name': 5, 'phone': '917123456'},
+                        {'customer_name': 'x' * 121, 'phone': '917123456'}):
+            cursor = Mock()
+            with self._tx(cursor), self.assertRaises(ContractError):
+                update_courier_order_customer('ord_' + 'a' * 32, payload, 'req')
+            cursor.execute.assert_not_called()
 
     def test_item_price_requires_a_price(self):
         with self.assertRaises(ContractError):

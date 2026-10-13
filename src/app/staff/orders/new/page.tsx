@@ -7,5 +7,5 @@ export const dynamic = 'force-dynamic';
 export default async function NewStaffOrderPage() {
   const { account } = await requireStaffSession();
   if (account.role !== 'courier') redirect('/staff/orders');
-  return <StaffOrderForm accountId={account.account_id} username={account.username} />;
+  return <StaffOrderForm />;
 }

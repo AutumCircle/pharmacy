@@ -87,7 +87,7 @@ export function listCourierOrders(token: string, values: { status?: CourierOrder
 }
 
 export function addCourierOrderItems(token: string, orderId: string,
-  items: Array<{ medicine_id: number; quantity: number }>, idempotencyKey: string) {
+  items: Array<{ medicine_id: number; quantity: number; unit_price?: string }>, idempotencyKey: string) {
   return request<ApiSuccessResponse<{ order_id: string; added: number; quantity_increased: number;
     items_subtotal: string; currency: 'TJS' }>>(
     `orders/${encodeURIComponent(orderId)}/items`,
@@ -120,6 +120,13 @@ export function updateCourierOrderStatus(token: string, orderId: string, body: {
 }) {
   return request<ApiSuccessResponse<{ order_id: string; status: CourierOrderStatus; changed_at: string }>>(
     `orders/${encodeURIComponent(orderId)}/status`, { token, method: 'PATCH', body },
+  );
+}
+
+export function updateCourierOrderCustomer(token: string, orderId: string,
+  body: { customer_name: string; phone: string }) {
+  return request<ApiSuccessResponse<{ order_id: string; customer_name: string; phone: string }>>(
+    `orders/${encodeURIComponent(orderId)}/customer`, { token, method: 'PATCH', body },
   );
 }
 

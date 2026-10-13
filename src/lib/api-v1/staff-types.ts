@@ -16,7 +16,7 @@ export type CreateStaffOrderRequest = {
   landmark: string;
   comment?: string;
   source: StaffOrderSource;
-  items: Array<{ medicine_id: number; quantity: number }>;
+  items: Array<{ medicine_id: number; quantity: number; unit_price?: string }>;
   manual_items?: Array<{ medicine_name: string; price: string; quantity: number }>;
   pharmacy_id?: 1 | 2;
 };
@@ -25,6 +25,7 @@ export type StaffOrderMedicine = {
   medicine_id: number;
   medicine_name: string;
   base_unit_price: number | string;
+  selling_unit_price: number | string;
   source_sku: string | null;
   country: string | null;
   vendor: string | null;
@@ -57,8 +58,11 @@ export type CourierOrder = {
   created_at: string;
   pharmacy_id: 1 | 2 | null;
   delivery_courier_amount: number | string;
-  medicines: Array<{ medicine_id: number | null; medicine_name: string; quantity: number;
-    base_unit_price: number | string | null }>;
+  order_total: number | string | null;
+  website_order: boolean;
+  medicines: Array<{ order_item_id: number; medicine_id: number | null; medicine_name: string;
+    quantity: number | string; base_unit_price: number | string | null;
+    selling_unit_price: number | string | null; line_total: number | string | null }>;
 };
 
 export type CourierOrderList = {
