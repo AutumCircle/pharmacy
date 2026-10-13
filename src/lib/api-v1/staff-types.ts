@@ -60,6 +60,7 @@ export type CourierOrder = {
   delivery_courier_amount: number | string;
   order_total: number | string | null;
   website_order: boolean;
+  own_order: boolean;
   medicines: Array<{ order_item_id: number; medicine_id: number | null; medicine_name: string;
     quantity: number | string; base_unit_price: number | string | null;
     selling_unit_price: number | string | null; line_total: number | string | null }>;
@@ -99,7 +100,8 @@ export type CourierEarnings = {
   total: number | string;
   today: number | string;
   yesterday: number | string;
-  daily: Array<{ date: string; orders_count: number; amount: number | string }>;
+  daily: Array<{ date: string; orders_count: number; courier_orders_count: number;
+    website_orders_count: number; amount: number | string }>;
   currency: 'TJS';
   page: { next_cursor: string | null; has_more: boolean };
 };

@@ -25,7 +25,7 @@ export default function StaffShell({ children, role }: { children: React.ReactNo
   }
 
   const courierTabs = [
-    { href: '/staff/orders', label: 'Заказы', icon: icons.orders, active: pathname === '/staff/orders' },
+    { href: '/staff/orders', label: 'Заказы', icon: icons.orders, active: pathname === '/staff/orders' || (pathname.startsWith('/staff/orders/') && !pathname.startsWith('/staff/orders/new')) },
     { href: '/staff/orders/new', label: 'Новый заказ', icon: icons.add, active: pathname.startsWith('/staff/orders/new') },
     { href: '/staff/earnings', label: 'Заработок', icon: icons.wallet, active: pathname.startsWith('/staff/earnings') },
   ];

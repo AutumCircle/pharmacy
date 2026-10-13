@@ -327,14 +327,17 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
 - `GET /v1/admin/orders*` возвращает `delivery_courier_amount`, `delivery_owner_amount`, `delivery_fee`; dashboard — `delivery_owner_total` и `delivery_courier_total` по доставленным заказам за период.
 - Миграция: `db/migrations/0018_order_delivery_fee.sql` (аддитивная, существующие заказы получают 0/0).
 
-### 8.1.2 Курьер: товары и данные клиента
+### 8.1.2 Курьер: товары, данные клиента, заработок
 
 - Каталог общий для аптек 1 и 2: `POST /v1/staff/orders` и `POST /v1/staff/orders/{order_id}/items` принимают каталожные позиции для любой аптеки.
-- У каждой каталожной позиции есть необязательное поле `unit_price` (цена для клиента, 0.01–999 999.99, не больше двух знаков после запятой). Без него цена по умолчанию: базовая цена каталога для заказов сотрудников и цена с наценкой для заказов с сайта. При добавлении товара, который уже есть в заказе, `unit_price` обновляет цену этой строки.
-- `base_unit_price` всегда берётся из каталога, клиентская цена на него не влияет.
-- `GET /v1/staff/orders` (курьер) возвращает по каждой позиции `order_item_id`, `selling_unit_price` и `line_total`, а по заказу — `order_total` и `website_order`.
-- `GET /v1/staff/order-medicines` также возвращает `selling_unit_price` (цена с наценкой) для подсказки цены в заказах с сайта.
-- `PATCH /v1/staff/orders/{order_id}/customer` с телом `{ "customer_name": "Фарход", "phone": "917123456" }`: курьер меняет только имя (до 120 символов, можно пустое) и телефон в любом статусе заказа. Увеличивает `edit_revision` и пишет `courier.order.customer_updated` в `admin_audit_log`. Маршрут покрыт существующим `ANY /v1/staff/{proxy+}`.
+- У каждой каталожной позиции есть необязательное поле `unit_price` (цена для клиента, 0.01–999 999.99, не больше двух знаков после запятой). Без него цена по умолчанию: базовая цена каталога для заказов сотрудников и цена с наценкой для заказов с сайта. При добавлении товара, который уже есть в заказе, `unit_price` обновляет цену этой строки. `base_unit_price` всегда берётся из каталога.
+- **Свои заказы.** Курьер меняет содержимое только тех заказов, которые создал сам (`created_by_staff_account_id = 3`). Это данные клиента, добавление, правка и удаление товаров. Для заказов с сайта эти вызовы от курьера возвращают `403 FORBIDDEN`. Статус и свою плату за доставку курьер меняет во всех заказах. Администратор работает со всеми заказами, как раньше.
+- `GET /v1/staff/orders` и `GET /v1/staff/orders/{order_id}` (курьер) возвращают по каждой позиции `order_item_id`, `selling_unit_price` и `line_total`, а по заказу — `order_total`, `website_order` и `own_order`.
+- `PATCH /v1/staff/orders/{order_id}/customer` с телом `{ "customer_name": "Фарход", "phone": "917123456", "address": "...", "landmark": "..." }`. Работает в любом статусе: имя до 120 символов (можно пустое), адрес 3–500, ориентир 2–300. Увеличивает `edit_revision` и пишет `courier.order.customer_updated` в `admin_audit_log`.
+- `PATCH /v1/staff/orders/{order_id}/items/{order_item_id}` с телом `{ "quantity": 2, "unit_price": "18.50" }` (одно или оба поля) меняет строку. `DELETE` на тот же адрес удаляет её. Итог заказа пересчитывается, в журнал пишется `courier.order.item_updated` или `courier.order.item_removed`. Отменённый заказ не меняется (`409`).
+- `GET /v1/staff/order-medicines` также возвращает `selling_unit_price` (цена с наценкой).
+- `GET /v1/staff/earnings`: в каждом дне `daily[]` есть `courier_orders_count` (создал курьер) и `website_orders_count` (заказы с сайта), помимо `orders_count` и `amount`.
+- Все новые маршруты покрыты существующим `ANY /v1/staff/{proxy+}`, менять API Gateway не нужно.
 
 ### 8.2 Categories
 

@@ -4,6 +4,8 @@ import { STAFF_SESSION_COOKIE } from '@/lib/admin-session';
 import { getStaffSession, updateCourierOrderCustomer } from '@/lib/api-v1/staff-server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 
+const limits = { customer_name: [0, 120], address: [3, 500], landmark: [2, 300] } as const;
+
 export async function PATCH(request: Request, { params }: { params: Promise<{ order_id: string }> }) {
   try {
     const token = (await cookies()).get(STAFF_SESSION_COOKIE)?.value;
@@ -16,12 +18,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     }
     const body: unknown = await request.json();
     const fields = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null;
-    if (!fields || Object.keys(fields).length !== 2 || typeof fields.customer_name !== 'string'
-      || fields.customer_name.trim().length > 120 || typeof fields.phone !== 'string' || !/^\d{9}$/.test(fields.phone)) {
-      return NextResponse.json({ error: { message: 'Проверьте имя и телефон (9 цифр)' } }, { status: 400 });
+    const textOk = fields && Object.entries(limits).every(([key, [min, max]]) => {
+      const value = fields[key];
+      return typeof value === 'string' && value.trim().length >= min && value.trim().length <= max;
+    });
+    if (!fields || !textOk || Object.keys(fields).length !== 4 || typeof fields.phone !== 'string' || !/^\d{9}$/.test(fields.phone)) {
+      return NextResponse.json({ error: { message: 'Проверьте имя, телефон (9 цифр), адрес и ориентир' } }, { status: 400 });
     }
-    const response = await updateCourierOrderCustomer(token, order_id,
-      { customer_name: fields.customer_name.trim(), phone: fields.phone });
+    const response = await updateCourierOrderCustomer(token, order_id, {
+      customer_name: String(fields.customer_name).trim(), phone: fields.phone,
+      address: String(fields.address).trim(), landmark: String(fields.landmark).trim(),
+    });
     return NextResponse.json(response, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return apiRouteError(error);

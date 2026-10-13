@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { StaffOrderMedicine } from '@/lib/api-v1/staff-types';
-import { money, parsePrice, priceInput, quantityLabel } from '../format';
+import { money, parsePrice, priceInput } from '../format';
+import QuantityStepper from './QuantityStepper';
 
 export type PickerLine = {
   key: string;
@@ -27,15 +28,39 @@ export function invalidLine(lines: PickerLine[]): PickerLine | undefined {
   return lines.find((line) => parsePrice(line.price) === null);
 }
 
-function stepDown(quantity: number) { return quantity > 1 ? quantity - 1 : 0.5; }
-function stepUp(quantity: number) { return quantity < 1 ? 1 : Math.min(99, quantity + 1); }
+function ManualForm({ initialName, onSave, onCancel }: {
+  initialName: string; onSave: (name: string, price: string) => void; onCancel: () => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [price, setPrice] = useState('');
+  const [error, setError] = useState('');
+
+  function save() {
+    const cleanName = name.trim().replace(/\s+/g, ' ');
+    const cleanPrice = parsePrice(price);
+    if (cleanName.length < 2) { setError('Название — минимум 2 буквы'); return; }
+    if (!cleanPrice) { setError('Укажите цену, например 25 или 12,50'); return; }
+    onSave(cleanName.slice(0, 200), cleanPrice);
+  }
+
+  return <div className="mp-manual-form">
+    <strong>Товар не из каталога</strong>
+    <label>Название<input value={name} maxLength={200} autoFocus onChange={(event) => setName(event.target.value)} /></label>
+    <label>Цена за 1 шт.<div className="mp-money"><input value={price} inputMode="decimal" placeholder="0"
+      onChange={(event) => setPrice(event.target.value)} /><span>с.</span></div></label>
+    {error && <p className="c-error" role="alert">{error}</p>}
+    <div className="c-row-actions">
+      <button type="button" className="c-btn c-btn-primary" onClick={save}>Сохранить</button>
+      <button type="button" className="c-btn c-btn-ghost" onClick={onCancel}>Отмена</button>
+    </div>
+  </div>;
+}
 
 export default function MedicinePicker({ lines, onChange, defaultPrice }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StaffOrderMedicine[]>([]);
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
-  const priceRefs = useRef(new Map<string, HTMLInputElement>());
-  const focusKey = useRef<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
 
   useEffect(() => {
     const text = query.trim();
@@ -57,89 +82,71 @@ export default function MedicinePicker({ lines, onChange, defaultPrice }: Props)
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [query]);
 
-  useEffect(() => {
-    if (!focusKey.current) return;
-    priceRefs.current.get(focusKey.current)?.focus();
-    focusKey.current = null;
-  }, [lines]);
-
   function addCatalog(medicine: StaffOrderMedicine) {
-    const existing = lines.find((line) => line.medicine_id === medicine.medicine_id);
-    if (existing) {
-      onChange(lines.map((line) => line === existing ? { ...line, quantity: stepUp(line.quantity) } : line));
-      return;
-    }
+    if (lines.some((line) => line.medicine_id === medicine.medicine_id)) return;
     onChange([...lines, { key: `m${medicine.medicine_id}`, medicine_id: medicine.medicine_id,
       medicine_name: medicine.medicine_name, quantity: 1, price: priceInput(defaultPrice(medicine)) }]);
+    setQuery('');
   }
 
-  function addManual() {
-    const name = query.trim().replace(/\s+/g, ' ');
-    if (name.length < 2) return;
-    const key = `x${Date.now()}`;
-    focusKey.current = key;
-    onChange([...lines, { key, medicine_id: null, medicine_name: name.slice(0, 200), quantity: 1, price: '' }]);
-    setQuery('');
+  function addManual(name: string, price: string) {
+    onChange([...lines, { key: `x${Date.now()}`, medicine_id: null, medicine_name: name, quantity: 1, price }]);
+    setManualOpen(false); setQuery('');
   }
 
   function update(key: string, patch: Partial<PickerLine>) {
     onChange(lines.map((line) => line.key === key ? { ...line, ...patch } : line));
   }
 
-  const total = lineTotal(lines);
-  const showResults = query.trim().length >= 2;
+  const searching = query.trim().length >= 2;
+  const nothingFound = searching && state === 'done' && results.length === 0;
 
   return <div className="mp">
-    <label className="mp-search">
+    {!manualOpen && <label className="mp-search">
       <span className="sr-only">Поиск лекарства</span>
       <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 4a6.5 6.5 0 0 1 5.2 10.4l4 4-1.4 1.4-4-4A6.5 6.5 0 1 1 10.5 4Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z" /></svg>
-      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти лекарство по названию"
+      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название лекарства"
         autoComplete="off" enterKeyHint="search" />
       {query && <button type="button" className="mp-clear" aria-label="Очистить поиск" onClick={() => setQuery('')}>×</button>}
-    </label>
+    </label>}
 
-    {showResults && <div className="mp-results" aria-live="polite">
-      {state === 'loading' && results.length === 0 && <p className="mp-hint">Ищем…</p>}
+    {searching && !manualOpen && <div className="mp-results" aria-live="polite">
+      {state === 'loading' && <p className="mp-hint">Ищем…</p>}
       {state === 'error' && <p className="mp-hint mp-hint-error">Поиск не сработал. Проверьте интернет.</p>}
-      {state === 'done' && results.length === 0 && <p className="mp-hint">В каталоге ничего не найдено.</p>}
-      {results.map((medicine) => {
-        const added = lines.find((line) => line.medicine_id === medicine.medicine_id);
-        return <button type="button" key={medicine.medicine_id} className="mp-result" onClick={() => addCatalog(medicine)}>
+      {nothingFound && <div className="mp-nothing">
+        <p>«{query.trim()}» нет в каталоге</p>
+        <button type="button" className="c-btn c-btn-outline c-btn-wide" onClick={() => setManualOpen(true)}>
+          + Добавить товар, которого нет в каталоге</button>
+      </div>}
+      {state !== 'loading' && results.map((medicine) => {
+        const added = lines.some((line) => line.medicine_id === medicine.medicine_id);
+        return <div key={medicine.medicine_id} className="mp-result">
           <span className="mp-result-name"><strong>{medicine.medicine_name}</strong>
-            {(medicine.vendor || medicine.country) && <small>{[medicine.vendor, medicine.country].filter(Boolean).join(' · ')}</small>}
+            <small>{money(defaultPrice(medicine))}{medicine.vendor ? ` · ${medicine.vendor}` : ''}</small>
           </span>
-          <span className="mp-result-price">{money(defaultPrice(medicine))}</span>
-          <span className={added ? 'mp-add mp-add-on' : 'mp-add'} aria-hidden="true">{added ? quantityLabel(added.quantity) : '+'}</span>
-        </button>;
+          <button type="button" className={added ? 'mp-add mp-add-on' : 'mp-add'} disabled={added}
+            onClick={() => addCatalog(medicine)}>{added ? 'В заказе ✓' : 'Добавить'}</button>
+        </div>;
       })}
-      {state !== 'loading' && <button type="button" className="mp-manual" onClick={addManual}>
-        Нет в каталоге? Добавить «{query.trim().slice(0, 60)}» со своей ценой
-      </button>}
     </div>}
+
+    {manualOpen && <ManualForm initialName={query.trim()} onSave={addManual} onCancel={() => setManualOpen(false)} />}
 
     {lines.length > 0 && <ul className="mp-lines">
       {lines.map((line) => {
         const valid = parsePrice(line.price) !== null;
         return <li key={line.key} className="mp-line">
           <div className="mp-line-head">
-            <strong>{line.medicine_name}</strong>
-            {line.medicine_id === null && <span className="mp-tag">вне каталога</span>}
+            <span className="mp-line-name"><strong>{line.medicine_name}</strong>
+              {line.medicine_id === null && <span className="mp-tag">не из каталога</span>}</span>
             <button type="button" className="mp-remove" aria-label={`Убрать ${line.medicine_name}`}
               onClick={() => onChange(lines.filter((entry) => entry.key !== line.key))}>×</button>
           </div>
           <div className="mp-line-body">
-            <div className="mp-stepper" role="group" aria-label="Количество">
-              <button type="button" aria-label="Меньше" disabled={line.quantity <= 0.5}
-                onClick={() => update(line.key, { quantity: stepDown(line.quantity) })}>−</button>
-              <output>{quantityLabel(line.quantity)}</output>
-              <button type="button" aria-label="Больше" disabled={line.quantity >= 99}
-                onClick={() => update(line.key, { quantity: stepUp(line.quantity) })}>+</button>
-            </div>
-            <span className="mp-times" aria-hidden="true">×</span>
-            <label className={valid ? 'mp-price' : 'mp-price mp-price-invalid'}>
-              <span className="sr-only">Цена для клиента за 1 шт.</span>
-              <input ref={(node) => { if (node) priceRefs.current.set(line.key, node); else priceRefs.current.delete(line.key); }}
-                value={line.price} inputMode="decimal" placeholder="Цена"
+            <QuantityStepper value={line.quantity} onChange={(quantity) => update(line.key, { quantity })} />
+            <label className={valid ? 'mp-money' : 'mp-money mp-money-invalid'}>
+              <span className="sr-only">Цена за 1 шт.</span>
+              <input value={line.price} inputMode="decimal" placeholder="Цена"
                 onChange={(event) => update(line.key, { price: event.target.value })} />
               <span aria-hidden="true">с.</span>
             </label>
@@ -148,6 +155,5 @@ export default function MedicinePicker({ lines, onChange, defaultPrice }: Props)
         </li>;
       })}
     </ul>}
-    {lines.length > 0 && <div className="mp-total"><span>Сумма товаров</span><strong>{money(total)}</strong></div>}
   </div>;
 }

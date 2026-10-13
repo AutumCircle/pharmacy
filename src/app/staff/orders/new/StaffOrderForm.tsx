@@ -12,7 +12,7 @@ const sources: Array<{ value: StaffOrderSource; label: string }> = [
   { value: 'instagram', label: 'Instagram' },
 ];
 
-type Created = { reference: string; notified: boolean };
+type Created = { orderId: string; reference: string; notified: boolean };
 
 export default function StaffOrderForm() {
   const [pharmacyId, setPharmacyId] = useState<1 | 2 | null>(null);
@@ -66,7 +66,7 @@ export default function StaffOrderForm() {
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) throw new Error(result?.error?.message || result?.error || 'Не удалось сохранить заказ');
-      setCreated({ reference: result.data.order_reference, notified: result.data.notification_sent === true });
+      setCreated({ orderId: result.data.order_id, reference: result.data.order_reference, notified: result.data.notification_sent === true });
       pending.current = null;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (cause) {
@@ -80,8 +80,8 @@ export default function StaffOrderForm() {
       <h1>Заказ № {created.reference} создан</h1>
       <p>{created.notified ? 'Владелец получил уведомление.' : 'Уведомление не отправилось — сообщите владельцу.'}</p>
       <div className="c-done-actions">
-        <button type="button" className="c-btn c-btn-primary c-btn-wide" onClick={reset}>Создать ещё заказ</button>
-        <Link className="c-btn c-btn-outline c-btn-wide" href="/staff/orders">К списку заказов</Link>
+        <Link className="c-btn c-btn-primary c-btn-wide" href={`/staff/orders/${created.orderId}`}>Открыть заказ</Link>
+        <button type="button" className="c-btn c-btn-outline c-btn-wide" onClick={reset}>Создать ещё заказ</button>
       </div>
     </section>;
   }
