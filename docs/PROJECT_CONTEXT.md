@@ -33,6 +33,7 @@
 | `infrastructure/aws` | IAM/S3 policy snippets; это не полный Infrastructure-as-Code. |
 | `scripts` | Сборка Lambda ZIP и Windows 7 агента. |
 | `tests`, `backend/tests` | Тесты frontend-contract и Python backend. |
+| `factory`, `.claude/skills/factory`, `.claude/agents` | «Software factory»: скилл `/factory` прогоняет задачу через spec → build → 4 ревью → approver; состояние в `factory/board.json`, доска — `factory/dashboard.html`. |
 
 ## 3. Целевая production-архитектура
 
