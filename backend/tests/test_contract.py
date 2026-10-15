@@ -39,6 +39,10 @@ class PhoneTests(unittest.TestCase):
     def test_accepts_formatted_local_phone(self):
         self.assertEqual(normalize_phone("917-12-34-56"), "+992917123456")
 
+    def test_keeps_local_phone_starting_with_992(self):
+        self.assertEqual(normalize_phone("992123456"), "+992992123456")
+        self.assertEqual(normalize_phone("+992 992 12 34 56"), "+992992123456")
+
     def test_rejects_excessive_phone(self):
         with self.assertRaises(ContractError):
             normalize_phone("9171234567")
