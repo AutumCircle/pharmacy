@@ -61,7 +61,7 @@ export type CourierOrder = {
   order_total: number | string | null;
   website_order: boolean;
   own_order: boolean;
-  /** Completed manual courier checklist steps (1, 2, 4, 5, 7), sorted. Steps 3, 6, 8 derive from status. */
+  /** Completed manual courier checklist steps (1, 2, 3, 6), sorted. Steps 4, 5, 7 derive from status. */
   checklist_steps: number[];
   medicines: Array<{ order_item_id: number; medicine_id: number | null; medicine_name: string;
     quantity: number | string; base_unit_price: number | string | null;

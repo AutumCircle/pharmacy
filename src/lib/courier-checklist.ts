@@ -1,10 +1,11 @@
 import type { CourierOrder, CourierOrderStatus } from './api-v1/staff-types';
 
-// Courier delivery checklist. Internal to the courier: steps never become order statuses and are
-// never shown on the customer tracking page. Steps 3, 6 and 8 are derived from the order status
-// (Lambda refuses to store them); the other steps are ticked by the courier and saved in RDS.
+// Courier delivery checklist (v2, the owner's 7 steps). Internal to the courier: steps never become
+// order statuses and are never shown on the customer tracking page. Steps 4, 5 and 7 are derived
+// from the order status (Lambda refuses to store them); steps 1, 2, 3 and 6 are ticked by the
+// courier and saved per order in RDS through Lambda.
 
-export type ChecklistStepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type ChecklistStepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export type ChecklistStep = {
   step: ChecklistStepNumber;
@@ -17,19 +18,18 @@ export type ChecklistStep = {
 export type ChecklistOrder = Pick<CourierOrder, 'status' | 'website_order' | 'checklist_steps'>
   & Partial<Pick<CourierOrder, 'own_order'>>;
 
-export type ChecklistProgress = { done: number; total: 8; next: ChecklistStep | null };
+export type ChecklistProgress = { done: number; total: 7; next: ChecklistStep | null };
 
 export const CHECKLIST_STEPS: readonly ChecklistStep[] = [
-  { step: 1, title: 'Указать плату за доставку', hint: 'Впишите сумму в поле «Мне за доставку».' },
-  { step: 2, title: 'Позвонить клиенту', hint: 'Уточните адрес, ориентир и удобное время.' },
-  { step: 3, title: 'Подтвердить заказ', hint: 'Статус станет «Собирается».',
-    status: { from: 'pending', to: 'confirmed', action: 'Подтвердить', doneWhen: ['confirmed', 'delivering', 'delivered'] } },
-  { step: 4, title: 'Передать список в аптеку', hint: 'Перешлите аптеке список товаров на сборку.' },
-  { step: 5, title: 'Забрать заказ в аптеке', hint: 'Сверьте товары и количество по списку.' },
-  { step: 6, title: 'Выехать к клиенту', hint: 'Статус станет «В пути».',
+  { step: 1, title: 'Рассчитать доставку через Заза или Яндекс Карты', hint: 'Впишите сумму в поле «Мне за доставку».' },
+  { step: 2, title: 'Передать список лекарств нужной аптеке', hint: 'Перешлите аптеке список товаров из заказа.' },
+  { step: 3, title: 'Получить подтверждение наличия и цены', hint: 'Дождитесь ответа аптеки по каждому товару.' },
+  { step: 4, title: 'Позвонить клиенту, сообщить итоговые суммы и согласовать оплату и время доставки', hint: 'Статус станет «Собирается».',
+    status: { from: 'pending', to: 'confirmed', action: 'Согласовано', doneWhen: ['confirmed', 'delivering', 'delivered'] } },
+  { step: 5, title: 'Забрать собранный заказ и выехать после подтверждения оплаты', hint: 'Статус станет «В пути».',
     status: { from: 'confirmed', to: 'delivering', action: 'Выехал', doneWhen: ['delivering', 'delivered'] } },
-  { step: 7, title: 'Вручить заказ и получить оплату', hint: 'Сумма к оплате — в блоке «Товары».' },
-  { step: 8, title: 'Отметить доставку', hint: 'Статус станет «Доставлен».',
+  { step: 6, title: 'Позвонить клиенту за 5–10 минут до прибытия', hint: 'Предупредите клиента, что скоро приедете.' },
+  { step: 7, title: 'Передать заказ, кратко показать клиенту, как в следующий раз заказать через сайт, и завершить заказ', hint: 'Статус станет «Доставлен».',
     status: { from: 'delivering', to: 'delivered', action: 'Доставлен', doneWhen: ['delivered'] } },
 ];
 
@@ -55,5 +55,5 @@ export function checklistProgress(order: ChecklistOrder): ChecklistProgress | nu
   if (!hasChecklist(order)) return null;
   const done = CHECKLIST_STEPS.filter((item) => isStepDone(order, item.step)).length;
   const next = CHECKLIST_STEPS.find((item) => !isStepDone(order, item.step)) ?? null;
-  return { done, total: 8, next };
+  return { done, total: 7, next };
 }

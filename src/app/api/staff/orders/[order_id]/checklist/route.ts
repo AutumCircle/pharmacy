@@ -18,9 +18,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
       return NextResponse.json({ error: { message: 'Неверный запрос' } }, { status: 400 });
     }
     const data = body as Record<string, unknown>;
-    if (Object.keys(data).some((key) => key !== 'step' && key !== 'done')
-      || typeof data.done !== 'boolean' || !Number.isInteger(data.step) || (data.step as number) < 1 || (data.step as number) > 8) {
+    if (Object.keys(data).some((key) => key !== 'step' && key !== 'done') || typeof data.done !== 'boolean') {
       return NextResponse.json({ error: { message: 'Неверная отметка шага' } }, { status: 400 });
+    }
+    if (!Number.isInteger(data.step) || (data.step as number) < 1 || (data.step as number) > 7) {
+      return NextResponse.json({ error: { message: 'Шаг должен быть числом от 1 до 7' } }, { status: 400 });
     }
     if (!isManualStep(data.step)) {
       return NextResponse.json({ error: { message: 'Этот шаг отмечается сменой статуса заказа' } }, { status: 400 });

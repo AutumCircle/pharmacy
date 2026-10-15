@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from backend.v1.admin_api.lambda_function import (
     add_courier_order_items, add_manual_order_items, courier_earnings, list_courier_orders, update_courier_order_status,
     get_courier_order, update_courier_order_checklist, update_courier_order_customer, update_courier_order_item,
     update_order_delivery, update_order_item_price,
+    COURIER_CHECKLIST_MARKER, _COURIER_CHECKLIST_STEP_SQL, _COURIER_ORDER_SELECT, _checklist_steps,
 )
 from backend.v1.shared.contract import ContractError
 
@@ -423,56 +425,96 @@ class CourierOrderTests(unittest.TestCase):
     _WEBSITE_ORDER = {'id': 7, 'status': 'confirmed', 'created_by_staff_account_id': None}
 
     def test_checklist_tick_upserts_parameterized_and_audits(self):
+        for step in (3, 6):
+            cursor = Mock()
+            cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': step}, {'steps': [1, step]}]
+            order_id = 'ord_' + 'a' * 32
+            with self._tx(cursor):
+                result = update_courier_order_checklist(order_id, {'step': step, 'done': True}, 'req')
+            self.assertEqual(result, {'order_id': order_id, 'checklist_steps': [1, step]})
+            calls = cursor.execute.call_args_list
+            self.assertIn('FOR UPDATE', calls[0].args[0])
+            self.assertEqual(calls[0].args[1], (order_id,))
+            insert = calls[1]
+            self.assertIn('INSERT INTO order_courier_checklist', insert.args[0])
+            self.assertIn('VALUES (%s, %s, %s)', insert.args[0])
+            self.assertIn('ON CONFLICT (order_id, step) DO UPDATE', insert.args[0])
+            self.assertIn('SET completed_by = EXCLUDED.completed_by, completed_at = now()', insert.args[0])
+            self.assertIn('WHERE order_courier_checklist.completed_by <> EXCLUDED.completed_by', insert.args[0])
+            self.assertIn('RETURNING step', insert.args[0])
+            self.assertEqual(insert.args[1], (7, step, 'staff:3/v2'))
+            self.assertIn('courier.order.checklist_updated', str(calls))
+            statements = ' '.join(call.args[0] for call in calls)
+            self.assertNotIn('UPDATE orders', statements)
+            self.assertNotIn('order_status_history', statements)
+
+    def test_checklist_tick_converts_legacy_row_and_rereads_with_mapping(self):
+        # Legacy (2, 'staff:3') is converted by the upsert; the re-read applies the legacy mapping in SQL.
         cursor = Mock()
-        cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': 2}, {'steps': [1, 2]}]
-        order_id = 'ord_' + 'a' * 32
+        cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': 2}, {'steps': [2, 1]}]
         with self._tx(cursor):
-            result = update_courier_order_checklist(order_id, {'step': 2, 'done': True}, 'req')
-        self.assertEqual(result, {'order_id': order_id, 'checklist_steps': [1, 2]})
+            result = update_courier_order_checklist('ord_' + 'a' * 32, {'step': 2, 'done': True}, 'req')
+        self.assertEqual(result['checklist_steps'], [1, 2])
         calls = cursor.execute.call_args_list
-        self.assertIn('FOR UPDATE', calls[0].args[0])
-        self.assertEqual(calls[0].args[1], (order_id,))
-        insert = calls[1]
-        self.assertIn('INSERT INTO order_courier_checklist', insert.args[0])
-        self.assertIn('ON CONFLICT (order_id, step) DO NOTHING', insert.args[0])
-        self.assertIn('VALUES (%s, %s, %s)', insert.args[0])
-        self.assertEqual(insert.args[1], (7, 2, 'staff:3'))
-        self.assertIn('courier.order.checklist_updated', str(calls))
-        statements = ' '.join(call.args[0] for call in calls)
-        self.assertNotIn('UPDATE orders', statements)
-        self.assertNotIn('order_status_history', statements)
+        self.assertEqual(calls[1].args[1], (7, 2, 'staff:3/v2'))
+        reread_sql, reread_args = calls[-1].args
+        self.assertIn("WHEN c.completed_by = 'staff:3/v2'", reread_sql)
+        self.assertIn('WHEN c.step = 4 THEN 2', reread_sql)
+        self.assertIn('FILTER (WHERE', reread_sql)
+        self.assertEqual(reread_args, (7,))
 
     def test_checklist_untick_deletes_parameterized_and_audits(self):
         cursor = Mock()
-        cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': 2}, {'steps': []}]
+        cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': 6}, {'steps': []}]
         with self._tx(cursor):
-            result = update_courier_order_checklist('legacy_7', {'step': 2, 'done': False}, 'req')
+            result = update_courier_order_checklist('legacy_7', {'step': 6, 'done': False}, 'req')
         self.assertEqual(result['checklist_steps'], [])
         delete = cursor.execute.call_args_list[1]
         self.assertIn('DELETE FROM order_courier_checklist WHERE order_id = %s AND step = %s', delete.args[0])
-        self.assertEqual(delete.args[1], (7, 2))
+        self.assertEqual(delete.args[1], (7, 6))
+        self.assertIn('courier.order.checklist_updated', str(cursor.execute.call_args_list))
+
+    def test_checklist_untick_step_two_also_deletes_legacy_step_four(self):
+        cursor = Mock()
+        cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': 2}, {'steps': [1]}]
+        with self._tx(cursor):
+            result = update_courier_order_checklist('ord_' + 'a' * 32, {'step': 2, 'done': False}, 'req')
+        self.assertEqual(result['checklist_steps'], [1])
+        sql, args = cursor.execute.call_args_list[1].args
+        self.assertIn('DELETE FROM order_courier_checklist', sql)
+        self.assertIn('WHERE order_id = %s AND (step = %s OR (step = 4 AND completed_by <> %s))', sql)
+        self.assertNotIn("'staff:3", sql)
+        self.assertEqual(args, (7, 2, 'staff:3/v2'))
         self.assertIn('courier.order.checklist_updated', str(cursor.execute.call_args_list))
 
     def test_checklist_repeated_request_is_noop_success_without_audit(self):
         for done in (True, False):
             cursor = Mock()
-            cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), None, {'steps': [2] if done else []}]
+            cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), None, {'steps': [3] if done else []}]
             with self._tx(cursor):
-                result = update_courier_order_checklist('ord_' + 'a' * 32, {'step': 2, 'done': done}, 'req')
-            self.assertEqual(result['checklist_steps'], [2] if done else [])
+                result = update_courier_order_checklist('ord_' + 'a' * 32, {'step': 3, 'done': done}, 'req')
+            self.assertEqual(result['checklist_steps'], [3] if done else [])
             self.assertNotIn('admin_audit_log', ' '.join(call.args[0] for call in cursor.execute.call_args_list))
 
     def test_checklist_validates_payload_before_database(self):
         for payload in ({}, {'step': 2}, {'done': True}, {'step': 2, 'done': True, 'extra': 1},
                         {'step': '2', 'done': True}, {'step': 2.0, 'done': True}, {'step': True, 'done': True},
-                        {'step': 0, 'done': True}, {'step': 9, 'done': True}, {'step': 2, 'done': 'yes'},
-                        {'step': 2, 'done': 1}, {'step': 3, 'done': True}, {'step': 6, 'done': True},
+                        {'step': 0, 'done': True}, {'step': 8, 'done': True}, {'step': 9, 'done': True},
+                        {'step': 2, 'done': 'yes'}, {'step': 2, 'done': 1},
+                        {'step': 4, 'done': True}, {'step': 5, 'done': True}, {'step': 7, 'done': True},
                         {'step': 8, 'done': False}):
             cursor = Mock()
             with self._tx(cursor), self.assertRaises(ContractError) as raised:
                 update_courier_order_checklist('ord_' + 'a' * 32, payload, 'req')
             self.assertEqual((raised.exception.code, raised.exception.http_status), ('VALIDATION_ERROR', 400))
             cursor.execute.assert_not_called()
+        for step in (4, 5, 7):
+            with self.assertRaises(ContractError) as raised:
+                update_courier_order_checklist('ord_' + 'a' * 32, {'step': step, 'done': True}, 'req')
+            self.assertIn('Этот шаг отмечается сменой статуса заказа', str(raised.exception.__dict__))
+        with self.assertRaises(ContractError) as raised:
+            update_courier_order_checklist('ord_' + 'a' * 32, {'step': 8, 'done': True}, 'req')
+        self.assertIn('Шаг должен быть числом от 1 до 7', str(raised.exception.__dict__))
 
     def test_checklist_rejects_cancelled_own_and_missing_orders(self):
         cases = (({'id': 7, 'status': 'cancelled', 'created_by_staff_account_id': None}, 409, 'ORDER_STATUS_CONFLICT'),
@@ -480,21 +522,22 @@ class CourierOrderTests(unittest.TestCase):
                  ({'id': 7, 'status': 'pending', 'created_by_staff_account_id': 1}, 409, 'CHECKLIST_NOT_AVAILABLE'),
                  (None, 404, 'ORDER_NOT_FOUND'))
         for order, status, code in cases:
-            cursor = Mock()
-            cursor.fetchone.return_value = order
-            with self._tx(cursor), self.assertRaises(ContractError) as raised:
-                update_courier_order_checklist('ord_' + 'a' * 32, {'step': 1, 'done': True}, 'req')
-            self.assertEqual((raised.exception.http_status, raised.exception.code), (status, code))
-            self.assertEqual(cursor.execute.call_count, 1)
-            self.assertIn('deleted_at IS NULL', cursor.execute.call_args.args[0])
+            for step in (1, 3, 6):
+                cursor = Mock()
+                cursor.fetchone.return_value = order
+                with self._tx(cursor), self.assertRaises(ContractError) as raised:
+                    update_courier_order_checklist('ord_' + 'a' * 32, {'step': step, 'done': True}, 'req')
+                self.assertEqual((raised.exception.http_status, raised.exception.code), (status, code))
+                self.assertEqual(cursor.execute.call_count, 1)
+                self.assertIn('deleted_at IS NULL', cursor.execute.call_args.args[0])
 
     def test_courier_select_projects_checklist_steps_without_n_plus_one(self):
         cursor = Mock()
         cursor.fetchall.return_value = [{'id': 7, 'public_id': 'ord_' + 'a' * 32,
-            'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': [4, 1, 2]}]
+            'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': [6, 1, 2]}]
         with self._tx(cursor):
             result = list_courier_orders({})
-        self.assertEqual(result['data'][0]['checklist_steps'], [1, 2, 4])
+        self.assertEqual(result['data'][0]['checklist_steps'], [1, 2, 6])
         self.assertEqual(cursor.execute.call_count, 1)
         sql = cursor.execute.call_args.args[0]
         self.assertIn('AS checklist_steps', sql)
@@ -508,6 +551,39 @@ class CourierOrderTests(unittest.TestCase):
             result = get_courier_order('ord_' + 'a' * 32)
         self.assertEqual(result['checklist_steps'], [])
         self.assertIn('AS checklist_steps', cursor.execute.call_args.args[0])
+
+    def test_courier_select_contains_legacy_case_mapping(self):
+        sql = _COURIER_ORDER_SELECT
+        self.assertIn("WHEN c.completed_by = 'staff:3/v2' THEN CASE WHEN c.step IN (1, 2, 3, 6)", sql)
+        self.assertIn('WHEN c.step = 1 THEN 1', sql)
+        self.assertIn('WHEN c.step = 4 THEN 2', sql)
+        self.assertIn('array_agg(DISTINCT CASE', sql)
+        self.assertIn('IS NOT NULL)', sql)
+        self.assertIn("'" + COURIER_CHECKLIST_MARKER + "'", _COURIER_CHECKLIST_STEP_SQL)
+
+    def test_legacy_case_mapping_maps_old_rows_to_new_steps(self):
+        # Evaluate the exact CASE expression on an in-memory table (portable SQL; array_agg is Postgres-only).
+        def mapped(rows):
+            db = sqlite3.connect(':memory:')
+            db.execute('CREATE TABLE order_courier_checklist (step INTEGER, completed_by TEXT)')
+            db.executemany('INSERT INTO order_courier_checklist VALUES (?, ?)', rows)
+            expression = _COURIER_CHECKLIST_STEP_SQL.replace('::integer', '')
+            values = db.execute('SELECT DISTINCT ' + expression + ' FROM order_courier_checklist c '
+                                'WHERE ' + expression + ' IS NOT NULL').fetchall()
+            db.close()
+            return _checklist_steps([value for (value,) in values])
+
+        legacy = [(1, 'staff:3'), (2, 'staff:3'), (4, 'staff:3'), (5, 'staff:3'), (7, 'staff:3')]
+        self.assertEqual(mapped(legacy), [1, 2])
+        self.assertEqual(mapped([(2, 'staff:3/v2'), (4, 'staff:3')]), [2])
+        self.assertEqual(mapped([(1, 'staff:3/v2'), (3, 'staff:3/v2'), (6, 'staff:3/v2'), (5, 'staff:3/v2')]), [1, 3, 6])
+        self.assertEqual(mapped([(1, 'staff:3'), (2, 'staff:3')]), [1])
+        # After unticking step 2 (v2 row 2 and legacy row 4 deleted) only the legacy step 1 remains.
+        self.assertEqual(mapped([(1, 'staff:3'), (5, 'staff:3'), (7, 'staff:3')]), [1])
+
+    def test_checklist_steps_drops_values_outside_manual_set(self):
+        self.assertEqual(_checklist_steps([7, 6, 5, 4, 3, 2, 1, 8, 0, 2]), [1, 2, 3, 6])
+        self.assertEqual(_checklist_steps(None), [])
 
     def test_item_price_requires_a_price(self):
         with self.assertRaises(ContractError):
