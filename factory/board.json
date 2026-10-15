@@ -1,4 +1,33 @@
 {
-  "updated": null,
-  "jobs": []
+  "updated": "2026-10-15T05:10:56Z",
+  "jobs": [
+    {
+      "id": "001-courier-delivery-checklist",
+      "title": "Чек-лист курьера в карточке заказа",
+      "branch": "factory/001-courier-delivery-checklist",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-15T05:10:56Z"
+    }
+  ]
 }
