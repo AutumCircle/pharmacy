@@ -182,6 +182,7 @@ export default function CartPage() {
           MEDICINE_NOT_FOUND: 'Некоторые лекарства больше не найдены в каталоге.',
           MINIMUM_ORDER_NOT_REACHED: 'После проверки актуальных цен сумма заказа меньше 50 сомони.',
           IDEMPOTENCY_CONFLICT: 'Данные заказа изменились. Повторите оформление ещё раз.',
+          RATE_LIMITED: 'Слишком много попыток оформить заказ. Подождите несколько минут и попробуйте снова — корзина и данные сохранены.',
         };
         const code = payload?.error?.code || '';
         setCheckoutError(messages[code] || payload?.error?.message || 'Не удалось оформить заказ. Повторите попытку.');
