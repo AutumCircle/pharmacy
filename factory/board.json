@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-15T05:45:13Z",
+  "updated": "2026-10-15T12:21:05Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -56,6 +56,62 @@
       "reworks": 0,
       "note": "",
       "updated": "2026-10-15T05:45:13Z"
+    },
+    {
+      "id": "003-courier-checklist-v2",
+      "title": "Чек-лист курьера v2 (7 шагов владельца)",
+      "branch": "factory/003-courier-checklist-v2",
+      "stage": "needs-human",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "Ручная проверка, SQL на Postgres, сброс старой отметки «Позвонить», деплой Lambda+Vercel вместе",
+      "updated": "2026-10-15T12:20:23Z"
+    },
+    {
+      "id": "004-tracking-rate-limit",
+      "title": "Rate limit на отслеживание заказа",
+      "branch": "factory/004-tracking-rate-limit",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 0,
+      "note": "",
+      "updated": "2026-10-15T12:21:05Z"
     }
   ]
 }

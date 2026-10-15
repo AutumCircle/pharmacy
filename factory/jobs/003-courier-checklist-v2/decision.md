@@ -1,0 +1,6 @@
+ESCALATE
+All four round-1 reviews say PASS, the diff has no migration, no agent.py, no tracking, no auth, no infra and no dependency change, and criteria 1-4, 6 and 7 are verified in build.md.
+Criterion 5 (hand check of the 7-step courier card, the «Согласовано»/«Выехал»/«Доставлен» transitions, ticks still there after a reload, and «N из 7 шагов» on a 390 px list) was never done. Also, the Postgres-only `array_agg(DISTINCT CASE ...) FILTER` mapping was only run in sqlite and never against real Postgres. A human must run both on a local/dev Lambda+Postgres build, not production.
+Product decision needed: on in-flight orders, legacy «Позвонить клиенту» ticks (old step 2) are silently dropped and the courier has to tick again. The spec explicitly asks the approver to confirm this is acceptable.
+Deploy note: the Lambda and the Vercel frontend must go out back to back. A mismatched pair returns 400 for checklist ticks. Approving the merge must not mean deploying only one of them.
+If all of this is confirmed, run `/factory approve 003-courier-checklist-v2`. Otherwise run `/factory rework 003-courier-checklist-v2 <note>`. Optionally ask for a test asserting the CASE literal 'staff:3/v2' equals COURIER_CHECKLIST_MARKER (security review note).
