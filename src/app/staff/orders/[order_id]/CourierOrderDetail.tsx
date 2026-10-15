@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import type { CourierOrder, CourierOrderStatus } from '@/lib/api-v1/staff-types';
+import { CHECKLIST_STEPS, checklistProgress, isStepDone } from '@/lib/courier-checklist';
 import { formatOrderDateTime } from '@/lib/order-time';
 import { money, parsePrice, priceInput, quantityLabel } from '../../format';
 import MedicinePicker, { invalidLine, lineTotal, type PickerLine } from '../MedicinePicker';
@@ -243,6 +244,77 @@ function FeeSection({ order, base }: { order: CourierOrder; base: string }) {
   </section>;
 }
 
+function ChecklistSection({ order, base, statusBusy, onStatus, onConflict }: {
+  order: CourierOrder; base: string; statusBusy: boolean;
+  onStatus: (next: CourierOrderStatus) => void; onConflict: () => void;
+}) {
+  const [steps, setSteps] = useState<number[]>(order.checklist_steps ?? []);
+  const [saving, setSaving] = useState<number[]>([]);
+  const [error, setError] = useState('');
+  const view = { ...order, checklist_steps: steps };
+  const progress = checklistProgress(view);
+  if (!progress) return null;
+
+  const mark = (step: number, done: boolean) => setSteps((current) => done
+    ? [...current.filter((value) => value !== step), step].sort((a, b) => a - b)
+    : current.filter((value) => value !== step));
+
+  async function toggle(step: number, done: boolean) {
+    setError('');
+    mark(step, done);
+    setSaving((current) => [...current, step]);
+    try {
+      const result = await send(`${base}/checklist`, 'PATCH', { step, done });
+      const saved: unknown = result?.data?.checklist_steps;
+      if (Array.isArray(saved)) mark(step, saved.includes(step));
+    } catch (cause) {
+      mark(step, !done);
+      setError(`Шаг ${step} не сохранён: ${errorText(cause)}`);
+      if ((cause as { status?: number }).status === 409) onConflict();
+    } finally {
+      setSaving((current) => current.filter((value) => value !== step));
+    }
+  }
+
+  return <section className="c-block c-checklist" aria-labelledby="c-checklist-title">
+    <div className="c-block-title"><h2 id="c-checklist-title">Чек-лист доставки</h2>
+      <strong>{progress.done} из {progress.total}</strong></div>
+    <div className="c-checklist-bar" role="progressbar" aria-label="Выполнено шагов" aria-valuemin={0}
+      aria-valuemax={progress.total} aria-valuenow={progress.done}>
+      <span style={{ width: `${(progress.done / progress.total) * 100}%` }} /></div>
+    <ol className="c-checklist-steps">
+      {CHECKLIST_STEPS.map((item) => {
+        const done = isStepDone(view, item.step);
+        const current = progress.next?.step === item.step;
+        const className = `c-check${done ? ' done' : ''}${current ? ' current' : ''}`;
+        const text = <span className="c-check-text"><strong>{item.title}</strong><small>{item.hint}</small></span>;
+        if (item.status) {
+          const linked = item.status;
+          return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>
+            <div className="c-check-row">
+              <span className="c-check-mark" aria-hidden="true">{done ? '✓' : item.step}</span>
+              {text}
+              {done ? <span className="sr-only">Выполнено</span>
+                : order.status === linked.from && <button type="button" className="c-btn c-btn-outline c-check-action"
+                  disabled={statusBusy} onClick={() => onStatus(linked.to)}>{statusBusy ? '…' : linked.action}</button>}
+            </div>
+          </li>;
+        }
+        return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>
+          <label className="c-check-row">
+            <input type="checkbox" className="c-check-input" checked={done} disabled={saving.includes(item.step)}
+              onChange={(event) => toggle(item.step, event.target.checked)} />
+            <span className="c-check-mark" aria-hidden="true">{done ? '✓' : item.step}</span>
+            {text}
+          </label>
+          {item.step === 1 && <a className="c-check-link" href="#courier-fee">К полю «Мне за доставку» ↓</a>}
+        </li>;
+      })}
+    </ol>
+    {error && <p className="c-error" role="alert">{error}</p>}
+  </section>;
+}
+
 export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -273,6 +345,8 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
       <span className={`c-pill c-pill-${order.status}`}>{statusLabels[order.status]}</span>
     </header>
     <Progress status={order.status} />
+    <ChecklistSection key={`${order.status}:${(order.checklist_steps ?? []).join(',')}`} order={order} base={base}
+      statusBusy={busy} onStatus={(next) => changeStatus(next)} onConflict={refresh} />
     <CustomerSection order={order} base={base} onSaved={refresh} />
     <ItemsSection order={order} base={base} onSaved={refresh} />
     {order.status !== 'cancelled' && <FeeSection order={order} base={base} />}

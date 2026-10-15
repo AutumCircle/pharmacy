@@ -8,8 +8,8 @@ from decimal import Decimal
 
 from backend.v1.admin_api.lambda_function import (
     add_courier_order_items, add_manual_order_items, courier_earnings, list_courier_orders, update_courier_order_status,
-    get_courier_order, update_courier_order_customer, update_courier_order_item, update_order_delivery,
-    update_order_item_price,
+    get_courier_order, update_courier_order_checklist, update_courier_order_customer, update_courier_order_item,
+    update_order_delivery, update_order_item_price,
 )
 from backend.v1.shared.contract import ContractError
 
@@ -417,6 +417,97 @@ class CourierOrderTests(unittest.TestCase):
         self.assertIn('o.public_id = %s', sql)
         self.assertIn('own_order', sql)
         self.assertEqual(args, ('ord_' + 'a' * 32,))
+
+    # --- courier delivery checklist -------------------------------------------------
+
+    _WEBSITE_ORDER = {'id': 7, 'status': 'confirmed', 'created_by_staff_account_id': None}
+
+    def test_checklist_tick_upserts_parameterized_and_audits(self):
+        cursor = Mock()
+        cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': 2}, {'steps': [1, 2]}]
+        order_id = 'ord_' + 'a' * 32
+        with self._tx(cursor):
+            result = update_courier_order_checklist(order_id, {'step': 2, 'done': True}, 'req')
+        self.assertEqual(result, {'order_id': order_id, 'checklist_steps': [1, 2]})
+        calls = cursor.execute.call_args_list
+        self.assertIn('FOR UPDATE', calls[0].args[0])
+        self.assertEqual(calls[0].args[1], (order_id,))
+        insert = calls[1]
+        self.assertIn('INSERT INTO order_courier_checklist', insert.args[0])
+        self.assertIn('ON CONFLICT (order_id, step) DO NOTHING', insert.args[0])
+        self.assertIn('VALUES (%s, %s, %s)', insert.args[0])
+        self.assertEqual(insert.args[1], (7, 2, 'staff:3'))
+        self.assertIn('courier.order.checklist_updated', str(calls))
+        statements = ' '.join(call.args[0] for call in calls)
+        self.assertNotIn('UPDATE orders', statements)
+        self.assertNotIn('order_status_history', statements)
+
+    def test_checklist_untick_deletes_parameterized_and_audits(self):
+        cursor = Mock()
+        cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': 2}, {'steps': []}]
+        with self._tx(cursor):
+            result = update_courier_order_checklist('legacy_7', {'step': 2, 'done': False}, 'req')
+        self.assertEqual(result['checklist_steps'], [])
+        delete = cursor.execute.call_args_list[1]
+        self.assertIn('DELETE FROM order_courier_checklist WHERE order_id = %s AND step = %s', delete.args[0])
+        self.assertEqual(delete.args[1], (7, 2))
+        self.assertIn('courier.order.checklist_updated', str(cursor.execute.call_args_list))
+
+    def test_checklist_repeated_request_is_noop_success_without_audit(self):
+        for done in (True, False):
+            cursor = Mock()
+            cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), None, {'steps': [2] if done else []}]
+            with self._tx(cursor):
+                result = update_courier_order_checklist('ord_' + 'a' * 32, {'step': 2, 'done': done}, 'req')
+            self.assertEqual(result['checklist_steps'], [2] if done else [])
+            self.assertNotIn('admin_audit_log', ' '.join(call.args[0] for call in cursor.execute.call_args_list))
+
+    def test_checklist_validates_payload_before_database(self):
+        for payload in ({}, {'step': 2}, {'done': True}, {'step': 2, 'done': True, 'extra': 1},
+                        {'step': '2', 'done': True}, {'step': 2.0, 'done': True}, {'step': True, 'done': True},
+                        {'step': 0, 'done': True}, {'step': 9, 'done': True}, {'step': 2, 'done': 'yes'},
+                        {'step': 2, 'done': 1}, {'step': 3, 'done': True}, {'step': 6, 'done': True},
+                        {'step': 8, 'done': False}):
+            cursor = Mock()
+            with self._tx(cursor), self.assertRaises(ContractError) as raised:
+                update_courier_order_checklist('ord_' + 'a' * 32, payload, 'req')
+            self.assertEqual((raised.exception.code, raised.exception.http_status), ('VALIDATION_ERROR', 400))
+            cursor.execute.assert_not_called()
+
+    def test_checklist_rejects_cancelled_own_and_missing_orders(self):
+        cases = (({'id': 7, 'status': 'cancelled', 'created_by_staff_account_id': None}, 409, 'ORDER_STATUS_CONFLICT'),
+                 ({'id': 7, 'status': 'pending', 'created_by_staff_account_id': 3}, 409, 'CHECKLIST_NOT_AVAILABLE'),
+                 ({'id': 7, 'status': 'pending', 'created_by_staff_account_id': 1}, 409, 'CHECKLIST_NOT_AVAILABLE'),
+                 (None, 404, 'ORDER_NOT_FOUND'))
+        for order, status, code in cases:
+            cursor = Mock()
+            cursor.fetchone.return_value = order
+            with self._tx(cursor), self.assertRaises(ContractError) as raised:
+                update_courier_order_checklist('ord_' + 'a' * 32, {'step': 1, 'done': True}, 'req')
+            self.assertEqual((raised.exception.http_status, raised.exception.code), (status, code))
+            self.assertEqual(cursor.execute.call_count, 1)
+            self.assertIn('deleted_at IS NULL', cursor.execute.call_args.args[0])
+
+    def test_courier_select_projects_checklist_steps_without_n_plus_one(self):
+        cursor = Mock()
+        cursor.fetchall.return_value = [{'id': 7, 'public_id': 'ord_' + 'a' * 32,
+            'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': [4, 1, 2]}]
+        with self._tx(cursor):
+            result = list_courier_orders({})
+        self.assertEqual(result['data'][0]['checklist_steps'], [1, 2, 4])
+        self.assertEqual(cursor.execute.call_count, 1)
+        sql = cursor.execute.call_args.args[0]
+        self.assertIn('AS checklist_steps', sql)
+        self.assertIn('FROM order_courier_checklist c WHERE c.order_id = o.id', sql)
+        self.assertIn('LEFT JOIN LATERAL', sql)
+
+        cursor = Mock()
+        cursor.fetchone.return_value = {'id': 7, 'public_id': 'ord_' + 'a' * 32,
+            'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': None}
+        with self._tx(cursor):
+            result = get_courier_order('ord_' + 'a' * 32)
+        self.assertEqual(result['checklist_steps'], [])
+        self.assertIn('AS checklist_steps', cursor.execute.call_args.args[0])
 
     def test_item_price_requires_a_price(self):
         with self.assertRaises(ContractError):

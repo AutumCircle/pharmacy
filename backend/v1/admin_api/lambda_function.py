@@ -1180,6 +1180,7 @@ _COURIER_ORDER_SELECT = """
            o.created_by_staff_account_id IS NULL AS website_order,
            COALESCE(o.created_by_staff_account_id = 3, false) AS own_order,
            COALESCE(items.medicines, '[]'::json) AS medicines,
+           COALESCE(checklist.steps, ARRAY[]::integer[]) AS checklist_steps,
            COALESCE(o.fulfillment_pharmacy_id,
                CASE WHEN o.created_by_staff_account_id IN (1, 2)
                     THEN o.created_by_staff_account_id ELSE 1 END) AS pharmacy_id
@@ -1192,12 +1193,24 @@ _COURIER_ORDER_SELECT = """
             'line_total', oi.line_total) ORDER BY oi.id) AS medicines
         FROM order_items oi WHERE oi.order_id = o.id
     ) items ON true
+    LEFT JOIN LATERAL (
+        SELECT array_agg(c.step::integer ORDER BY c.step) AS steps
+        FROM order_courier_checklist c WHERE c.order_id = o.id
+    ) checklist ON true
 """
+
+# Courier checklist steps 3, 6 and 8 are derived from orders.status and are never stored.
+COURIER_CHECKLIST_MANUAL_STEPS = frozenset({1, 2, 4, 5, 7})
+
+
+def _checklist_steps(value: Any) -> list[int]:
+    return sorted({int(step) for step in (value or []) if int(step) in COURIER_CHECKLIST_MANUAL_STEPS})
 
 
 def _courier_order_row(row: dict[str, Any]) -> dict[str, Any]:
     row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
     row.pop("id")
+    row["checklist_steps"] = _checklist_steps(row.get("checklist_steps"))
     row["created_at"] = order_time_iso(row["created_at"])
     return row
 
@@ -1669,6 +1682,46 @@ def update_courier_order_status(order_id: str, payload: dict[str, Any], current_
                            resource_type="order", resource_id=order_id, request=current_request_id,
                            details={"from_status": current, "to_status": new})
     return {"order_id": order_id, "status": new, "changed_at": changed_at}
+
+
+def update_courier_order_checklist(order_id: str, payload: dict[str, Any], current_request_id: str) -> dict[str, Any]:
+    """Courier ticks or unticks a manual checklist step in a website order. Idempotent."""
+    if not isinstance(payload, dict) or set(payload) != {"step", "done"}:
+        raise ContractError("VALIDATION_ERROR", "Укажите шаг и отметку")
+    step, done = payload["step"], payload["done"]
+    if isinstance(step, bool) or not isinstance(step, int) or not 1 <= step <= 8:
+        raise ContractError("VALIDATION_ERROR", "Шаг должен быть числом от 1 до 8")
+    if step not in COURIER_CHECKLIST_MANUAL_STEPS:
+        raise ContractError("VALIDATION_ERROR", "Этот шаг отмечается сменой статуса заказа")
+    if not isinstance(done, bool):
+        raise ContractError("VALIDATION_ERROR", "Отметка должна быть true или false")
+    lookup, lookup_values = _order_lookup(order_id)
+    with transaction() as cur:
+        cur.execute(f"""SELECT id, status, created_by_staff_account_id
+                        FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
+        order = cur.fetchone()
+        if not order:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        if order["status"] == "cancelled":
+            raise ContractError("ORDER_STATUS_CONFLICT", "Заказ отменён", http_status=409)
+        if order["created_by_staff_account_id"] is not None:
+            raise ContractError("CHECKLIST_NOT_AVAILABLE", "Чек-лист есть только у заказов с сайта", http_status=409)
+        if done:
+            cur.execute("""INSERT INTO order_courier_checklist (order_id, step, completed_by)
+                           VALUES (%s, %s, %s) ON CONFLICT (order_id, step) DO NOTHING RETURNING step""",
+                        (order["id"], step, "staff:3"))
+        else:
+            cur.execute("DELETE FROM order_courier_checklist WHERE order_id = %s AND step = %s RETURNING step",
+                        (order["id"], step))
+        changed = cur.fetchone() is not None
+        if changed:
+            _write_admin_audit(cur, actor_id="staff:3", action="courier.order.checklist_updated",
+                               resource_type="order", resource_id=order_id, request=current_request_id,
+                               details={"step": step, "done": done})
+        cur.execute("""SELECT COALESCE(array_agg(step::integer ORDER BY step), ARRAY[]::integer[]) AS steps
+                       FROM order_courier_checklist WHERE order_id = %s""", (order["id"],))
+        row = cur.fetchone()
+    return {"order_id": order_id, "checklist_steps": _checklist_steps(row["steps"] if row else [])}
 
 
 def list_orders(query: dict[str, Any]) -> dict[str, Any]:
@@ -3955,6 +4008,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if staff_method == "PATCH" and customer_match:
                 staff_accounts.session_account(event, courier=True)
                 return success(update_courier_order_customer(customer_match.group(1), _body(event),
+                    current_request_id), request=current_request_id)
+            checklist_match = re.fullmatch(
+                r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/checklist", staff_path)
+            if staff_method == "PATCH" and checklist_match:
+                staff_accounts.session_account(event, courier=True)
+                return success(update_courier_order_checklist(checklist_match.group(1), _body(event),
                     current_request_id), request=current_request_id)
             status_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/status", staff_path)
             if staff_method == "PATCH" and status_match:
