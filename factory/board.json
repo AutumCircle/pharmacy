@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-15T12:26:22Z",
+  "updated": "2026-10-15T12:56:01Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -112,6 +112,34 @@
       "reworks": 0,
       "note": "Отменено владельцем: поиск по телефону без лимита; merge откатан revert-коммитом",
       "updated": "2026-10-15T12:26:22Z"
+    },
+    {
+      "id": "005-checkout-rate-limit",
+      "title": "Rate limit на оформление заказа",
+      "branch": "factory/005-checkout-rate-limit",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 0,
+      "note": "",
+      "updated": "2026-10-15T12:56:01Z"
     }
   ]
 }
