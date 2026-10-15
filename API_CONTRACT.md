@@ -214,6 +214,7 @@ Validation:
 Обязательный алгоритм Lambda:
 
 1. Проверить caller, rate limit, schema и `Idempotency-Key`.
+   - Текущая реализация: per-IP лимит попыток создания заказа применяется в Next.js route `POST /api/checkout` (см. §11), до вызова Lambda. Lambda-side лимит и лимит по hash телефона для create order пока не реализованы.
 2. Повтор с тем же key и payload возвращает исходный response; тот же key с другим payload — `409 IDEMPOTENCY_CONFLICT`.
 3. В одной DB transaction получить все позиции по primary key `medicine_id`.
 4. Для каждой позиции потребовать ровно одну активную запись с `in_stock=true` и положительной `base_unit_price`.
@@ -422,7 +423,12 @@ Responses и logs не содержат stack trace, SQL, environment values, cr
 
 - Public, admin и internal principals имеют разные permissions; unknown routes/actions — deny-by-default.
 - Текущая локальная development-конфигурация и API key сохраняются на Phase 2. Ротация выполняется при финальном production deployment; до этого ключ не переносится в новые client-side paths или logs.
-- Create order и tracking имеют отдельные per-IP/phone-hash rate limits.
+- Create order и tracking имеют отдельные per-IP/phone-hash rate limits (целевое требование). Текущее состояние:
+  - **Create order — реализован только per-IP лимит в Next.js** (`src/app/api/checkout/route.ts`, `src/lib/rate-limit.ts`): fixed window, не более **5** попыток за **10 минут** на один client IP (первый адрес `x-forwarded-for`, затем `x-real-ip`, иначе общий bucket `unknown`), до **10 000** отслеживаемых IP. Квоту расходуют только запросы с `Idempotency-Key` и валидным телом; повтор с тем же `Idempotency-Key` тоже считается попыткой. Лимит 5 покрывает один заказ, два повтора и одно исправление (например, после `ORDER_ITEMS_UNAVAILABLE`).
+  - Сверх лимита ответ `429` с заголовком `Retry-After: <секунды>` и телом `{ "error": { "code": "RATE_LIMITED", "message": "Слишком много попыток оформить заказ. Подождите несколько минут и попробуйте снова." } }`; Lambda и Telegram-уведомления не вызываются. Корзина, данные формы и pending idempotency key в браузере сохраняются.
+  - Счётчик хранится в памяти каждого Vercel instance: лимит не глобальный (фактический потолок — лимит × число тёплых instances), сбрасывается при cold start; это сдерживание флуда с одного IP, а не жёсткая гарантия.
+  - **Не реализовано:** Lambda/RDS-side лимит для create order и лимит по hash телефона. Требует миграции и деплоя Lambda (или Vercel KV/Upstash) — отдельная задача.
+  - Tracking (`/api/tracking`) этим лимитом не затрагивается и в текущей реализации не ограничивается (решение владельца).
 - Next.js задаёт upstream timeout и отмену. Автоматические retries разрешены только для safe reads; order retry — только с тем же idempotency key.
 - Admin reads/mutations используют `no-store`; search/get/categories могут иметь короткий TTL с invalidation после sync.
 - Lambda использует parameterized SQL, transactions и DB constraints для prices, quantities, statuses, idempotency и `medicine_id` references.
