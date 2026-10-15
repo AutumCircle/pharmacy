@@ -1173,7 +1173,23 @@ def create_staff_order(
         return response, 201, notification
 
 
-_COURIER_ORDER_SELECT = """
+# Courier checklist v2 (the owner's 7 steps). Steps 4, 5 and 7 are derived from orders.status and are
+# never stored; the courier ticks steps 1, 2, 3 and 6. Rows written by v2 carry
+# completed_by = 'staff:3/v2'; any other marker is a job-001 (8-step) row, mapped on read:
+# old 1 -> new 1, old 4 -> new 2, everything else is ignored. No migration, no data rewrite.
+COURIER_CHECKLIST_MANUAL_STEPS = frozenset({1, 2, 3, 6})
+COURIER_CHECKLIST_MARKER = "staff:3/v2"
+# Maps one stored row (alias c) to its v2 step number, or NULL when the row is ignored. The marker is a
+# server-side constant, not client input; it must equal COURIER_CHECKLIST_MARKER.
+_COURIER_CHECKLIST_STEP_SQL = """CASE
+            WHEN c.completed_by = 'staff:3/v2' THEN CASE WHEN c.step IN (1, 2, 3, 6) THEN c.step::integer END
+            WHEN c.step = 1 THEN 1
+            WHEN c.step = 4 THEN 2
+        END"""
+_COURIER_CHECKLIST_AGG_SQL = (f"array_agg(DISTINCT {_COURIER_CHECKLIST_STEP_SQL})"
+                              f" FILTER (WHERE {_COURIER_CHECKLIST_STEP_SQL} IS NOT NULL)")
+
+_COURIER_ORDER_SELECT = f"""
     SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
            o.address, o.landmark, o.notes, o.order_source, o.status, o.created_at,
            o.delivery_courier_amount, o.order_total,
@@ -1194,13 +1210,10 @@ _COURIER_ORDER_SELECT = """
         FROM order_items oi WHERE oi.order_id = o.id
     ) items ON true
     LEFT JOIN LATERAL (
-        SELECT array_agg(c.step::integer ORDER BY c.step) AS steps
+        SELECT {_COURIER_CHECKLIST_AGG_SQL} AS steps
         FROM order_courier_checklist c WHERE c.order_id = o.id
     ) checklist ON true
 """
-
-# Courier checklist steps 3, 6 and 8 are derived from orders.status and are never stored.
-COURIER_CHECKLIST_MANUAL_STEPS = frozenset({1, 2, 4, 5, 7})
 
 
 def _checklist_steps(value: Any) -> list[int]:
@@ -1689,8 +1702,8 @@ def update_courier_order_checklist(order_id: str, payload: dict[str, Any], curre
     if not isinstance(payload, dict) or set(payload) != {"step", "done"}:
         raise ContractError("VALIDATION_ERROR", "Укажите шаг и отметку")
     step, done = payload["step"], payload["done"]
-    if isinstance(step, bool) or not isinstance(step, int) or not 1 <= step <= 8:
-        raise ContractError("VALIDATION_ERROR", "Шаг должен быть числом от 1 до 8")
+    if isinstance(step, bool) or not isinstance(step, int) or not 1 <= step <= 7:
+        raise ContractError("VALIDATION_ERROR", "Шаг должен быть числом от 1 до 7")
     if step not in COURIER_CHECKLIST_MANUAL_STEPS:
         raise ContractError("VALIDATION_ERROR", "Этот шаг отмечается сменой статуса заказа")
     if not isinstance(done, bool):
@@ -1707,9 +1720,20 @@ def update_courier_order_checklist(order_id: str, payload: dict[str, Any], curre
         if order["created_by_staff_account_id"] is not None:
             raise ContractError("CHECKLIST_NOT_AVAILABLE", "Чек-лист есть только у заказов с сайта", http_status=409)
         if done:
+            # A legacy row under the same number is converted to v2; a repeated v2 tick is a no-op.
             cur.execute("""INSERT INTO order_courier_checklist (order_id, step, completed_by)
-                           VALUES (%s, %s, %s) ON CONFLICT (order_id, step) DO NOTHING RETURNING step""",
-                        (order["id"], step, "staff:3"))
+                           VALUES (%s, %s, %s)
+                           ON CONFLICT (order_id, step) DO UPDATE
+                           SET completed_by = EXCLUDED.completed_by, completed_at = now()
+                           WHERE order_courier_checklist.completed_by <> EXCLUDED.completed_by
+                           RETURNING step""",
+                        (order["id"], step, COURIER_CHECKLIST_MARKER))
+        elif step == 2:
+            # New step 2 is also read from a legacy step-4 row; remove it so the untick sticks.
+            cur.execute("""DELETE FROM order_courier_checklist
+                           WHERE order_id = %s AND (step = %s OR (step = 4 AND completed_by <> %s))
+                           RETURNING step""",
+                        (order["id"], step, COURIER_CHECKLIST_MARKER))
         else:
             cur.execute("DELETE FROM order_courier_checklist WHERE order_id = %s AND step = %s RETURNING step",
                         (order["id"], step))
@@ -1718,8 +1742,8 @@ def update_courier_order_checklist(order_id: str, payload: dict[str, Any], curre
             _write_admin_audit(cur, actor_id="staff:3", action="courier.order.checklist_updated",
                                resource_type="order", resource_id=order_id, request=current_request_id,
                                details={"step": step, "done": done})
-        cur.execute("""SELECT COALESCE(array_agg(step::integer ORDER BY step), ARRAY[]::integer[]) AS steps
-                       FROM order_courier_checklist WHERE order_id = %s""", (order["id"],))
+        cur.execute(f"""SELECT COALESCE({_COURIER_CHECKLIST_AGG_SQL}, ARRAY[]::integer[]) AS steps
+                        FROM order_courier_checklist c WHERE c.order_id = %s""", (order["id"],))
         row = cur.fetchone()
     return {"order_id": order_id, "checklist_steps": _checklist_steps(row["steps"] if row else [])}
 
