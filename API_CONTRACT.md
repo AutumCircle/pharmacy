@@ -280,13 +280,7 @@ Request:
 - Только exact normalized phone match; suffix/substring matching запрещён.
 - Endpoint выполняет parameterized filtered SQL с limit 20, а не вызывает admin `list_orders`.
 - Одинаковая форма ответа используется для неизвестного номера и номера без заказов.
-- Целевое требование: rate limit по IP и hash нормализованного телефона; raw phone не пишется в access logs.
-- **Реализовано сейчас (Next.js `POST /api/tracking`):** fixed-window limit по IP клиента — 10 валидных поисков за 10 минут (`TRACKING_RATE_LIMIT`, `TRACKING_RATE_WINDOW_MS` в `src/app/api/tracking/route.ts`, helper `src/lib/rate-limit.ts`).
-  - IP берётся из первого значения `x-forwarded-for`, затем `x-real-ip`; запросы без IP делят общий bucket `unknown`.
-  - Считается каждый поиск с валидным телефоном (есть заказы или нет); невалидное тело/телефон возвращает `400` и квоту не расходует.
-  - При превышении: HTTP `429`, заголовок `Retry-After: <секунды до конца окна>`, тело `{ "error": { "code": "RATE_LIMITED", "message": "Слишком много запросов. Повторите через несколько минут." } }`; Lambda не вызывается. Страница `/tracking` показывает это сообщение.
-  - Счётчик хранится в памяти каждого Vercel-инстанса (максимум 10 000 активных IP на инстанс; при заполнении новые IP получают `429` до истечения окон). Инстансы память не делят, cold start сбрасывает счётчик, поэтому это **не** глобальный жёсткий лимит: фактический потолок — `limit × число тёплых инстансов`. Ключ — только IP, raw phone не логируется и не используется как ключ.
-  - **Не реализовано:** bucket по hash телефона и лимит на стороне Lambda/RDS (или Vercel KV). Для жёсткого глобального лимита нужна миграция и Lambda deploy либо новая инфраструктура — отдельная задача.
+- Rate limit применяется по IP и hash нормализованного телефона; raw phone не пишется в access logs.
 - Response содержит `order_reference`, status, `medicine_id`, item names/quantities/selling snapshots, `items_subtotal`, `order_total` и timestamps. Delivery fee отсутствует.
 - Точный адрес, полный телефон, base price, admin notes и чужие заказы исключены.
 
@@ -426,7 +420,7 @@ Responses и logs не содержат stack trace, SQL, environment values, cr
 
 - Public, admin и internal principals имеют разные permissions; unknown routes/actions — deny-by-default.
 - Текущая локальная development-конфигурация и API key сохраняются на Phase 2. Ротация выполняется при финальном production deployment; до этого ключ не переносится в новые client-side paths или logs.
-- Create order и tracking имеют отдельные per-IP/phone-hash rate limits. Сейчас для tracking реализован только per-IP in-memory лимит в Next.js (см. §7).
+- Create order и tracking имеют отдельные per-IP/phone-hash rate limits.
 - Next.js задаёт upstream timeout и отмену. Автоматические retries разрешены только для safe reads; order retry — только с тем же idempotency key.
 - Admin reads/mutations используют `no-store`; search/get/categories могут иметь короткий TTL с invalidation после sync.
 - Lambda использует parameterized SQL, transactions и DB constraints для prices, quantities, statuses, idempotency и `medicine_id` references.

@@ -7,29 +7,6 @@ interface CachedRead<T> {
   promise: Promise<T>;
 }
 
-export class PublicReadError extends Error {
-  readonly status: number;
-  readonly serverMessage: string | null;
-
-  constructor(status: number, serverMessage: string | null) {
-    super(`Public read failed with ${status}`);
-    this.name = 'PublicReadError';
-    this.status = status;
-    this.serverMessage = serverMessage;
-  }
-}
-
-async function readServerMessage(response: Response): Promise<string | null> {
-  try {
-    const payload: unknown = await response.json();
-    const error = payload && typeof payload === 'object' ? (payload as { error?: unknown }).error : undefined;
-    const message = error && typeof error === 'object' ? (error as { message?: unknown }).message : undefined;
-    return typeof message === 'string' && message.trim() ? message : null;
-  } catch {
-    return null;
-  }
-}
-
 const reads = new Map<string, CachedRead<unknown>>();
 const SHORT_DEDUPE_MS = 2_000;
 
@@ -47,7 +24,7 @@ async function post<T>(path: string, body: unknown, force = false): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then(async (response) => {
-    if (!response.ok) throw new PublicReadError(response.status, await readServerMessage(response));
+    if (!response.ok) throw new Error(`Public read failed with ${response.status}`);
     const payload = await response.json() as T;
     entry.expiresAt = Date.now() + SHORT_DEDUPE_MS;
     return payload;

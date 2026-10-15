@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { PublicOrder } from '@/lib/api-v1/types';
-import { PublicReadError, trackOrdersClient } from '@/lib/api-v1/client-reads';
+import { trackOrdersClient } from '@/lib/api-v1/client-reads';
 import { parseTrackingPhone, TRACKING_PHONE_ERROR } from '@/lib/tracking-phone';
 import { formatOrderDate, formatOrderDateTime, parseOrderTime } from '@/lib/order-time';
 
@@ -31,12 +31,8 @@ export default function TrackingPage() {
       } else {
         setSelectedOrder(null);
       }
-    } catch (fetchError) {
-      setError(
-        fetchError instanceof PublicReadError && fetchError.status === 429 && fetchError.serverMessage
-          ? fetchError.serverMessage
-          : 'Ошибка при загрузке заказов.',
-      );
+    } catch {
+      setError('Ошибка при загрузке заказов.');
     } finally {
       setLoading(false);
     }
@@ -164,7 +160,7 @@ export default function TrackingPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
             <h1 className="section-title" style={{ margin: 0, fontSize: '28px', color: '#313131' }}>Мои заказы</h1>
             <button 
-              onClick={() => { setPhone(''); setOrders([]); setSelectedOrder(null); setError(''); localStorage.removeItem('userPhone'); }} 
+              onClick={() => { setPhone(''); setOrders([]); setSelectedOrder(null); localStorage.removeItem('userPhone'); }} 
               style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', textDecoration: 'underline', fontSize: '14px' }}
             >
               Сменить номер телефона
@@ -185,8 +181,6 @@ export default function TrackingPage() {
                 
                 {loading ? (
                   <div style={{ textAlign: 'center', padding: '20px', color: '#888' }}>Загрузка...</div>
-                ) : error ? (
-                  <div role="alert" style={{ textAlign: 'center', padding: '20px', color: '#c62828', fontSize: '14px' }}>{error}</div>
                 ) : orders.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '20px', color: '#888' }}>У вас пока нет заказов</div>
                 ) : (
