@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-15T05:10:56Z",
+  "updated": "2026-10-15T05:45:13Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -28,6 +28,34 @@
       "reworks": 0,
       "note": "approved by human",
       "updated": "2026-10-15T05:10:56Z"
+    },
+    {
+      "id": "002-checkout-phone-input",
+      "title": "Поле телефона +992 при оформлении",
+      "branch": "factory/002-checkout-phone-input",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 0,
+      "note": "",
+      "updated": "2026-10-15T05:45:13Z"
     }
   ]
 }
