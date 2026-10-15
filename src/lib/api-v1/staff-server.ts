@@ -150,3 +150,9 @@ export function updateCourierDeliveryAmount(token: string, orderId: string, amou
     { token, method: 'PATCH', body: { delivery_courier_amount: amount } },
   );
 }
+
+export function updateCourierOrderChecklist(token: string, orderId: string, body: { step: number; done: boolean }) {
+  return request<ApiSuccessResponse<{ order_id: string; checklist_steps: number[] }>>(
+    `orders/${encodeURIComponent(orderId)}/checklist`, { token, method: 'PATCH', body },
+  );
+}

@@ -337,6 +337,23 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(response['statusCode'], 200)
         add_items.assert_called_once()
 
+    def test_only_courier_can_tick_checklist(self):
+        path = '/v1/staff/orders/ord_' + 'a' * 32 + '/checklist'
+        body = {'step': 2, 'done': True}
+        self.cursor.fetchone.return_value = self.account
+        with patch('backend.v1.admin_api.lambda_function.update_courier_order_checklist') as update:
+            response = lambda_handler(self.event(path, 'PATCH', token=staff.create_session(self.account), body=body), None)
+        self.assertEqual(response['statusCode'], 403)
+        update.assert_not_called()
+        courier = {**self.account, 'account_id': 3, 'role': 'courier'}
+        self.cursor.fetchone.return_value = courier
+        with patch('backend.v1.admin_api.lambda_function.update_courier_order_checklist',
+                   return_value={'order_id': 'ord_' + 'a' * 32, 'checklist_steps': [2]}) as update:
+            response = lambda_handler(self.event(path, 'PATCH', token=staff.create_session(courier), body=body), None)
+        self.assertEqual(response['statusCode'], 200)
+        update.assert_called_once()
+        self.assertEqual(update.call_args.args[:2], ('ord_' + 'a' * 32, body))
+
     def test_employee_with_catalog_can_read_catalog(self):
         with_catalog = {**self.account, 'account_id': 2, 'catalog_access': True}
         self.cursor.fetchone.return_value = with_catalog

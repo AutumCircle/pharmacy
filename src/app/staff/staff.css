@@ -300,3 +300,29 @@
 .ec-dot-site { background: var(--c-blue); }
 
 .staff-shell-courier .noa-sound { position: fixed; top: 8px; bottom: auto; right: 96px; padding: 8px 12px; box-shadow: none; z-index: 25; }
+
+/* Courier delivery checklist (website orders only; internal to the courier). */
+.c-checklist-bar { height: 6px; margin-bottom: 10px; border-radius: 3px; background: #dde3df; overflow: hidden; }
+.c-checklist-bar span { display: block; height: 100%; border-radius: inherit; background: var(--c-ok); transition: width .2s ease; }
+.c-checklist-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.c-check { border: 1px solid var(--c-line); border-radius: 12px; background: #fff; }
+.c-check.current { border-color: var(--c-brand); box-shadow: 0 0 0 2px rgba(196,22,28,.10); }
+.c-check.done { background: var(--c-ok-soft); border-color: #cfe9d8; }
+.c-check-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 12px; }
+label.c-check-row { cursor: pointer; }
+.c-check-input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.c-check-input:disabled { cursor: progress; }
+.c-check-input:focus-visible ~ .c-check-mark { outline: 3px solid rgba(196,22,28,.35); outline-offset: 2px; }
+.c-check-mark { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border: 2px solid #c9d1cc; border-radius: 8px; background: #fff; color: var(--c-muted); font-size: 13px; font-weight: 800; }
+.c-check.current .c-check-mark { border-color: var(--c-brand); color: var(--c-brand-dark); }
+.c-check.done .c-check-mark { border-color: var(--c-ok); background: var(--c-ok); color: #fff; font-size: 15px; }
+.c-check-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.c-check-text strong { font-size: 15px; line-height: 1.3; }
+.c-check-text small { color: var(--c-muted); font-size: 12px; line-height: 1.35; }
+.c-check.done .c-check-text strong { color: var(--c-ok); }
+.c-check-action { position: relative; z-index: 1; flex: none; min-height: 40px; padding: 0 14px; }
+.c-check-link { display: inline-block; margin: -4px 0 8px 52px; color: var(--c-brand-dark); font-size: 13px; font-weight: 700; text-decoration: none; }
+.c-check-link:hover { text-decoration: underline; }
+.c-row-checklist { color: var(--c-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c-row-checklist b { color: var(--c-ink); font-weight: 700; }
+.c-row-checklist.done b { color: var(--c-ok); }
