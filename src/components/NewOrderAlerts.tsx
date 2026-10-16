@@ -16,7 +16,7 @@ function writeSoundPreference(value: boolean) {
 }
 
 /** Two short rising tones; Web Audio needs no audio file and works offline. */
-function chime(context: AudioContext) {
+export function chime(context: AudioContext) {
   const start = context.currentTime;
   [[880, 0], [1320, 0.18], [880, 0.5], [1320, 0.68]].forEach(([frequency, offset]) => {
     const oscillator = context.createOscillator();

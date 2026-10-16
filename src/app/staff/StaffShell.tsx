@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import NewOrderAlerts, { type AlertOrder } from '@/components/NewOrderAlerts';
+import PharmacyOrderAlerts from '@/components/PharmacyOrderAlerts';
 import type { CourierOrder } from '@/lib/api-v1/staff-types';
 
 const icons = {
@@ -45,7 +46,7 @@ export default function StaffShell({ children, role }: { children: React.ReactNo
   ];
 
   return (
-    <div className={role === 'courier' ? 'staff-shell staff-shell-courier' : 'staff-shell'}>
+    <div className={role === 'courier' ? 'staff-shell staff-shell-courier' : role === 'pharmacy' ? 'staff-shell staff-shell-pharmacy' : 'staff-shell'}>
       <header className="staff-header">
         <div className="staff-brand"><strong>Vatan</strong><span>{role === 'courier' ? 'Доставка' : 'Аптека'}</span></div>
         <nav className="staff-nav" aria-label="Разделы кабинета">
@@ -59,6 +60,7 @@ export default function StaffShell({ children, role }: { children: React.ReactNo
       </header>
       <main className="staff-main">{children}</main>
       <NewOrderAlerts load={loadWebsiteOrders} enabled={role === 'courier'} />
+      <PharmacyOrderAlerts enabled={role === 'pharmacy'} />
     </div>
   );
 }
