@@ -74,7 +74,7 @@ export default function PharmacyOrderCard({ order, now, actions, pharmacyId }: {
             {priceColumns && <td className="num">{money(item.unitPrice)}</td>}
             {priceColumns && <td className="num">{money(item.lineTotal)}</td>}
             {clientColumn && <td className="num">{money(item.clientLineTotal)}</td>}
-            {answerColumn && <td className="answer"><span className={`pa-chip pa-chip-${pharmacyAnswerChip(item.myAnswer).tone}`}>
+            {answerColumn && <td className="answer"><span className={`pa-chip pa-tone-${pharmacyAnswerChip(item.myAnswer).tone}`}>
               {pharmacyAnswerChip(item.myAnswer).text}</span></td>}
           </tr>)}</tbody>
           {view.total != null && <tfoot><tr>

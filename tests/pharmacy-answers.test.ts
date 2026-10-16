@@ -113,6 +113,11 @@ test('confirmedAmountText covers null and value cases', () => {
   const text = confirmedAmountText({ confirmed_total: '1250.50', pharmacy_answers_complete: true, unavailable_count: 0 });
   assert.match(text, /^Подтверждённая сумма: 1\s250,5 сом$/);
   assert.equal(confirmedAmountText({ confirmed_total: '0', pharmacy_answers_complete: true }), 'Подтверждённая сумма: 0 сом');
+  // Everything unavailable everywhere: no «0 сом», ask the courier to call the client.
+  const none = { confirmed_total: '0', pharmacy_answers_complete: true, unavailable_count: 2, item_count: 2 };
+  assert.equal(confirmedAmountText(none), 'Все позиции недоступны — свяжитесь с клиентом');
+  assert.equal(isAmountConfirmed(none), false);
+  assert.equal(confirmedAmountText({ ...none, item_count: undefined }), 'Все позиции недоступны — свяжитесь с клиентом');
   assert.equal(confirmedAmountText({ confirmed_total: '57.50', unavailable_count: 2 }),
     'Подтверждённая сумма: 57,5 сом · без 2 поз. (нет в наличии)');
   assert.equal(isAmountConfirmed({ confirmed_total: '57.50' }), true);

@@ -313,12 +313,12 @@ function ChecklistSection({ order, base, statusBusy, onStatus, onConflict }: {
           return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>
             <div className="c-check-row">
               <span className="c-check-mark" aria-hidden="true">{done ? '✓' : item.step}</span>
-              {text}
+              {unconfirmed ? <span className="c-check-text"><strong>{item.title}</strong><small>{item.hint}</small>
+                <small className="c-check-warning" role="note">Сумма ещё не подтверждена аптекой</small></span> : text}
               {done ? <span className="sr-only">Выполнено</span>
                 : order.status === linked.from && <button type="button" className="c-btn c-btn-outline c-check-action"
                   disabled={statusBusy} onClick={() => onStatus(linked.to)}>{statusBusy ? '…' : linked.action}</button>}
             </div>
-            {unconfirmed && <p className="c-check-warning" role="note">Сумма ещё не подтверждена аптекой</p>}
           </li>;
         }
         return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>

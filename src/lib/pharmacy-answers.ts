@@ -134,7 +134,16 @@ type AmountOrder = {
   confirmed_total?: string | number | null;
   pharmacy_answers_complete?: boolean;
   unavailable_count?: number;
+  item_count?: number;
 };
+
+/** Every item is unavailable at its final pharmacy: there is no sum to confirm. */
+export function allItemsUnavailable(order: AmountOrder): boolean {
+  const total = order.confirmed_total;
+  const unavailable = order.unavailable_count ?? 0;
+  return total !== null && total !== undefined && total !== '' && Number(total) === 0 && unavailable > 0
+    && (order.item_count === undefined || unavailable >= order.item_count);
+}
 
 function som(value: string | number): string {
   const amount = Number(value);
@@ -145,6 +154,7 @@ function som(value: string | number): string {
 export function confirmedAmountText(order: AmountOrder): string {
   const total = order.confirmed_total;
   if (total === null || total === undefined || total === '') return 'Сумма ещё не подтверждена аптекой';
+  if (allItemsUnavailable(order)) return 'Все позиции недоступны — свяжитесь с клиентом';
   const missing = order.unavailable_count && order.unavailable_count > 0
     ? ` · без ${order.unavailable_count} поз. (нет в наличии)` : '';
   return `Подтверждённая сумма: ${som(total)}${missing}`;
@@ -152,7 +162,8 @@ export function confirmedAmountText(order: AmountOrder): string {
 
 /** True when the courier may tell the client a final sum. */
 export function isAmountConfirmed(order: AmountOrder): boolean {
-  return order.confirmed_total !== null && order.confirmed_total !== undefined && order.confirmed_total !== '';
+  return order.confirmed_total !== null && order.confirmed_total !== undefined && order.confirmed_total !== ''
+    && !allItemsUnavailable(order);
 }
 
 /** «Ответ аптек: N из M» for the courier list; null for an old Lambda response. */

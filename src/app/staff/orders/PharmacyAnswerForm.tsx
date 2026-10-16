@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PharmacyAnswer } from '@/lib/api-v1/staff-types';
 import {
   PHARMACY_ANSWER_LABELS, PHARMACY_PROBLEM_MAX, normalizeProblem, validatePharmacyAnswersRequest,
@@ -31,6 +31,10 @@ export default function PharmacyAnswerForm({ orderId, items, pharmacyId }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const unanswered = items.filter((item) => item.myAnswer === null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+
+  // Move focus to a new error so keyboard and screen-reader users land on it.
+  useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 
   function startProblems() {
     setChoices(Object.fromEntries(items.map((item) => [item.orderItemId,
@@ -102,7 +106,7 @@ export default function PharmacyAnswerForm({ orderId, items, pharmacyId }: {
       <button type="button" className="pa-btn pa-btn-problem" disabled={busy} onClick={startProblems}>
         {unanswered.length > 0 ? 'Нет в наличии / цена отличается' : 'Изменить ответ'}
       </button>
-      {error && <p className="pa-error" role="alert">{error}</p>}
+      {error && <p className="pa-error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
     </div>;
   }
 
@@ -132,7 +136,7 @@ export default function PharmacyAnswerForm({ orderId, items, pharmacyId }: {
           </label>}
       </li>;
     })}</ul>
-    {error && <p className="pa-error" role="alert">{error}</p>}
+    {error && <p className="pa-error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
     <div className="pa-actions">
       <button type="button" className="pa-btn pa-btn-ok" disabled={busy} onClick={sendChoices}>
         {busy ? 'Отправляем…' : 'Отправить ответ'}</button>
