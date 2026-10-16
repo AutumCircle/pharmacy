@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-16T10:11:09Z",
+  "updated": "2026-10-16T10:16:43Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -238,19 +238,29 @@
       "id": "009-ios-carousels-endpoint",
       "title": "Публичный JSON каруселей для iOS",
       "branch": "factory/009-ios-carousels-endpoint",
-      "stage": "build",
+      "stage": "merged",
       "round": 1,
       "reviews": {
-        "security": "pending",
-        "ux": "pending",
-        "ui": "pending",
-        "code": "pending"
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
       },
-      "history": [],
-      "decision": null,
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
       "reworks": 0,
       "note": "",
-      "updated": "2026-10-16T10:05:39Z"
+      "updated": "2026-10-16T10:16:43Z"
     }
   ]
 }
