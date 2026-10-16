@@ -1,0 +1,6 @@
+ESCALATE
+All four round-2 reviews say PASS. There is no new dependency, no migration, no change to agent.py and no secret or infra change. Lint, build, the 131 frontend tests and the backend tests pass, except for the 2 failures already known on main.
+Not approvable because AC7 is still open. The spec requires a manual check on the real «Ватан 1» and «Ватан 2» devices before approval, and build.md marks it NOT DONE.
+The change also edits the admin Lambda (`backend/v1/admin_api/lambda_function.py`). The new fields work only after a manual deploy of admin-api-v1.zip, which must come after 011's 0025 migration and Lambda. Until then the UI degrades safely to no reminders.
+A human must deploy the Lambda (after 011), then test on each pharmacy device and record its model and browser. Check Android Chrome and iPhone Safari, both in a tab and as a home-screen app. Check the toast and banner, the chime after a tap, a reminder after about 3 min, the permission panel state, and what stops when the screen is locked or battery saver is on.
+If all of that works, run `/factory approve 012-pharmacy-order-alerts`; otherwise run `/factory rework 012-pharmacy-order-alerts <what failed on which device>`. Follow-ups 012b (Web Push) and Telegram to «Ватан 2» still need a separate owner decision.

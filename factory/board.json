@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-16T18:59:37Z",
+  "updated": "2026-10-16T19:18:00Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -340,19 +340,38 @@
       "id": "012-pharmacy-order-alerts",
       "title": "Оповещения аптеки о новом заказе",
       "branch": "factory/012-pharmacy-order-alerts",
-      "stage": "spec",
-      "round": 0,
+      "stage": "merged",
+      "round": 2,
       "reviews": {
-        "security": "pending",
-        "ux": "pending",
-        "ui": "pending",
-        "code": "pending"
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
       },
-      "history": [],
-      "decision": null,
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "CHANGES",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
       "reworks": 0,
-      "note": "Сборка после слияния 011 (тот же экран)",
-      "updated": "2026-10-16T18:35:37Z"
+      "note": "approved by human; проверка на устройствах после выката",
+      "updated": "2026-10-16T19:18:00Z"
     }
   ]
 }
