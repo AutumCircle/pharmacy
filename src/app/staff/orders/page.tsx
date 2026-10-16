@@ -36,7 +36,7 @@ export default async function CourierOrdersPage({ searchParams }: {
       </div>
       {response.data.length === 0 ? <div className="staff-order-form">Сейчас заказов на сборку нет.</div>
         : <div className="courier-order-list">{response.data.map((order) =>
-          <PharmacyOrderCard key={order.order_id} order={order} now={now} />)}</div>}
+          <PharmacyOrderCard key={order.order_id} order={order} now={now} pharmacyId={account.account_id} />)}</div>}
       {response.page.next_cursor && <div className="staff-pagination"><Link href={`/staff/orders?cursor=${encodeURIComponent(response.page.next_cursor)}`}>Следующие заказы →</Link></div>}
     </section>;
   }

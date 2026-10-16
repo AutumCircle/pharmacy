@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { CourierEarnings, CourierOrder, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
+import type { CourierEarnings, CourierOrder, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyAnswersRequest, PharmacyAnswersResult, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
@@ -154,5 +154,12 @@ export function updateCourierDeliveryAmount(token: string, orderId: string, amou
 export function updateCourierOrderChecklist(token: string, orderId: string, body: { step: number; done: boolean }) {
   return request<ApiSuccessResponse<{ order_id: string; checklist_steps: number[] }>>(
     `orders/${encodeURIComponent(orderId)}/checklist`, { token, method: 'PATCH', body },
+  );
+}
+
+/** Pharmacist answers per item (job 010). The pharmacy id comes from the staff session in Lambda. */
+export function answerPharmacyOrderItems(token: string, orderId: string, body: PharmacyAnswersRequest) {
+  return request<ApiSuccessResponse<PharmacyAnswersResult>>(
+    `orders/${encodeURIComponent(orderId)}/pharmacy-answers`, { token, method: 'POST', body },
   );
 }

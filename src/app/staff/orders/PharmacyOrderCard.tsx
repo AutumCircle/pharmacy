@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
 import type { PharmacyPreparationOrder } from '@/lib/api-v1/staff-types';
 import { formatOrderDateTime } from '@/lib/order-time';
+import { pharmacyAnswerChip } from '@/lib/pharmacy-answers';
 import { pharmacyOrderView } from '@/lib/pharmacy-order';
 import { money, quantityLabel } from '../format';
+import PharmacyAnswerForm from './PharmacyAnswerForm';
 import WaitingMinutes from './WaitingMinutes';
 
 const statusText = { pending: 'Новый', confirmed: 'Собирается' } as const;
@@ -18,17 +20,24 @@ function safeDateTime(value: string): string | null {
 /**
  * Pharmacy order card. Shows what the owner's `pharmacy_web` policy lets the Lambda return
  * (see pharmacyOrderView): client name/phone/address/landmark, client totals, profit and creator
- * appear only when turned ON in the admin notification settings. `actions` is the reserved footer
- * slot for pharmacist actions (next job).
+ * appear only when turned ON in the admin notification settings. Job 010: each item shows this
+ * pharmacy's answer chip, and while the order is «Новый» the footer holds PharmacyAnswerForm. With an
+ * old Lambda response (no order_item_id) no answer column or controls are rendered.
+ * `actions` overrides the footer (reserved for job 011 «Начать сборку» / «Собран»).
  */
-export default function PharmacyOrderCard({ order, now, actions }: {
-  order: PharmacyPreparationOrder; now: number; actions?: ReactNode;
+export default function PharmacyOrderCard({ order, now, actions, pharmacyId }: {
+  order: PharmacyPreparationOrder; now: number; actions?: ReactNode; pharmacyId?: number;
 }) {
   const view = pharmacyOrderView(order);
   const createdAt = view.createdAt ? safeDateTime(view.createdAt) : null;
   const priceColumns = view.showPrices;
   const clientColumn = view.showClientPrices;
   const hasClient = !!(view.customerName || view.phone || view.address || view.landmark);
+  const answerColumn = view.hasAnswers;
+  const footer = actions ?? (view.canAnswer && view.medicines ? <PharmacyAnswerForm orderId={order.order_id}
+    pharmacyId={pharmacyId}
+    items={view.medicines.map((item) => ({ orderItemId: item.orderItemId as number, name: item.name,
+      myAnswer: item.myAnswer, myProblem: item.myProblem }))} /> : null);
   return <article className="courier-order-card pharmacy-order-card">
     <header className="pharmacy-order-head">
       <div>
@@ -56,18 +65,23 @@ export default function PharmacyOrderCard({ order, now, actions }: {
             {priceColumns && <th scope="col" className="num">Цена</th>}
             {priceColumns && <th scope="col" className="num">Сумма</th>}
             {clientColumn && <th scope="col" className="num">Клиенту</th>}
+            {answerColumn && <th scope="col">Ответ</th>}
           </tr></thead>
-          <tbody>{view.medicines.map((item, index) => <tr key={`${item.name}-${index}`}>
-            <td className="name">{item.name}</td>
+          <tbody>{view.medicines.map((item, index) => <tr key={`${item.orderItemId ?? item.name}-${index}`}>
+            <td className="name">{item.name}
+              {item.myProblem && <small className="pa-item-problem">{item.myProblem}</small>}</td>
             <td className="num qty">{item.quantity != null ? quantityLabel(item.quantity) : '—'}</td>
             {priceColumns && <td className="num">{money(item.unitPrice)}</td>}
             {priceColumns && <td className="num">{money(item.lineTotal)}</td>}
             {clientColumn && <td className="num">{money(item.clientLineTotal)}</td>}
+            {answerColumn && <td className="answer"><span className={`pa-chip pa-tone-${pharmacyAnswerChip(item.myAnswer).tone}`}>
+              {pharmacyAnswerChip(item.myAnswer).text}</span></td>}
           </tr>)}</tbody>
           {view.total != null && <tfoot><tr>
             <th scope="row" colSpan={priceColumns ? 3 : 1}>Итого</th>
             <td className="num total">{money(view.total)}</td>
             {clientColumn && <td className="num">{view.clientTotal != null ? money(view.clientTotal) : ''}</td>}
+            {answerColumn && <td />}
           </tr></tfoot>}
         </table>
       </div>}
@@ -76,7 +90,8 @@ export default function PharmacyOrderCard({ order, now, actions }: {
       {view.clientTotal != null && view.profit != null && ' · '}
       {view.profit != null && <>Разница: <strong>{money(view.profit)}</strong></>}
     </p>}
+    {view.routedAwayCount > 0 && <p className="pa-routed">Передано в Ватан 2: {view.routedAwayCount} поз.</p>}
     {view.notes && <p className="pharmacy-order-note">Комментарий: {view.notes}</p>}
-    <footer className="pharmacy-order-actions" data-slot="actions">{actions}</footer>
+    <footer className="pharmacy-order-actions" data-slot="actions">{footer}</footer>
   </article>;
 }

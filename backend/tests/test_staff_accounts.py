@@ -271,8 +271,8 @@ class StaffTests(unittest.TestCase):
         self.assertNotIn('profit', result['data'][0])
         sql, args = order_cursor.execute.call_args_list[-2].args
         self.assertIn('o.created_by_staff_account_id IS NULL', sql)
-        self.assertIn('COALESCE(o.fulfillment_pharmacy_id, 1) = %s', sql)
-        self.assertEqual(args, (1, 21))
+        self.assertIn('COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1) = %s', sql)
+        self.assertEqual(args, (1, 1, 1, 1, 1, 21))
         self.assertIn('o.phone', sql)
 
     def test_pharmacy_web_policy_is_enforced_by_lambda(self):
@@ -303,7 +303,7 @@ class StaffTests(unittest.TestCase):
         self.assertNotIn('status', row)
         self.assertNotIn('customer_name', row)
 
-    def _pharmacy_rows(self, policies=None, status='pending', pharmacy_id=1, query=None):
+    def _pharmacy_rows(self, policies=None, status='pending', pharmacy_id=1, query=None, extra=None):
         from datetime import datetime, timezone
         cursor = Mock()
         cursor.fetchall.return_value = [{
@@ -313,8 +313,11 @@ class StaffTests(unittest.TestCase):
             'address': 'PRIVATE ADDRESS', 'landmark': 'PRIVATE LANDMARK', 'order_source': None,
             'utm_source': None, 'order_total': Decimal('120.00'), 'base_total': Decimal('100.00'),
             'created_by_staff_account_id': None,
-            'medicines': [{'medicine_name': 'NOW D3', 'quantity': 2, 'line_total': 120,
-                           'base_unit_price': '50.00', 'base_line_total': '100.00'}],
+            'medicines': [{'order_item_id': 81, 'medicine_name': 'NOW D3', 'quantity': 2, 'line_total': 120,
+                           'base_unit_price': '50.00', 'base_line_total': '100.00',
+                           'my_answer': None, 'my_problem': None}],
+            'unanswered_count': 1, 'unanswered_unrouted': True, 'unanswered_routed_since': None,
+            'routed_away_count': 0, **(extra or {}),
         }]
         cursor.fetchone.return_value = {'courier_enabled': True, 'policies': policies or {}, 'revision': 1}
 
@@ -350,6 +353,55 @@ class StaffTests(unittest.TestCase):
         self.assertTrue(self._pharmacy_rows(status='pending')[0]['data'][0]['awaiting_response'])
         self.assertFalse(self._pharmacy_rows(status='confirmed')[0]['data'][0]['awaiting_response'])
 
+    def test_pharmacy_queue_sql_uses_effective_item_assignment(self):
+        _, cursor = self._pharmacy_rows()
+        sql, args = cursor.execute.call_args_list[-2].args
+        effective = 'COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1)'
+        # Items: only those effectively assigned to this pharmacy; base_total summed over them only.
+        self.assertIn(f'WHERE oi.order_id = o.id AND {effective} = %s', sql)
+        # Orders: at least one item effectively assigned to this pharmacy.
+        self.assertIn('AND EXISTS (SELECT 1 FROM order_items oi', sql)
+        self.assertIn(f'WHERE oi.order_id = o.id AND {effective} = %s)', sql)
+        # Routed-away items: answered by this pharmacy and now assigned elsewhere.
+        self.assertIn(f'WHERE oi.order_id = o.id AND {effective} <> %s', sql)
+        self.assertIn('mine.pharmacy_id = %s', sql)
+        self.assertIn("'order_item_id', oi.id", sql)
+        self.assertIn("'my_answer', mine.answer, 'my_problem', mine.problem", sql)
+        self.assertNotIn('COALESCE(o.fulfillment_pharmacy_id, 1) = %s', sql)
+        self.assertEqual(args, (1, 1, 1, 1, 1, 21))
+
+    def test_pharmacy_item_fields_and_routed_away_count(self):
+        row = self._pharmacy_rows(extra={'routed_away_count': 1})[0]['data'][0]
+        self.assertEqual(row['routed_away_count'], 1)
+        item = row['medicines'][0]
+        self.assertEqual((item['order_item_id'], item['my_answer'], item['my_problem']), (81, None, None))
+        for key in ('unanswered_count', 'unanswered_unrouted', 'unanswered_routed_since'):
+            self.assertNotIn(key, row)
+
+    def test_pharmacy_awaiting_response_follows_unanswered_items(self):
+        one_open = self._pharmacy_rows(extra={'unanswered_count': 1})[0]['data'][0]
+        self.assertTrue(one_open['awaiting_response'])
+        all_answered = self._pharmacy_rows(extra={
+            'unanswered_count': 0, 'unanswered_unrouted': None, 'unanswered_routed_since': None})[0]['data'][0]
+        self.assertFalse(all_answered['awaiting_response'])
+        self.assertEqual(all_answered['waiting_since'], all_answered['created_at'])
+        self.assertFalse(self._pharmacy_rows(status='confirmed')[0]['data'][0]['awaiting_response'])
+
+    def test_pharmacy_waiting_since_uses_routing_time_for_routed_items(self):
+        from datetime import datetime, timezone
+        routed_at = datetime(2026, 10, 10, 9, 15, tzinfo=timezone.utc)
+        row = self._pharmacy_rows(pharmacy_id=2, extra={
+            'unanswered_count': 1, 'unanswered_unrouted': False, 'unanswered_routed_since': routed_at,
+        })[0]['data'][0]
+        self.assertTrue(row['awaiting_response'])
+        self.assertEqual(row['waiting_since'], '2026-10-10T09:15:00+00:00')
+        self.assertEqual(row['created_at'], '2026-10-10T08:30:00+00:00')
+        # An unanswered item that was never routed keeps the order creation time.
+        mixed = self._pharmacy_rows(pharmacy_id=2, extra={
+            'unanswered_count': 2, 'unanswered_unrouted': True, 'unanswered_routed_since': routed_at,
+        })[0]['data'][0]
+        self.assertEqual(mixed['waiting_since'], mixed['created_at'])
+
     def test_pharmacy_price_fields_hidden_when_policy_disables_them(self):
         from backend.v1.shared.order_notification_settings import default_policies
         policies = default_policies()
@@ -380,8 +432,8 @@ class StaffTests(unittest.TestCase):
     def test_pharmacy_two_queue_is_scoped_by_session_account(self):
         _, cursor = self._pharmacy_rows(pharmacy_id=2)
         sql, args = cursor.execute.call_args_list[-2].args
-        self.assertIn('COALESCE(o.fulfillment_pharmacy_id, 1) = %s', sql)
-        self.assertEqual(args, (2, 21))
+        self.assertIn('COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1) = %s', sql)
+        self.assertEqual(args, (2, 2, 2, 2, 2, 21))
         pharmacy_two = {**self.account, 'account_id': 2, 'catalog_access': False}
         self.cursor.fetchone.return_value = pharmacy_two
         with patch('backend.v1.admin_api.lambda_function.list_pharmacy_preparation_orders',
