@@ -1,10 +1,11 @@
 import type {
-  CourierAssemblyMark, CourierAssemblyState, PharmacyAssemblyRequest, PharmacyAssemblyState,
+  CourierAssemblyMark, CourierAssemblyState, PharmacyAssemblyRequest, PharmacyAssemblyState, PharmacyItemCollectRequest,
 } from './api-v1/staff-types';
 
-// Pharmacy assembly marks (job 011): «Начать сборку» -> «Собирается», «Собран» -> «Собран», per
-// (order, pharmacy). Internal to staff: the customer status and /tracking never change. Lambda is the
-// authority: it takes the pharmacy id from the staff session and enforces status, ownership and order.
+// Pharmacy assembly marks (job 011 + rework 1): «Начать сборку» -> «Собирается», «Сборка сделана» ->
+// «Собран», per (order, pharmacy), while the order is «Новый» (or already confirmed). «Ватан 2» may instead
+// mark each routed item «Собрано»; its part follows the items. The courier's «Согласовано» waits until every
+// pharmacy holding items is «Собран». Customer statuses and /tracking never change. Lambda is the authority.
 
 export const ASSEMBLY_STATES: readonly PharmacyAssemblyState[] = ['assembling', 'assembled'];
 
@@ -16,6 +17,9 @@ export const ASSEMBLY_LABELS: Record<CourierAssemblyState, string> = {
 };
 
 export const ASSEMBLY_WARNING = 'Не все аптеки отметили «Собран»';
+
+/** Same text as Lambda's 409 ASSEMBLY_NOT_COMPLETE on «Согласовано». */
+export const ASSEMBLY_NOT_COMPLETE = 'Сначала все аптеки должны отметить «Сборка сделана»';
 
 const PHARMACY_NAMES: Record<1 | 2, string> = { 1: 'Ватан 1', 2: 'Ватан 2' };
 
@@ -36,6 +40,19 @@ export function validateAssemblyRequest(body: unknown): AssemblyValidation {
   return { ok: true, value: { state } };
 }
 
+export type CollectValidation = { ok: true; value: PharmacyItemCollectRequest } | { ok: false; error: string };
+
+/** Mirrors Lambda `validate_item_collect_request`: body is exactly {"order_item_id": <positive int>}. */
+export function validateItemCollectRequest(body: unknown): CollectValidation {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, error: 'Укажите позицию заказа' };
+  const keys = Object.keys(body);
+  const id = (body as Record<string, unknown>).order_item_id;
+  if (keys.length !== 1 || keys[0] !== 'order_item_id' || typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) {
+    return { ok: false, error: 'Укажите позицию заказа' };
+  }
+  return { ok: true, value: { order_item_id: id } };
+}
+
 /** Chip for this pharmacy's own mark; tone matches the existing pa-tone-* classes. */
 export function assemblyChip(state: PharmacyAssemblyState | null | undefined): { text: string; tone: string } {
   if (state === 'assembled') return { text: ASSEMBLY_LABELS.assembled, tone: 'ok' };
@@ -48,15 +65,15 @@ type PharmacyAssemblyInput = { assembly_available?: boolean; assembly_state?: st
 export type AssemblyAction = { state: PharmacyAssemblyState; label: string };
 
 /**
- * The next button on the pharmacy card: «Начать сборку», then «Собран», then nothing (the chip says
- * «Собран»). Null when the Lambda did not offer assembly (not confirmed, nothing to assemble, or an
+ * The next button on the pharmacy card: «Начать сборку», then «Сборка сделана», then nothing (the chip
+ * says «Собран»). Null when the Lambda did not offer assembly (not confirmed, nothing to assemble, or an
  * old Lambda without the field).
  */
 export function nextAssemblyAction(order: PharmacyAssemblyInput): AssemblyAction | null {
   if (order.assembly_available !== true) return null;
   const state = order.assembly_state ?? null;
   if (state === null) return { state: 'assembling', label: 'Начать сборку' };
-  if (state === 'assembling') return { state: 'assembled', label: 'Собран' };
+  if (state === 'assembling') return { state: 'assembled', label: 'Сборка сделана' };
   return null;
 }
 
@@ -97,8 +114,20 @@ export function courierAssemblySummary(order: CourierAssemblyInput): string | nu
 }
 
 /**
+ * Rework 1: «Согласовано» (pending -> confirmed) is blocked while a pharmacy holding items has not marked
+ * «Сборка сделана». Returns the reason, or null when the courier may confirm (also for an old Lambda
+ * payload, courier-created orders and orders with nothing to assemble). Lambda enforces the same rule.
+ */
+export function confirmBlockedReason(order: CourierAssemblyInput & { website_order?: boolean }): string | null {
+  if (order.status !== 'pending' || order.website_order === false || !Array.isArray(order.assembly)
+    || typeof order.assembly_complete !== 'boolean') return null;
+  return order.assembly_complete ? null : ASSEMBLY_NOT_COMPLETE;
+}
+
+/**
  * Warning next to step 5 and «Выехал»: shown only while the order is confirmed and the Lambda says
- * not every pharmacy marked «Собран». Absent for an old Lambda payload. Never blocks the courier.
+ * not every pharmacy marked «Собран» (orders confirmed before rework 1 or by the admin). Absent for an
+ * old Lambda payload. Never blocks the courier.
  */
 export function assemblyWarning(order: CourierAssemblyInput): string | null {
   if (order.status !== 'confirmed' || !Array.isArray(order.assembly) || typeof order.assembly_complete !== 'boolean') {

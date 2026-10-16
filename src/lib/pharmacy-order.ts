@@ -1,4 +1,5 @@
 import { parseOrderTime } from './order-time.ts';
+import { crossPharmacyMark } from './pharmacy-answers.ts';
 import { nextAssemblyAction } from './pharmacy-assembly.ts';
 
 export type WaitingLevel = 'normal' | 'warning' | 'urgent';
@@ -48,8 +49,11 @@ export type PharmacyOrderInput = {
     medicine_name: string; quantity?: number | string; line_total?: Money;
     base_unit_price?: Money; base_line_total?: Money;
     order_item_id?: number; my_answer?: string | null; my_problem?: string | null;
+    routed_here?: boolean; collected?: boolean;
   }>;
   routed_away_count?: number;
+  routed_away?: Array<{ order_item_id?: number; medicine_name: string; quantity?: number | string;
+    pharmacy_id?: number; answer?: string | null }>;
   /** Job 011, not policy-gated: this pharmacy's assembly mark and whether it may mark now. */
   assembly_state?: string | null;
   assembly_available?: boolean;
@@ -74,6 +78,10 @@ export type PharmacyOrderView = {
     name: string; quantity: Money | null; unitPrice: Money | null; lineTotal: Money | null; clientLineTotal: Money | null;
     /** Job 010 answer fields; null on an old Lambda response. */
     orderItemId: number | null; myAnswer: ItemAnswer | null; myProblem: string | null;
+    /** Rework 1: routed here from «Ватан 1» (per-item controls), and marked «Собрано» by this pharmacy. */
+    routedHere: boolean; collected: boolean;
+    /** Owner's colour for routed items: orange «В аптеке 2» / red «Нет в наличии в обеих аптеках». */
+    crossMark: { text: string; tone: 'orange' | 'bad' } | null;
   }> | null;
   /** The Lambda returned answer fields for every item (job 010), so answers can be shown. */
   hasAnswers: boolean;
@@ -81,6 +89,10 @@ export type PharmacyOrderView = {
   canAnswer: boolean;
   /** Items this pharmacy routed to «Ватан 2» («Передано в Ватан 2: N поз.»). */
   routedAwayCount: number;
+  /** Rework 1: items this pharmacy sent to «Ватан 2», with «Ватан 2»'s result (colour + text). */
+  routedAway: Array<{ name: string; quantity: Money | null; text: string; tone: string }>;
+  /** Show «Начать сборку» / «Сборка сделана» (hidden when every own item came routed: those are per item). */
+  partControls: boolean;
   /** Job 011: this pharmacy's mark (null = «Ждёт сборки» or an old Lambda). */
   assemblyState: AssemblyMark | null;
   /** Job 011: «Начать сборку» / «Собран» controls are shown; false when the field is absent. */
@@ -148,10 +160,22 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
       orderItemId: hasAnswers ? item.order_item_id ?? null : null,
       myAnswer: hasAnswers ? itemAnswer(item.my_answer) : null,
       myProblem: hasAnswers ? text(item.my_problem) : null,
+      routedHere: hasAnswers && item.routed_here === true,
+      collected: hasAnswers && item.collected === true,
+      crossMark: hasAnswers ? crossPharmacyMark(item.routed_here === true, itemAnswer(item.my_answer)) : null,
     })),
     hasAnswers,
     canAnswer: hasAnswers && status === 'pending',
     routedAwayCount: typeof order.routed_away_count === 'number' && order.routed_away_count > 0 ? order.routed_away_count : 0,
+    routedAway: Array.isArray(order.routed_away) ? order.routed_away.map((entry) => {
+      const answer = itemAnswer(entry.answer);
+      const mark = crossPharmacyMark(true, answer)
+        ?? (answer === 'price_differs' ? { text: 'В аптеке 2: цена отличается', tone: 'warn' }
+          : { text: 'Ждём ответ Ватан 2', tone: 'wait' });
+      return { name: entry.medicine_name, quantity: entry.quantity ?? null, text: mark.text, tone: mark.tone };
+    }) : [],
+    partControls: assemblyAvailable
+      && !(hasAnswers && !!medicines && medicines.length > 0 && medicines.every((item) => item.routed_here === true)),
     assemblyState,
     assemblyAvailable,
     assemblyAction: nextAssemblyAction({ assembly_available: assemblyAvailable, assembly_state: assemblyState }),
