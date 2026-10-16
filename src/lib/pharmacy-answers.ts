@@ -35,6 +35,22 @@ export function normalizeProblem(value: string): string {
   return value.split(/\s+/).filter(Boolean).join(' ');
 }
 
+export const PHARMACY_PRICE_ERROR = 'Цена должна быть от 0,01 до 999999,99 с. с точностью до копейки';
+
+/**
+ * Mirrors Lambda `validate_unit_price` for the pharmacy's own price at assembly (rework 1, «Ватан 2»):
+ * 0.01..999999.99 with at most two decimals, comma allowed. Returns a canonical "45.50" string or null.
+ * This is an input only: Lambda recomputes the client price and every total itself.
+ */
+export function normalizePharmacyPrice(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const text = String(value).trim().replace(',', '.');
+  if (!/^\d{1,6}(\.\d{1,2})?$/.test(text)) return null;
+  const amount = Number(text);
+  if (!Number.isFinite(amount) || amount < 0.01 || amount > 999999.99) return null;
+  return amount.toFixed(2);
+}
+
 export type AnswersValidation = { ok: true; value: PharmacyAnswersRequest } | { ok: false; error: string };
 
 /**
@@ -59,7 +75,8 @@ export function validatePharmacyAnswersRequest(body: unknown): AnswersValidation
     const entry = raw as Record<string, unknown>;
     const entryKeys = Object.keys(entry);
     if (!('order_item_id' in entry) || !('answer' in entry)
-      || entryKeys.some((key) => key !== 'order_item_id' && key !== 'answer' && key !== 'problem')) {
+      || entryKeys.some((key) => key !== 'order_item_id' && key !== 'answer' && key !== 'problem'
+        && key !== 'base_unit_price')) {
       return fail('Проверьте позиции и ответы');
     }
     const id = entry.order_item_id;
@@ -72,9 +89,16 @@ export function validatePharmacyAnswersRequest(body: unknown): AnswersValidation
     if (rawProblem !== undefined && rawProblem !== null && typeof rawProblem !== 'string') {
       return fail('Описание проблемы должно быть текстом');
     }
+    if ('base_unit_price' in entry && answer !== 'available') return fail('Цену можно указать только для «В наличии»');
     if (answer === 'available') {
       if (rawProblem !== undefined && rawProblem !== null) return fail('Для «В наличии» проблема не указывается');
-      answers.push({ order_item_id: id, answer });
+      if ('base_unit_price' in entry) {
+        const price = normalizePharmacyPrice(entry.base_unit_price);
+        if (price === null) return fail(PHARMACY_PRICE_ERROR);
+        answers.push({ order_item_id: id, answer, base_unit_price: price });
+      } else {
+        answers.push({ order_item_id: id, answer });
+      }
       continue;
     }
     const problem = typeof rawProblem === 'string' ? normalizeProblem(rawProblem) : '';
@@ -98,27 +122,52 @@ function pharmacyName(id: number): string {
   return id === 1 || id === 2 ? PHARMACY_NAMES[id] : `Аптека ${id}`;
 }
 
-/** Tone of an item's state on the courier screen: ok / warn / bad / wait. */
+/** Owner's colours for items that moved between pharmacies (rework 1). */
+export const BOTH_PHARMACIES_MISSING = 'Нет в наличии в обеих аптеках';
+export const AT_PHARMACY_TWO = 'В аптеке 2';
+
+/**
+ * Cross-pharmacy mark of an item routed «Ватан 1» -> «Ватан 2», from «Ватан 2»'s answer:
+ * available there = orange «В аптеке 2»; unavailable there = red «Нет в наличии в обеих аптеках».
+ * Null when the item was not routed or «Ватан 2» has not answered yet (or answered «Цена отличается»).
+ */
+export function crossPharmacyMark(routed: boolean, answerAtTwo: PharmacyAnswer | null | undefined):
+  { text: string; tone: 'orange' | 'bad' } | null {
+  if (!routed) return null;
+  if (answerAtTwo === 'available') return { text: AT_PHARMACY_TWO, tone: 'orange' };
+  if (answerAtTwo === 'unavailable') return { text: BOTH_PHARMACIES_MISSING, tone: 'bad' };
+  return null;
+}
+
+function routedToTwo(item: CourierItemInput): boolean {
+  return (item.pharmacy_id ?? 1) === 2 && Array.isArray(item.answers)
+    && item.answers.some((answer) => answer.pharmacy_id === 1 && answer.answer === 'unavailable');
+}
+
+/** Tone of an item's state on the courier screen: ok / warn / bad / wait / orange (in «Ватан 2»). */
 export function courierItemAnswerTone(item: CourierItemInput): string | null {
   if (!Array.isArray(item.answers)) return null;
   const pharmacy = item.pharmacy_id ?? 1;
   const current = item.answers.find((answer) => answer.pharmacy_id === pharmacy);
+  const cross = crossPharmacyMark(routedToTwo(item), current?.answer);
+  if (cross) return cross.tone;
   if (!current) return 'wait';
   return current.answer === 'available' ? 'ok' : current.answer === 'unavailable' ? 'bad' : 'warn';
 }
 
 /**
  * One line per item for the courier: which pharmacy holds it and what it answered.
- * Examples: «Ватан 1: в наличии», «Ватан 1: нет → Ватан 2 · ждём ответ Ватан 2»,
- * «Ватан 1: нет → Ватан 2: нет в наличии · нет ни в одной аптеке», «Ватан 1: цена отличается: …»,
- * «Ждём ответ Ватан 1». Null for an old Lambda response without answers.
+ * Examples: «Ватан 1: в наличии», «Ватан 1: нет → Ватан 2 · ждём ответ Ватан 2», «В аптеке 2»,
+ * «Нет в наличии в обеих аптеках», «Ватан 1: цена отличается: …», «Ждём ответ Ватан 1».
+ * Null for an old Lambda response without answers.
  */
 export function courierItemAnswerLabel(item: CourierItemInput): string | null {
   if (!Array.isArray(item.answers)) return null;
   const pharmacy = item.pharmacy_id ?? 1;
   const current = item.answers.find((answer) => answer.pharmacy_id === pharmacy);
-  const routed = pharmacy === 2
-    && item.answers.some((answer) => answer.pharmacy_id === 1 && answer.answer === 'unavailable');
+  const routed = routedToTwo(item);
+  const cross = crossPharmacyMark(routed, current?.answer);
+  if (cross) return cross.text;
   const prefix = routed ? 'Ватан 1: нет → ' : '';
   const name = pharmacyName(pharmacy);
   if (!current) return routed ? `${prefix}Ватан 2 · ждём ответ Ватан 2` : `Ждём ответ ${name}`;
@@ -127,7 +176,7 @@ export function courierItemAnswerLabel(item: CourierItemInput): string | null {
     return `${prefix}${name}: цена отличается${current.problem ? `: ${current.problem}` : ''}`;
   }
   const reason = current.problem ? ` (${current.problem})` : '';
-  return routed ? `${prefix}${name}: нет в наличии${reason} · нет ни в одной аптеке` : `${name}: нет в наличии${reason}`;
+  return `${name}: нет в наличии${reason}`;
 }
 
 type AmountOrder = {

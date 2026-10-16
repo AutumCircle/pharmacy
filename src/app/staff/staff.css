@@ -1,7 +1,7 @@
 /* Staff area: shell shared by pharmacy employees and the courier. */
 .staff-shell { --c-brand: #c4161c; --c-brand-dark: #9f1117; --c-brand-soft: #fdecec; --c-ink: #14201a; --c-muted: #66706a;
   --c-line: #e3e8e4; --c-bg: #f3f5f4; --c-card: #fff; --c-ok: #187a3c; --c-ok-soft: #e8f6ed; --c-blue: #1d5f9a; --c-blue-soft: #e8f1fa;
-  --c-amber: #8a5a00; --c-amber-soft: #fff4dc; --c-radius: 16px;
+  --c-amber: #8a5a00; --c-amber-soft: #fff4dc; --c-orange: #b54708; --c-orange-soft: #fff0e3; --c-radius: 16px;
   min-height: 100dvh; background: var(--c-bg); color: var(--c-ink); -webkit-tap-highlight-color: transparent; }
 .staff-header { min-height: 60px; display: flex; align-items: center; gap: 16px; padding: 10px clamp(16px,4vw,48px); background: #fff; border-bottom: 1px solid var(--c-line); position: sticky; top: 0; z-index: 20; }
 .staff-brand { display: flex; align-items: baseline; gap: 8px; }
@@ -405,6 +405,32 @@ label.c-check-row { cursor: pointer; }
 .c-check-text .c-check-warning { color: var(--c-amber); font-weight: 700; }
 .c-row-answers { color: var(--c-muted); font-size: 13px; font-weight: 650; }
 .c-row-answers.done { color: var(--c-ok); }
+/* ---- Job 011: pharmacy assembly marks (pharmacy card + courier screens) ---- */
+.pa-assembly { align-items: center; }
+.pa-assembly-mark { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 100%; color: var(--c-muted); font-size: 14px; font-weight: 700; }
+.pa-btn-start { background: var(--c-card); border-color: var(--c-ok); color: var(--c-ok); }
+.c-assembly-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.c-assembly-line { padding: 8px 12px; border-radius: 10px; font-size: 15px; font-weight: 750; overflow-wrap: anywhere; }
+.c-assembly-waiting { background: var(--c-bg); color: var(--c-muted); }
+.c-assembly-assembling { background: var(--c-amber-soft); color: var(--c-amber); }
+.c-assembly-assembled { background: var(--c-ok-soft); color: var(--c-ok); }
+.c-action-bar { flex-wrap: wrap; }
+/* ---- Job 011 rework 1: owner's colours for routed items, «Ватан 2» per-item controls ---- */
+.pa-tone-orange { color: var(--c-orange); background: var(--c-orange-soft); }
+.pa-chip-extra { margin-left: 4px; }
+.pa-routed p { margin: 0; }
+.pa-routed-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.pa-routed-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; border-radius: 8px; background: var(--c-card); color: var(--c-ink); font-weight: 650; }
+.pa-item-tone-bad { box-shadow: inset 4px 0 0 var(--c-brand); }
+.pa-item-tone-orange { box-shadow: inset 4px 0 0 var(--c-orange); }
+.pa-routed-items { display: grid; gap: 10px; width: 100%; padding: 12px; border: 1.5px solid var(--c-orange); border-radius: 12px; background: var(--c-card); }
+.pa-routed-items .pa-item { padding-left: 10px; }
+.pa-item-marks { display: flex; flex-wrap: wrap; gap: 6px; }
+.pa-item-marks:empty { display: none; }
+.pa-price-edit { display: grid; gap: 8px; }
+.c-item.c-item-tone-bad { padding: 10px 10px 10px 14px; border-radius: 10px; box-shadow: inset 4px 0 0 var(--c-brand); background: var(--c-brand-soft); }
+.c-item.c-item-tone-orange { padding: 10px 10px 10px 14px; border-radius: 10px; box-shadow: inset 4px 0 0 var(--c-orange); background: var(--c-orange-soft); }
+.c-action-warning { flex-basis: 100%; margin: 0; padding: 6px 10px; border-radius: 8px; background: var(--c-amber-soft); color: var(--c-amber); font-size: 13px; font-weight: 750; }
 @media (max-width: 380px) {
   .pa-option { flex-basis: 100%; }
 }

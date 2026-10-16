@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   PHARMACY_ANSWER_LABELS, answersProgressText, confirmedAmountText, courierItemAnswerLabel, courierItemAnswerTone,
+  crossPharmacyMark, normalizePharmacyPrice,
   isAmountConfirmed, pharmacyAnswerChip, validatePharmacyAnswersRequest,
 } from '../src/lib/pharmacy-answers.ts';
 
@@ -42,7 +43,6 @@ test('request validation mirrors Lambda rejections', () => {
     { answers: [{ order_item_id: 1, answer: 'available', pharmacy_id: 2 }] },
     { answers: [{ order_item_id: 1, answer: 'available', price: '10' }] },
     { answers: [{ order_item_id: 1, answer: 'price_differs', problem: 'дороже', unit_price: '12' }] },
-    { answers: [{ order_item_id: 1, answer: 'available', base_unit_price: '12' }] },
     { answers: [{ order_item_id: 1 }] },
     { answers: [{ answer: 'available' }] },
     { answers: [{ order_item_id: '1', answer: 'available' }] },
@@ -87,12 +87,12 @@ test('courierItemAnswerLabel covers every state', () => {
   assert.equal(courierItemAnswerLabel({ pharmacy_id: 2, answers: [answer(1, 'unavailable')] }),
     'Ватан 1: нет → Ватан 2 · ждём ответ Ватан 2');
   assert.equal(courierItemAnswerLabel({ pharmacy_id: 2, answers: [answer(1, 'unavailable'), answer(2, 'available')] }),
-    'Ватан 1: нет → Ватан 2: в наличии');
+    'В аптеке 2'); // rework 1: orange
   assert.equal(courierItemAnswerLabel({ pharmacy_id: 2, answers: [answer(1, 'unavailable'), answer(2, 'price_differs', 'дороже')] }),
     'Ватан 1: нет → Ватан 2: цена отличается: дороже');
   // Unavailable at both pharmacies.
   assert.equal(courierItemAnswerLabel({ pharmacy_id: 2, answers: [answer(1, 'unavailable'), answer(2, 'unavailable')] }),
-    'Ватан 1: нет → Ватан 2: нет в наличии · нет ни в одной аптеке');
+    'Нет в наличии в обеих аптеках'); // rework 1: red
   // Order originally at «Ватан 2»: unavailable is final, no routing text.
   assert.equal(courierItemAnswerLabel({ pharmacy_id: 2, answers: [answer(2, 'unavailable', 'закончился')] }),
     'Ватан 2: нет в наличии (закончился)');
@@ -105,6 +105,30 @@ test('courierItemAnswerLabel covers every state', () => {
   assert.equal(courierItemAnswerTone({ pharmacy_id: 2, answers: [answer(1, 'unavailable'), answer(2, 'unavailable')] }), 'bad');
   assert.equal(courierItemAnswerTone({ pharmacy_id: 1, answers: [answer(1, 'price_differs', 'x')] }), 'warn');
   assert.equal(courierItemAnswerTone({ pharmacy_id: 1, answers: [answer(1, 'available')] }), 'ok');
+  assert.equal(courierItemAnswerTone({ pharmacy_id: 2, answers: [answer(1, 'unavailable'), answer(2, 'available')] }), 'orange');
+  assert.equal(courierItemAnswerTone({ pharmacy_id: 2, answers: [answer(2, 'available')] }), 'ok', 'not routed');
+});
+
+test('crossPharmacyMark: owner colours for routed items (rework 1)', () => {
+  assert.deepEqual(crossPharmacyMark(true, 'available'), { text: 'В аптеке 2', tone: 'orange' });
+  assert.deepEqual(crossPharmacyMark(true, 'unavailable'), { text: 'Нет в наличии в обеих аптеках', tone: 'bad' });
+  assert.equal(crossPharmacyMark(true, null), null);
+  assert.equal(crossPharmacyMark(true, 'price_differs'), null);
+  assert.equal(crossPharmacyMark(false, 'unavailable'), null);
+});
+
+test('request validation: pharmacy price only with «В наличии» (rework 1)', () => {
+  assert.deepEqual(validatePharmacyAnswersRequest({ answers: [{ order_item_id: 1, answer: 'available', base_unit_price: '45,5' }] }),
+    { ok: true, value: { answers: [{ order_item_id: 1, answer: 'available', base_unit_price: '45.50' }] } });
+  assert.deepEqual(validatePharmacyAnswersRequest({ answers: [{ order_item_id: 1, answer: 'available', base_unit_price: 40 }] }),
+    { ok: true, value: { answers: [{ order_item_id: 1, answer: 'available', base_unit_price: '40.00' }] } });
+  for (const price of ['0', '0.00', '-1', '1000000', '1.234', 'abc', '', null, true]) {
+    assert.equal(validatePharmacyAnswersRequest({ answers: [{ order_item_id: 1, answer: 'available', base_unit_price: price }] }).ok,
+      false, String(price));
+  }
+  assert.equal(validatePharmacyAnswersRequest({ answers: [{ order_item_id: 1, answer: 'unavailable', base_unit_price: '40' }] }).ok, false);
+  assert.equal(normalizePharmacyPrice('999999.99'), '999999.99');
+  assert.equal(normalizePharmacyPrice(' 12 '), '12.00');
 });
 
 test('confirmedAmountText covers null and value cases', () => {

@@ -1196,6 +1196,9 @@ _COURIER_ORDER_PHARMACY_SQL = """COALESCE(o.fulfillment_pharmacy_id,
                CASE WHEN o.created_by_staff_account_id IN (1, 2)
                     THEN o.created_by_staff_account_id ELSE 1 END)"""
 
+# Assembly marks (job 011): one entry per assembly pharmacy = distinct effective pharmacy of the items
+# that pharmacy has not answered «Нет в наличии» (unanswered items count). Website orders only; the
+# state is 'waiting' while the pharmacy has no mark. assembly_complete is derived in _courier_order_row.
 # Per-item pharmacy answers (job 010). Effective item pharmacy = the item's own assignment, else the
 # order's. The "current" answer is the one from that pharmacy; pharmacy_answers_complete and
 # confirmed_total (client sum of items answered «available») are computed here, never by a client.
@@ -1212,6 +1215,7 @@ _COURIER_ORDER_SELECT = f"""
            COALESCE(items.answered_count, 0) AS answered_count,
            COALESCE(items.item_count, 0) AS item_count,
            COALESCE(checklist.steps, ARRAY[]::integer[]) AS checklist_steps,
+           COALESCE(assembly.list, '[]'::json) AS assembly,
            {_COURIER_ORDER_PHARMACY_SQL} AS pharmacy_id
     FROM orders o
     LEFT JOIN LATERAL (
@@ -1245,6 +1249,21 @@ _COURIER_ORDER_SELECT = f"""
         SELECT {_COURIER_CHECKLIST_AGG_SQL} AS steps
         FROM order_courier_checklist c WHERE c.order_id = o.id
     ) checklist ON true
+    LEFT JOIN LATERAL (
+        SELECT json_agg(json_build_object('pharmacy_id', ph.pharmacy_id,
+            'state', COALESCE(asm.state, 'waiting'), 'started_at', asm.started_at,
+            'assembled_at', asm.assembled_at) ORDER BY ph.pharmacy_id) AS list
+        FROM (
+            SELECT DISTINCT COALESCE(oi.fulfillment_pharmacy_id, {_COURIER_ORDER_PHARMACY_SQL}) AS pharmacy_id
+            FROM order_items oi
+            LEFT JOIN order_item_pharmacy_answers cur
+                   ON cur.order_item_id = oi.id
+                  AND cur.pharmacy_id = COALESCE(oi.fulfillment_pharmacy_id, {_COURIER_ORDER_PHARMACY_SQL})
+            WHERE oi.order_id = o.id AND o.created_by_staff_account_id IS NULL
+              AND cur.answer IS DISTINCT FROM 'unavailable'
+        ) ph
+        LEFT JOIN order_pharmacy_assembly asm ON asm.order_id = o.id AND asm.pharmacy_id = ph.pharmacy_id
+    ) assembly ON true
 """
 
 
@@ -1264,6 +1283,19 @@ def _courier_order_row(row: dict[str, Any]) -> dict[str, Any]:
     row["unavailable_count"] = int(row.get("unavailable_count") or 0)
     row["answered_count"] = int(row.get("answered_count") or 0)
     row["item_count"] = int(row.get("item_count") or 0)
+    assembly = row.get("assembly")
+    if isinstance(assembly, str):
+        assembly = json.loads(assembly)
+    if not row.get("website_order") or not isinstance(assembly, list):
+        assembly = []
+    row["assembly"] = [{"pharmacy_id": int(entry["pharmacy_id"]),
+                        "state": entry.get("state") if entry.get("state") in ASSEMBLY_STATES else "waiting",
+                        "started_at": entry.get("started_at"), "assembled_at": entry.get("assembled_at")}
+                       for entry in sorted(assembly, key=lambda value: int(value["pharmacy_id"]))]
+    # Rework 1: every assembly pharmacy marked «Собран» (vacuously true without any, e.g. courier-created
+    # orders or all items unavailable). Not tied to «confirmed»: «Согласовано» waits for it.
+    row["assembly_complete"] = (row.get("status") != "cancelled"
+                                and all(entry["state"] == "assembled" for entry in row["assembly"]))
     return row
 
 
@@ -1546,7 +1578,7 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         raise ContractError("VALIDATION_ERROR", "Unknown order filter")
     limit = min(_limit(query), 50)
     cursor = _decode_cursor(query.get("cursor"))
-    params: list[Any] = [pharmacy_id, pharmacy_id, pharmacy_id, pharmacy_id, pharmacy_id]
+    params: list[Any] = [pharmacy_id] * 7
     cursor_filter = ""
     if cursor:
         try:
@@ -1568,32 +1600,46 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                        COALESCE(items.unanswered_count, 0) AS unanswered_count,
                        COALESCE(items.unanswered_unrouted, false) AS unanswered_unrouted,
                        items.unanswered_routed_since,
-                       COALESCE(routed.routed_away_count, 0) AS routed_away_count
+                       COALESCE(routed.routed_away_count, 0) AS routed_away_count,
+                       COALESCE(routed.routed_away, '[]'::json) AS routed_away,
+                       COALESCE(items.assemblable_count, 0) AS assemblable_count,
+                       asm.state AS assembly_state
                 FROM orders o
                 LEFT JOIN LATERAL (
                     SELECT json_agg(json_build_object('order_item_id', oi.id, 'medicine_name', oi.medicine_name,
                         'quantity', oi.quantity, 'line_total', oi.line_total,
                         'base_unit_price', COALESCE(oi.base_unit_price, oi.price)::text,
                         'base_line_total', (COALESCE(oi.base_unit_price, oi.price) * oi.quantity)::text,
-                        'my_answer', mine.answer, 'my_problem', mine.problem)
+                        'my_answer', mine.answer, 'my_problem', mine.problem,
+                        'routed_here', oi.pharmacy_assigned_at IS NOT NULL,
+                        'collected', col.order_item_id IS NOT NULL)
                         ORDER BY oi.id) AS medicines,
                         SUM(COALESCE(oi.base_unit_price, oi.price) * oi.quantity) AS base_total,
                         COUNT(*) FILTER (WHERE mine.answer IS NULL) AS unanswered_count,
                         bool_or(oi.pharmacy_assigned_at IS NULL) FILTER (WHERE mine.answer IS NULL)
                             AS unanswered_unrouted,
-                        MIN(oi.pharmacy_assigned_at) FILTER (WHERE mine.answer IS NULL) AS unanswered_routed_since
+                        MIN(oi.pharmacy_assigned_at) FILTER (WHERE mine.answer IS NULL) AS unanswered_routed_since,
+                        COUNT(*) FILTER (WHERE mine.answer IS DISTINCT FROM 'unavailable') AS assemblable_count
                     FROM order_items oi
                     LEFT JOIN order_item_pharmacy_answers mine
                            ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                    LEFT JOIN order_item_assembly col
+                           ON col.order_item_id = oi.id AND col.pharmacy_id = %s
                     WHERE oi.order_id = o.id AND {_ITEM_PHARMACY_SQL} = %s
                 ) items ON true
                 LEFT JOIN LATERAL (
-                    SELECT COUNT(*) AS routed_away_count
+                    SELECT COUNT(*) AS routed_away_count,
+                        json_agg(json_build_object('order_item_id', oi.id, 'medicine_name', oi.medicine_name,
+                            'quantity', oi.quantity, 'pharmacy_id', {_ITEM_PHARMACY_SQL},
+                            'answer', cur.answer) ORDER BY oi.id) AS routed_away
                     FROM order_items oi
                     JOIN order_item_pharmacy_answers mine
                       ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                    LEFT JOIN order_item_pharmacy_answers cur
+                           ON cur.order_item_id = oi.id AND cur.pharmacy_id = {_ITEM_PHARMACY_SQL}
                     WHERE oi.order_id = o.id AND {_ITEM_PHARMACY_SQL} <> %s
                 ) routed ON true
+                LEFT JOIN order_pharmacy_assembly asm ON asm.order_id = o.id AND asm.pharmacy_id = %s
                 WHERE o.deleted_at IS NULL AND o.created_by_staff_account_id IS NULL
                   AND o.status IN ('pending', 'confirmed')
                   AND EXISTS (SELECT 1 FROM order_items oi
@@ -1626,6 +1672,11 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                                 if row["awaiting_response"] and not unrouted and routed_since is not None
                                 else row["created_at"])
         row["routed_away_count"] = int(row.get("routed_away_count") or 0)
+        # Job 011 assembly mark of this pharmacy (null = «Ждёт сборки»); also ungated and client-free.
+        assemblable = int(row.pop("assemblable_count", 0) or 0)
+        row["assembly_state"] = row.get("assembly_state") if row.get("assembly_state") in ASSEMBLY_STATES else None
+        # Rework 1: assembly starts while the order is still «Новый» (and stays possible once confirmed).
+        row["assembly_available"] = row["status"] in ASSEMBLY_ORDER_STATUSES and assemblable > 0
         row["profit"] = (row["order_total"] or Decimal("0")) - row["base_total"]
         if policy["source"]:
             utm_source = row.pop("utm_source")
@@ -1642,6 +1693,16 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         for field, key in fields.items():
             if not policy[field]:
                 row.pop(key, None)
+        # Items moved to another pharmacy, with that pharmacy's answer (no client data). Shown with the
+        # owner's colours: available there = «В аптеке 2», unavailable there = «Нет в наличии в обеих аптеках».
+        routed_away = row.pop("routed_away", None)
+        if isinstance(routed_away, str):
+            routed_away = json.loads(routed_away)
+        if policy["items"]:
+            row["routed_away"] = [{key: entry.get(key) for key in
+                                   ("order_item_id", "medicine_name", "quantity", "pharmacy_id", "answer")
+                                   if key != "quantity" or policy["quantity"]}
+                                  for entry in (routed_away or [])]
         if not policy["items"]:
             row.pop("medicines", None)
         else:
@@ -1655,13 +1716,23 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
 
 
 PHARMACY_ANSWERS = ("available", "unavailable", "price_differs")
+# Job 011 pharmacy assembly marks: forward only, none -> assembling -> assembled.
+ASSEMBLY_STATES = ("assembling", "assembled")
+# Rework 1 (owner, 2026-10-16): pharmacies assemble while the order is «Новый», before the courier's call;
+# confirmed orders still accept marks (orders confirmed before this change).
+ASSEMBLY_ORDER_STATUSES = ("pending", "confirmed")
+_ASSEMBLY_TRANSITIONS = {(None, "assembling"), ("assembling", "assembled")}
 PHARMACY_ANSWER_MAX_ITEMS = 50
 PHARMACY_PROBLEM_MIN, PHARMACY_PROBLEM_MAX = 3, 300
 _ORDER_ITEM_ID_MAX = 9223372036854775807
 
 
 def validate_pharmacy_answers(payload: Any) -> list[dict[str, Any]]:
-    """Body {"answers": [{order_item_id, answer, problem?}]}; no prices, no pharmacy id, no other keys."""
+    """Body {"answers": [{order_item_id, answer, problem?, base_unit_price?}]}; no pharmacy id, no other keys.
+
+    base_unit_price (rework 1) is the pharmacy's own price for an «available» item: 0.01..999999.99 with at
+    most two decimals. It is an input only; the Lambda recomputes client prices and totals itself.
+    """
     if not isinstance(payload, dict) or set(payload) != {"answers"} or not isinstance(payload["answers"], list):
         raise ContractError("VALIDATION_ERROR", "Укажите ответы по позициям")
     entries = payload["answers"]
@@ -1671,7 +1742,8 @@ def validate_pharmacy_answers(payload: Any) -> list[dict[str, Any]]:
     seen: set[int] = set()
     for entry in entries:
         if (not isinstance(entry, dict)
-                or not {"order_item_id", "answer"} <= set(entry) <= {"order_item_id", "answer", "problem"}):
+                or not {"order_item_id", "answer"} <= set(entry) <= {"order_item_id", "answer", "problem",
+                                                                   "base_unit_price"}):
             raise ContractError("VALIDATION_ERROR", "Проверьте позиции и ответы")
         item_id = entry["order_item_id"]
         if type(item_id) is not int or not 0 < item_id <= _ORDER_ITEM_ID_MAX:
@@ -1700,7 +1772,15 @@ def validate_pharmacy_answers(payload: Any) -> list[dict[str, Any]]:
             elif not PHARMACY_PROBLEM_MIN <= len(problem) <= PHARMACY_PROBLEM_MAX:
                 raise ContractError("VALIDATION_ERROR",
                                     f"Описание проблемы: от {PHARMACY_PROBLEM_MIN} до {PHARMACY_PROBLEM_MAX} символов")
-        answers.append({"order_item_id": item_id, "answer": answer, "problem": problem})
+        base_unit_price = None
+        if "base_unit_price" in entry:
+            if answer != "available":
+                raise ContractError("VALIDATION_ERROR", "Цену можно указать только для «В наличии»")
+            base_unit_price = validate_unit_price(entry["base_unit_price"])
+        parsed = {"order_item_id": item_id, "answer": answer, "problem": problem}
+        if base_unit_price is not None:
+            parsed["base_unit_price"] = base_unit_price
+        answers.append(parsed)
     return answers
 
 
@@ -1725,7 +1805,8 @@ def answer_pharmacy_order_items(
         order = cur.fetchone()
         if not order or order["created_by_staff_account_id"] is not None:
             raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
-        cur.execute(f"""SELECT oi.id, {_ITEM_PHARMACY_SQL} AS pharmacy_id, mine.answer, mine.problem
+        cur.execute(f"""SELECT oi.id, {_ITEM_PHARMACY_SQL} AS pharmacy_id, mine.answer, mine.problem,
+                               COALESCE(oi.base_unit_price, oi.price) AS base_unit_price
                         FROM order_items oi
                         JOIN orders o ON o.id = oi.order_id
                         LEFT JOIN order_item_pharmacy_answers mine
@@ -1740,11 +1821,18 @@ def answer_pharmacy_order_items(
                                 "Ответить можно только по новому заказу", http_status=409)
         changes: list[dict[str, Any]] = []
         routed: list[int] = []
+        price_changes: list[dict[str, Any]] = []
         for entry in answers:
             item = items.get(entry["order_item_id"])
             if not item:
                 raise ContractError("ORDER_ITEM_NOT_FOUND", "Позиция не найдена в заказе", http_status=404)
-            same = item["answer"] == entry["answer"] and item["problem"] == entry["problem"]
+            new_base = entry.get("base_unit_price")
+            if new_base is not None and pharmacy_id != 2:
+                raise ContractError("FORBIDDEN", "Цену при сборке меняет только «Ватан 2»", http_status=403)
+            current_base = item.get("base_unit_price")
+            price_change = new_base is not None and (current_base is None or Decimal(str(current_base)) != new_base)
+            same = (item["answer"] == entry["answer"] and item["problem"] == entry["problem"]
+                    and not price_change)
             if int(item["pharmacy_id"]) != pharmacy_id:
                 # An item this pharmacy already routed away may be re-sent unchanged (idempotent);
                 # anything else on another pharmacy's item is forbidden.
@@ -1753,6 +1841,11 @@ def answer_pharmacy_order_items(
                 raise ContractError("FORBIDDEN", "Эта позиция передана другой аптеке", http_status=403)
             if same:
                 continue
+            if price_change:
+                price_changes.append({"order_item_id": entry["order_item_id"],
+                                      "previous_base_unit_price": current_base, "new_base_unit_price": new_base})
+            if item["answer"] == entry["answer"] and item["problem"] == entry["problem"]:
+                continue  # only the price changed
             changes.append(entry)
             if pharmacy_id == 1 and entry["answer"] == "unavailable":
                 routed.append(entry["order_item_id"])
@@ -1764,7 +1857,9 @@ def answer_pharmacy_order_items(
                            ON CONFLICT (order_item_id, pharmacy_id) DO UPDATE
                            SET answer = EXCLUDED.answer, problem = EXCLUDED.problem,
                                answered_by = EXCLUDED.answered_by, answered_at = now()""",
-                        (pharmacy_id, actor, json.dumps(changes, ensure_ascii=False)))
+                        (pharmacy_id, actor, json.dumps(
+                            [{key: entry[key] for key in ("order_item_id", "answer", "problem")} for entry in changes],
+                            ensure_ascii=False)))
             if routed:
                 cur.execute("""UPDATE order_items SET fulfillment_pharmacy_id = 2, pharmacy_assigned_at = now()
                                WHERE order_id = %s AND id = ANY(%s)""",
@@ -1775,6 +1870,10 @@ def answer_pharmacy_order_items(
                                         "items": [{"order_item_id": entry["order_item_id"], "answer": entry["answer"]}
                                                   for entry in changes],
                                         "routed_to_pharmacy_2": routed})
+        if price_changes:
+            _reprice_items_from_base(cur, order["id"], order_id, pharmacy_id, price_changes, current_request_id)
+        if changes or price_changes:
+            _sync_item_assembly(cur, order["id"], pharmacy_id)
         for entry in changes:
             item = items[entry["order_item_id"]]
             item["answer"], item["problem"] = entry["answer"], entry["problem"]
@@ -1789,6 +1888,257 @@ def answer_pharmacy_order_items(
         "routed_away_count": len(away),
         "awaiting_response": any(item["answer"] is None for item in mine),
     }
+
+
+def _reprice_items_from_base(
+    cur: Any, order_db_id: int, order_id: str, pharmacy_id: int, changes: list[dict[str, Any]],
+    current_request_id: str,
+) -> None:
+    """«Ватан 2» set its own (base) price for an item while answering «В наличии» (rework 1).
+
+    The pharmacy's price is an input only. The client price is recomputed in SQL with the stored
+    pricing rule (vatan_selling_unit_price, as at checkout), then the line and the order totals are
+    recomputed the same way as the admin base-price edit. One audit row; no client data.
+    """
+    audited = []
+    for change in changes:
+        cur.execute("""UPDATE order_items
+                       SET base_unit_price = %s,
+                           selling_unit_price = vatan_selling_unit_price(%s),
+                           line_total = ROUND(vatan_selling_unit_price(%s) * quantity, 2)
+                       WHERE id = %s AND order_id = %s
+                       RETURNING selling_unit_price, line_total""",
+                    (change["new_base_unit_price"], change["new_base_unit_price"], change["new_base_unit_price"],
+                     change["order_item_id"], order_db_id))
+        saved = cur.fetchone() or {}
+        audited.append({
+            "order_item_id": change["order_item_id"],
+            "previous_base_unit_price": (None if change["previous_base_unit_price"] is None
+                                         else str(change["previous_base_unit_price"])),
+            "new_base_unit_price": str(change["new_base_unit_price"]),
+            "new_selling_unit_price": None if saved.get("selling_unit_price") is None else str(saved["selling_unit_price"]),
+        })
+    cur.execute("""UPDATE orders SET items_subtotal = totals.subtotal, order_total = totals.subtotal,
+                                     total_price = totals.subtotal
+                   FROM (SELECT COALESCE(SUM(line_total), 0) AS subtotal
+                         FROM order_items WHERE order_id = %s) totals
+                   WHERE orders.id = %s""",
+                (order_db_id, order_db_id))
+    _write_admin_audit(cur, actor_id=f"staff:{pharmacy_id}", action="pharmacy.order.item_price_changed",
+                       resource_type="order", resource_id=order_id, request=current_request_id,
+                       details={"pharmacy_id": pharmacy_id, "items": audited})
+
+
+def _sync_item_assembly(cur: Any, order_db_id: int, pharmacy_id: int) -> None:
+    """Per-item «Собрано» (rework 1) drives the pharmacy's part mark: once at least one item is collected
+    the part is «Собирается»; when every item it did not answer «Нет в наличии» is collected it becomes
+    «Собран». Forward only: an «assembled» part never goes back. One statement, no reads."""
+    cur.execute(f"""INSERT INTO order_pharmacy_assembly (order_id, pharmacy_id, state, assembled_at, updated_by)
+                    SELECT %s, %s,
+                           CASE WHEN progress.open_count = 0 THEN 'assembled' ELSE 'assembling' END,
+                           CASE WHEN progress.open_count = 0 THEN now() END, %s
+                    FROM (SELECT COUNT(*) FILTER (WHERE col.order_item_id IS NOT NULL) AS collected_count,
+                                 COUNT(*) FILTER (WHERE col.order_item_id IS NULL
+                                                    AND mine.answer IS DISTINCT FROM 'unavailable') AS open_count
+                          FROM order_items oi
+                          JOIN orders o ON o.id = oi.order_id
+                          LEFT JOIN order_item_pharmacy_answers mine
+                                 ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                          LEFT JOIN order_item_assembly col
+                                 ON col.order_item_id = oi.id AND col.pharmacy_id = %s
+                          WHERE oi.order_id = %s AND {_ITEM_PHARMACY_SQL} = %s) progress
+                    WHERE progress.collected_count > 0
+                    ON CONFLICT (order_id, pharmacy_id) DO UPDATE
+                    SET state = EXCLUDED.state, assembled_at = EXCLUDED.assembled_at,
+                        updated_by = EXCLUDED.updated_by
+                    WHERE order_pharmacy_assembly.state = 'assembling' AND EXCLUDED.state = 'assembled'""",
+                (order_db_id, pharmacy_id, f"staff:{pharmacy_id}", pharmacy_id, pharmacy_id, order_db_id, pharmacy_id))
+
+
+# Assembly pharmacies of one order (website orders): distinct effective pharmacies of the items their
+# current pharmacy did not answer «Нет в наличии», with that pharmacy's part mark. Same rule as the
+# courier projection (_COURIER_ORDER_SELECT).
+_ORDER_ASSEMBLY_PARTS_SQL = f"""
+    SELECT parts.pharmacy_id, asm.state
+    FROM (SELECT DISTINCT {_ITEM_PHARMACY_SQL} AS pharmacy_id
+          FROM order_items oi
+          JOIN orders o ON o.id = oi.order_id
+          LEFT JOIN order_item_pharmacy_answers cur
+                 ON cur.order_item_id = oi.id AND cur.pharmacy_id = {_ITEM_PHARMACY_SQL}
+          WHERE oi.order_id = %s AND cur.answer IS DISTINCT FROM 'unavailable') parts
+    LEFT JOIN order_pharmacy_assembly asm ON asm.order_id = %s AND asm.pharmacy_id = parts.pharmacy_id
+    ORDER BY parts.pharmacy_id"""
+
+ASSEMBLY_NOT_COMPLETE_MESSAGE = "Сначала все аптеки должны отметить «Сборка сделана»"
+
+
+def _require_assembly_complete(cur: Any, order_db_id: int) -> None:
+    """Rework 1: the courier's «Согласовано» (pending -> confirmed) waits until every pharmacy that holds
+    collectable items marked its part «Собран». Orders with nothing to assemble are not blocked."""
+    cur.execute(_ORDER_ASSEMBLY_PARTS_SQL, (order_db_id, order_db_id))
+    waiting = [int(row["pharmacy_id"]) for row in cur.fetchall() if row.get("state") != "assembled"]
+    if waiting:
+        raise ContractError("ASSEMBLY_NOT_COMPLETE", ASSEMBLY_NOT_COMPLETE_MESSAGE, http_status=409)
+
+
+def validate_item_collect_request(payload: Any) -> int:
+    """Body is exactly {"order_item_id": <positive int>}."""
+    if (not isinstance(payload, dict) or set(payload) != {"order_item_id"}
+            or type(payload["order_item_id"]) is not int or not 0 < payload["order_item_id"] <= _ORDER_ITEM_ID_MAX):
+        raise ContractError("VALIDATION_ERROR", "Укажите позицию заказа")
+    return payload["order_item_id"]
+
+
+def collect_pharmacy_order_item(
+    order_id: str, payload: Any, pharmacy_id: int, current_request_id: str,
+) -> dict[str, Any]:
+    """«Собрано» for one item of this pharmacy (rework 1; used by «Ватан 2» for routed items).
+
+    The item must be effectively assigned to the session pharmacy and answered «В наличии» by it.
+    Repeating is a no-op. The pharmacy's part mark follows the items (_sync_item_assembly).
+    orders.status and order_status_history are never touched.
+    """
+    if pharmacy_id not in (1, 2):
+        raise ContractError("FORBIDDEN", "Доступ только для аптеки", http_status=403)
+    order_item_id = validate_item_collect_request(payload)
+    lookup, lookup_values = _order_lookup(order_id)
+    actor = f"staff:{pharmacy_id}"
+    with transaction() as cur:
+        cur.execute(f"""SELECT id, status, created_by_staff_account_id, fulfillment_pharmacy_id
+                        FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
+        order = cur.fetchone()
+        if not order or order["created_by_staff_account_id"] is not None:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        cur.execute(f"""SELECT oi.id, {_ITEM_PHARMACY_SQL} AS pharmacy_id, mine.answer,
+                               col.order_item_id IS NOT NULL AS collected
+                        FROM order_items oi
+                        JOIN orders o ON o.id = oi.order_id
+                        LEFT JOIN order_item_pharmacy_answers mine
+                               ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                        LEFT JOIN order_item_assembly col
+                               ON col.order_item_id = oi.id AND col.pharmacy_id = %s
+                        WHERE oi.order_id = %s AND oi.id = %s FOR UPDATE OF oi""",
+                    (pharmacy_id, pharmacy_id, order["id"], order_item_id))
+        item = cur.fetchone()
+        if not item:
+            raise ContractError("ORDER_ITEM_NOT_FOUND", "Позиция не найдена в заказе", http_status=404)
+        if int(item["pharmacy_id"]) != pharmacy_id:
+            raise ContractError("FORBIDDEN", "Эта позиция у другой аптеки", http_status=403)
+        if order["status"] not in ASSEMBLY_ORDER_STATUSES:
+            raise ContractError("ORDER_STATUS_CONFLICT", "Сборка доступна только для нового или согласованного заказа",
+                                http_status=409)
+        if not item["collected"]:
+            if item["answer"] != "available":
+                raise ContractError("ITEM_NOT_AVAILABLE", "Сначала отметьте «В наличии»", http_status=409)
+            cur.execute("""INSERT INTO order_item_assembly (order_item_id, pharmacy_id, collected_by)
+                           VALUES (%s, %s, %s) ON CONFLICT (order_item_id, pharmacy_id) DO NOTHING""",
+                        (order_item_id, pharmacy_id, actor))
+            _sync_item_assembly(cur, order["id"], pharmacy_id)
+            _write_admin_audit(cur, actor_id=actor, action="pharmacy.order.item_collected",
+                               resource_type="order", resource_id=order_id, request=current_request_id,
+                               details={"pharmacy_id": pharmacy_id, "order_item_id": order_item_id})
+        cur.execute("""SELECT state FROM order_pharmacy_assembly WHERE order_id = %s AND pharmacy_id = %s""",
+                    (order["id"], pharmacy_id))
+        part = cur.fetchone()
+    return {"order_id": order_id, "order_item_id": order_item_id, "pharmacy_id": pharmacy_id, "collected": True,
+            "assembly_state": part["state"] if part and part.get("state") in ASSEMBLY_STATES else None}
+
+
+def validate_assembly_request(payload: Any) -> str:
+    """Body is exactly {"state": "assembling" | "assembled"}; no pharmacy id, no other keys."""
+    if (not isinstance(payload, dict) or set(payload) != {"state"}
+            or not isinstance(payload["state"], str) or payload["state"] not in ASSEMBLY_STATES):
+        raise ContractError("VALIDATION_ERROR", "Укажите отметку сборки")
+    return payload["state"]
+
+
+def _assembly_projection(order_id: str, pharmacy_id: int, row: Any) -> dict[str, Any]:
+    return {
+        "order_id": order_id,
+        "pharmacy_id": pharmacy_id,
+        "state": row["state"] if row else None,
+        "started_at": order_time_iso(row["started_at"]) if row and row.get("started_at") else None,
+        "assembled_at": order_time_iso(row["assembled_at"]) if row and row.get("assembled_at") else None,
+    }
+
+
+def mark_pharmacy_assembly(order_id: str, payload: Any, pharmacy_id: int, current_request_id: str) -> dict[str, Any]:
+    """«Начать сборку» / «Сборка сделана» for this pharmacy's part of a website order (job 011, rework 1).
+
+    Allowed while the order is «Новый» (assembly happens before the courier's call) or already confirmed.
+    pharmacy_id comes from the HMAC staff session only. The pharmacy must hold at least one item it did
+    not answer «Нет в наличии». Transitions are forward only (none -> assembling -> assembled); repeating
+    the current state is a no-op (no writes, no audit). «Сборка сделана» on a «Новый» order records
+    «В наличии» for this pharmacy's still unanswered items (the rest were collected), so the courier gets a
+    confirmed sum. orders.status and order_status_history are never touched.
+    """
+    if pharmacy_id not in (1, 2):
+        raise ContractError("FORBIDDEN", "Доступ только для аптеки", http_status=403)
+    target = validate_assembly_request(payload)
+    lookup, lookup_values = _order_lookup(order_id)
+    actor = f"staff:{pharmacy_id}"
+    with transaction() as cur:
+        cur.execute(f"""SELECT id, status, created_by_staff_account_id, fulfillment_pharmacy_id
+                        FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
+        order = cur.fetchone()
+        if not order or order["created_by_staff_account_id"] is not None:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        cur.execute(f"""SELECT COUNT(*) AS assigned_count,
+                               COUNT(*) FILTER (WHERE mine.answer IS DISTINCT FROM 'unavailable')
+                                   AS assemblable_count
+                        FROM order_items oi
+                        JOIN orders o ON o.id = oi.order_id
+                        LEFT JOIN order_item_pharmacy_answers mine
+                               ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                        WHERE oi.order_id = %s AND {_ITEM_PHARMACY_SQL} = %s""",
+                    (pharmacy_id, order["id"], pharmacy_id))
+        counts = cur.fetchone() or {}
+        if not int(counts.get("assigned_count") or 0):
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        if order["status"] not in ASSEMBLY_ORDER_STATUSES:
+            raise ContractError("ORDER_STATUS_CONFLICT", "Сборка доступна только для нового или согласованного заказа",
+                                http_status=409)
+        if not int(counts.get("assemblable_count") or 0):
+            raise ContractError("NOTHING_TO_ASSEMBLE", "Нечего собирать", http_status=409)
+        cur.execute("""SELECT state, started_at, assembled_at FROM order_pharmacy_assembly
+                       WHERE order_id = %s AND pharmacy_id = %s FOR UPDATE""",
+                    (order["id"], pharmacy_id))
+        current = cur.fetchone()
+        current_state = current["state"] if current else None
+        if current_state == target:
+            return _assembly_projection(order_id, pharmacy_id, current)
+        if (current_state, target) not in _ASSEMBLY_TRANSITIONS:
+            message = ("Сначала нажмите «Начать сборку»" if current_state is None
+                       else "Заказ уже отмечен «Собран»")
+            raise ContractError("ASSEMBLY_STATE_CONFLICT", message, http_status=409)
+        cur.execute("""INSERT INTO order_pharmacy_assembly
+                           (order_id, pharmacy_id, state, assembled_at, updated_by)
+                       VALUES (%s, %s, %s, CASE WHEN %s = 'assembled' THEN now() END, %s)
+                       ON CONFLICT (order_id, pharmacy_id) DO UPDATE
+                       SET state = EXCLUDED.state, assembled_at = EXCLUDED.assembled_at,
+                           updated_by = EXCLUDED.updated_by
+                       RETURNING state, started_at, assembled_at""",
+                    (order["id"], pharmacy_id, target, target, actor))
+        saved = cur.fetchone()
+        details: dict[str, Any] = {"pharmacy_id": pharmacy_id, "from_state": current_state, "to_state": target}
+        if target == "assembled" and order["status"] == "pending":
+            cur.execute(f"""INSERT INTO order_item_pharmacy_answers (order_item_id, pharmacy_id, answer, answered_by)
+                            SELECT oi.id, %s, 'available', %s
+                            FROM order_items oi
+                            JOIN orders o ON o.id = oi.order_id
+                            LEFT JOIN order_item_pharmacy_answers mine
+                                   ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                            WHERE oi.order_id = %s AND {_ITEM_PHARMACY_SQL} = %s AND mine.answer IS NULL
+                            ON CONFLICT (order_item_id, pharmacy_id) DO NOTHING
+                            RETURNING order_item_id""",
+                        (pharmacy_id, actor, pharmacy_id, order["id"], pharmacy_id))
+            answered = sorted(int(row["order_item_id"]) for row in cur.fetchall())
+            if answered:
+                details["answered_available"] = answered
+        _write_admin_audit(cur, actor_id=actor, action="pharmacy.order.assembly_marked",
+                           resource_type="order", resource_id=order_id, request=current_request_id,
+                           details=details)
+    return _assembly_projection(order_id, pharmacy_id, saved)
 
 
 def courier_earnings(query: dict[str, Any]) -> dict[str, Any]:
@@ -1906,7 +2256,8 @@ def update_courier_order_status(order_id: str, payload: dict[str, Any], current_
         raise ContractError("VALIDATION_ERROR", "Invalid status update request")
     lookup, lookup_values = _order_lookup(order_id)
     with transaction() as cur:
-        cur.execute(f"SELECT id, status FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE", lookup_values)
+        cur.execute(f"""SELECT id, status, created_by_staff_account_id FROM orders
+                        WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
         order = cur.fetchone()
         if not order:
             raise ContractError("ORDER_NOT_FOUND", "Order was not found", http_status=404)
@@ -1915,6 +2266,9 @@ def update_courier_order_status(order_id: str, payload: dict[str, Any], current_
         current, new, reason = validate_status_transition(
             order["status"], payload["status"], reason=payload.get("reason")
         )
+        if current == "pending" and new == "confirmed" and order.get("created_by_staff_account_id") is None:
+            # Rework 1: «Согласовано» waits for «Сборка сделана» from every pharmacy holding items.
+            _require_assembly_complete(cur, order["id"])
         cur.execute("UPDATE orders SET status = %s WHERE id = %s", (new, order["id"]))
         cur.execute("""INSERT INTO order_status_history
             (order_id, from_status, to_status, actor_type, actor_id, reason)
@@ -4461,6 +4815,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if staff_method == "POST" and answers_match:
                 account = staff_accounts.session_account(event, pharmacy=True)
                 return success(answer_pharmacy_order_items(answers_match.group(1), _body(event),
+                    account["account_id"], current_request_id), request=current_request_id)
+            collect_match = re.fullmatch(
+                r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/assembly/items", staff_path)
+            if staff_method == "POST" and collect_match:
+                account = staff_accounts.session_account(event, pharmacy=True)
+                return success(collect_pharmacy_order_item(collect_match.group(1), _body(event),
+                    account["account_id"], current_request_id), request=current_request_id)
+            assembly_match = re.fullmatch(
+                r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/assembly", staff_path)
+            if staff_method == "POST" and assembly_match:
+                account = staff_accounts.session_account(event, pharmacy=True)
+                return success(mark_pharmacy_assembly(assembly_match.group(1), _body(event),
                     account["account_id"], current_request_id), request=current_request_id)
             items_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/items", staff_path)
             if staff_method == "POST" and items_match:

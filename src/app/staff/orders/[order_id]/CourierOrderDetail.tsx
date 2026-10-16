@@ -9,6 +9,9 @@ import { formatOrderDateTime } from '@/lib/order-time';
 import {
   answersProgressText, confirmedAmountText, courierItemAnswerLabel, courierItemAnswerTone, isAmountConfirmed,
 } from '@/lib/pharmacy-answers';
+import {
+  ASSEMBLY_NOT_COMPLETE, assemblyWarning, confirmBlockedReason, courierAssemblyLines,
+} from '@/lib/pharmacy-assembly';
 import { money, parsePrice, priceInput, quantityLabel } from '../../format';
 import MedicinePicker, { invalidLine, lineTotal, type PickerLine } from '../MedicinePicker';
 import QuantityStepper from '../QuantityStepper';
@@ -44,6 +47,17 @@ function Progress({ status }: { status: CourierOrderStatus }) {
     {statusFlow.map((step, index) => <li key={step} className={index < current ? 'done' : index === current ? 'current' : ''}
       aria-current={index === current ? 'step' : undefined}><span aria-hidden="true" />{statusLabels[step]}</li>)}
   </ol>;
+}
+
+/** Job 011: each pharmacy's assembly mark, read-only for the courier. Hidden for an old Lambda. */
+function AssemblySection({ order }: { order: CourierOrder }) {
+  const lines = courierAssemblyLines(order);
+  if (!lines.length || order.status === 'cancelled') return null;
+  return <section className="c-block c-assembly" aria-labelledby="c-assembly-title">
+    <div className="c-block-title"><h2 id="c-assembly-title">Сборка в аптеках</h2></div>
+    <ul className="c-assembly-lines">{lines.map((line) =>
+      <li key={line.pharmacyId} className={`c-assembly-line c-assembly-${line.state}`}>{line.text}</li>)}</ul>
+  </section>;
 }
 
 function CustomerSection({ order, base, onSaved }: { order: CourierOrder; base: string; onSaved: () => void }) {
@@ -137,14 +151,17 @@ function ItemRow({ item, base, editable, delivered, onSaved }: {
   }
 
   const answerLabel = courierItemAnswerLabel(item);
+  const answerTone = courierItemAnswerTone(item);
   const summary = <>
     <span className="c-item-name">{item.medicine_name}</span>
     <span className="c-item-qty">{quantityLabel(item.quantity)} шт. × {money(item.selling_unit_price)}</span>
     <span className="c-item-sum">{money(item.line_total)}</span>
-    {answerLabel && <span className={`c-item-answer pa-tone-${courierItemAnswerTone(item)}`}>{answerLabel}</span>}
+    {answerLabel && <span className={`c-item-answer pa-tone-${answerTone}`}>{answerLabel}</span>}
   </>;
+  // Rework 1: the whole row is red when the item is missing in both pharmacies, orange when it is in «Ватан 2».
+  const rowTone = answerTone === 'bad' || answerTone === 'orange' ? ` c-item-tone-${answerTone}` : '';
 
-  if (!editable) return <li className="c-item">{summary}</li>;
+  if (!editable) return <li className={`c-item${rowTone}`}>{summary}</li>;
   if (!open) return <li className="c-item"><button type="button" className="c-item-button" onClick={start}
     aria-label={`Изменить ${item.medicine_name}`}>{summary}<span className="c-item-edit" aria-hidden="true">✎</span></button></li>;
   const valid = parsePrice(price) !== null;
@@ -310,14 +327,19 @@ function ChecklistSection({ order, base, statusBusy, onStatus, onConflict }: {
         if (item.status) {
           const linked = item.status;
           const unconfirmed = item.step === 4 && !done && order.status === 'pending' && !isAmountConfirmed(order);
+          // Rework 1: «Согласовано» is blocked until every pharmacy marked «Сборка сделана» (Lambda 409 too).
+          const blocked = item.step === 4 && !done ? confirmBlockedReason(order) : null;
+          // Step 5 keeps a non-blocking note for orders confirmed before every pharmacy was done.
+          const notAssembled = item.step === 5 && !done ? assemblyWarning(order) : null;
+          const warning = blocked ?? (unconfirmed ? 'Сумма ещё не подтверждена аптекой' : notAssembled);
           return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>
             <div className="c-check-row">
               <span className="c-check-mark" aria-hidden="true">{done ? '✓' : item.step}</span>
-              {unconfirmed ? <span className="c-check-text"><strong>{item.title}</strong><small>{item.hint}</small>
-                <small className="c-check-warning" role="note">Сумма ещё не подтверждена аптекой</small></span> : text}
+              {warning ? <span className="c-check-text"><strong>{item.title}</strong><small>{item.hint}</small>
+                <small className="c-check-warning" role="note">{warning}</small></span> : text}
               {done ? <span className="sr-only">Выполнено</span>
                 : order.status === linked.from && <button type="button" className="c-btn c-btn-outline c-check-action"
-                  disabled={statusBusy} onClick={() => onStatus(linked.to)}>{statusBusy ? '…' : linked.action}</button>}
+                  disabled={statusBusy || !!blocked} onClick={() => onStatus(linked.to)}>{statusBusy ? '…' : linked.action}</button>}
             </div>
           </li>;
         }
@@ -345,6 +367,9 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
   const base = `/api/staff/orders/${encodeURIComponent(order.order_id)}`;
   const step = nextStep[order.status];
   const refresh = () => router.refresh();
+  const leaveWarning = order.status === 'confirmed' ? assemblyWarning(order) : null;
+  const confirmBlocked = confirmBlockedReason(order);
+  const barNote = confirmBlocked ?? leaveWarning;
 
   async function changeStatus(next: CourierOrderStatus, cancelReason?: string) {
     setBusy(true); setError('');
@@ -353,7 +378,10 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
         ...(cancelReason ? { reason: cancelReason } : {}) });
       setCancelling(false); setReason(''); refresh();
     } catch (cause) {
-      if ((cause as { status?: number }).status === 409) { refresh(); setError('Статус уже изменился — экран обновлён.'); }
+      if ((cause as { status?: number }).status === 409) {
+        refresh();
+        setError(errorText(cause) === ASSEMBLY_NOT_COMPLETE ? ASSEMBLY_NOT_COMPLETE : 'Статус уже изменился — экран обновлён.');
+      }
       else setError(errorText(cause));
     } finally { setBusy(false); }
   }
@@ -369,6 +397,7 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
     <ChecklistSection key={`${order.status}:${(order.checklist_steps ?? []).join(',')}:${order.pharmacy_answers_complete ? 1 : 0}`}
       order={order} base={base}
       statusBusy={busy} onStatus={(next) => changeStatus(next)} onConflict={refresh} />
+    <AssemblySection order={order} />
     <CustomerSection order={order} base={base} onSaved={refresh} />
     <ItemsSection order={order} base={base} onSaved={refresh} />
     {order.status !== 'cancelled' && <FeeSection order={order} base={base} />}
@@ -383,7 +412,9 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
       </div>
     </section>}
     {step && !cancelling && <div className="c-action-bar">
-      <button type="button" className="c-btn c-btn-primary" disabled={busy} onClick={() => changeStatus(step.status)}>
+      {barNote && <p className="c-action-warning" role="note">{barNote}</p>}
+      <button type="button" className="c-btn c-btn-primary" disabled={busy || !!confirmBlocked}
+        onClick={() => changeStatus(step.status)}>
         {busy ? 'Сохраняем…' : step.label}</button>
       <button type="button" className="c-btn c-btn-ghost" disabled={busy} onClick={() => setCancelling(true)}>Отменить</button>
     </div>}

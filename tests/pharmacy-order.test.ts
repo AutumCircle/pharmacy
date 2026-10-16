@@ -44,7 +44,7 @@ test('pharmacyOrderView default policy response has no client data', () => {
   assert.equal(view.showPrices, true);
   assert.equal(view.showClientPrices, false);
   assert.deepEqual(view.medicines, [{ name: 'NOW D3', quantity: 2, unitPrice: '50.00', lineTotal: '100.00', clientLineTotal: null,
-    orderItemId: null, myAnswer: null, myProblem: null }]);
+    orderItemId: null, myAnswer: null, myProblem: null, routedHere: false, collected: false, crossMark: null }]);
   assert.equal(view.total, '100.00');
   for (const key of ['customerName', 'phone', 'address', 'landmark', 'clientTotal', 'profit', 'creator'] as const) {
     assert.equal(view[key], null, key);
@@ -140,4 +140,67 @@ test('pharmacyOrderView degrades to no actions on an old Lambda response', () =>
   const bogus = pharmacyOrderView({ order_id: 'z', status: 'pending',
     medicines: [{ order_item_id: 81, medicine_name: 'A', my_answer: 'maybe' }] });
   assert.equal(bogus.medicines?.[0].myAnswer, null);
+});
+
+test('pharmacyOrderView exposes assembly_state and assembly_available (job 011)', () => {
+  const base = { order_id: 'ord_x', status: 'confirmed', medicines: [{ order_item_id: 81, medicine_name: 'A', my_answer: 'available' }] };
+  const waiting = pharmacyOrderView({ ...base, assembly_state: null, assembly_available: true });
+  assert.equal(waiting.assemblyAvailable, true);
+  assert.equal(waiting.assemblyState, null);
+  assert.deepEqual(waiting.assemblyAction, { state: 'assembling', label: 'Начать сборку' });
+  const assembling = pharmacyOrderView({ ...base, assembly_state: 'assembling', assembly_available: true });
+  assert.equal(assembling.assemblyState, 'assembling');
+  assert.deepEqual(assembling.assemblyAction, { state: 'assembled', label: 'Сборка сделана' });
+  const assembled = pharmacyOrderView({ ...base, assembly_state: 'assembled', assembly_available: true });
+  assert.equal(assembled.assemblyState, 'assembled');
+  assert.equal(assembled.assemblyAction, null);
+  const nothing = pharmacyOrderView({ ...base, assembly_state: null, assembly_available: false });
+  assert.equal(nothing.assemblyAvailable, false);
+  assert.equal(nothing.assemblyAction, null);
+  // Assembly does not depend on the status field, which the pharmacy_web policy may hide.
+  const hiddenStatus = pharmacyOrderView({ order_id: 'ord_x', assembly_state: null, assembly_available: true });
+  assert.equal(hiddenStatus.status, null);
+  assert.equal(hiddenStatus.assemblyAvailable, true);
+});
+
+test('pharmacyOrderView degrades to no assembly actions without the job 011 fields', () => {
+  const old = pharmacyOrderView({ order_id: 'ord_x', status: 'confirmed', medicines: [{ medicine_name: 'A' }] });
+  assert.equal(old.assemblyAvailable, false);
+  assert.equal(old.assemblyState, null);
+  assert.equal(old.assemblyAction, null);
+  const bogus = pharmacyOrderView({ order_id: 'ord_x', status: 'confirmed', assembly_state: 'done', assembly_available: true });
+  assert.equal(bogus.assemblyState, null);
+});
+
+test('pharmacyOrderView: routed items, owner colours and part controls (rework 1)', () => {
+  const two = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', assembly_available: true, assembly_state: null,
+    medicines: [
+      { order_item_id: 82, medicine_name: 'B', my_answer: 'available', routed_here: true, collected: true },
+      { order_item_id: 83, medicine_name: 'C', my_answer: 'unavailable', routed_here: true, collected: false },
+      { order_item_id: 84, medicine_name: 'D', my_answer: null, routed_here: true },
+    ] });
+  assert.deepEqual(two.medicines?.map((item) => [item.routedHere, item.collected, item.crossMark?.text ?? null]), [
+    [true, true, 'В аптеке 2'], [true, false, 'Нет в наличии в обеих аптеках'], [true, false, null]]);
+  assert.equal(two.medicines?.[0].crossMark?.tone, 'orange');
+  assert.equal(two.medicines?.[1].crossMark?.tone, 'bad');
+  assert.equal(two.partControls, false, 'only routed items: per-item controls instead of the part buttons');
+
+  const one = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', assembly_available: true,
+    medicines: [{ order_item_id: 81, medicine_name: 'A', my_answer: 'available' }],
+    routed_away_count: 3,
+    routed_away: [
+      { order_item_id: 82, medicine_name: 'B', quantity: 1, pharmacy_id: 2, answer: 'available' },
+      { order_item_id: 83, medicine_name: 'C', pharmacy_id: 2, answer: 'unavailable' },
+      { order_item_id: 84, medicine_name: 'D', pharmacy_id: 2, answer: null },
+    ] });
+  assert.equal(one.partControls, true);
+  assert.equal(one.medicines?.[0].crossMark, null);
+  assert.deepEqual(one.routedAway, [
+    { name: 'B', quantity: 1, text: 'В аптеке 2', tone: 'orange' },
+    { name: 'C', quantity: null, text: 'Нет в наличии в обеих аптеках', tone: 'bad' },
+    { name: 'D', quantity: null, text: 'Ждём ответ Ватан 2', tone: 'wait' }]);
+  // Old Lambda: no routed fields.
+  const old = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines: [{ medicine_name: 'A' }] });
+  assert.deepEqual(old.routedAway, []);
+  assert.equal(old.partControls, false);
 });

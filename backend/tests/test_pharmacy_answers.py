@@ -59,7 +59,6 @@ class PharmacyAnswerTests(unittest.TestCase):
             {'answers': [{'answer': 'available'}]},
             {'answers': [{'order_item_id': 81, 'answer': 'available', 'price': '10'}]},
             {'answers': [{'order_item_id': 81, 'answer': 'price_differs', 'problem': 'дороже', 'unit_price': '12'}]},
-            {'answers': [{'order_item_id': 81, 'answer': 'available', 'base_unit_price': '12'}]},
             {'answers': [{'order_item_id': 81, 'answer': 'available', 'pharmacy_id': 2}]},
             {'answers': [{'order_item_id': '81', 'answer': 'available'}]},
             {'answers': [{'order_item_id': True, 'answer': 'available'}]},

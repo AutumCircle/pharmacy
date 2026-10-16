@@ -56,7 +56,9 @@ export type PharmacyItemAnswer = {
 };
 
 export type PharmacyAnswersRequest = {
-  answers: Array<{ order_item_id: number; answer: PharmacyAnswer; problem?: string | null }>;
+  /** base_unit_price (rework 1, «Ватан 2» only, with «available»): the pharmacy's own price; Lambda
+   * recomputes the client price and totals. */
+  answers: Array<{ order_item_id: number; answer: PharmacyAnswer; problem?: string | null; base_unit_price?: string }>;
 };
 
 export type PharmacyAnswersResult = {
@@ -64,6 +66,50 @@ export type PharmacyAnswersResult = {
   items: Array<{ order_item_id: number; my_answer: PharmacyAnswer | null; my_problem: string | null }>;
   routed_away_count: number;
   awaiting_response: boolean;
+};
+
+/** A pharmacy's assembly mark on its part of a confirmed order (job 011). No mark = «Ждёт сборки». */
+export type PharmacyAssemblyState = 'assembling' | 'assembled';
+
+/** Courier view of one pharmacy's assembly: 'waiting' while the pharmacy has no mark. */
+export type CourierAssemblyState = 'waiting' | PharmacyAssemblyState;
+
+export type PharmacyAssemblyRequest = { state: PharmacyAssemblyState };
+
+export type PharmacyAssemblyResult = {
+  order_id: string;
+  pharmacy_id: 1 | 2;
+  state: PharmacyAssemblyState | null;
+  started_at: string | null;
+  assembled_at: string | null;
+};
+
+/** Per-item «Собрано» (rework 1). */
+export type PharmacyItemCollectRequest = { order_item_id: number };
+
+export type PharmacyItemCollectResult = {
+  order_id: string;
+  order_item_id: number;
+  pharmacy_id: 1 | 2;
+  collected: true;
+  assembly_state: PharmacyAssemblyState | null;
+};
+
+/** An item this pharmacy answered «Нет в наличии» that now sits at another pharmacy (rework 1). */
+export type PharmacyRoutedAwayItem = {
+  order_item_id: number;
+  medicine_name: string;
+  quantity?: number | string;
+  pharmacy_id: 1 | 2;
+  /** That pharmacy's answer; null while it has not answered. */
+  answer: PharmacyAnswer | null;
+};
+
+export type CourierAssemblyMark = {
+  pharmacy_id: 1 | 2;
+  state: CourierAssemblyState;
+  started_at: string | null;
+  assembled_at: string | null;
 };
 
 export type CourierOrder = {
@@ -101,6 +147,11 @@ export type CourierOrder = {
   /** Items answered by their current pharmacy / all items («Ответ аптек: N из M»). */
   answered_count?: number;
   item_count?: number;
+  /** Job 011: one entry per pharmacy that has something to assemble, by pharmacy id; [] for
+   * courier-created orders; absent on older Lambdas (then no marks and no warning are shown). */
+  assembly?: CourierAssemblyMark[];
+  /** Confirmed and every listed pharmacy marked «Собран». */
+  assembly_complete?: boolean;
 };
 
 export type CourierOrderList = {
@@ -128,9 +179,17 @@ export type PharmacyPreparationOrder = {
   medicines?: Array<{ medicine_name: string; quantity?: number; line_total?: number | string;
     base_unit_price?: number | string; base_line_total?: number | string;
     /** Job 010: absent on older Lambdas (then no answer controls are shown). */
-    order_item_id?: number; my_answer?: PharmacyAnswer | null; my_problem?: string | null }>;
+    order_item_id?: number; my_answer?: PharmacyAnswer | null; my_problem?: string | null;
+    /** Rework 1: the item was routed here from «Ватан 1»; this pharmacy marked it «Собрано». */
+    routed_here?: boolean; collected?: boolean }>;
   /** Items this pharmacy answered «Нет в наличии» that were routed to «Ватан 2». */
   routed_away_count?: number;
+  /** Rework 1: those items with the other pharmacy's answer (absent when `items` is hidden). */
+  routed_away?: PharmacyRoutedAwayItem[];
+  /** Job 011: this pharmacy's assembly mark (null = «Ждёт сборки»); absent on older Lambdas. */
+  assembly_state?: PharmacyAssemblyState | null;
+  /** Job 011: the order is confirmed and this pharmacy has something to assemble. */
+  assembly_available?: boolean;
   order_total?: number | string;
   base_total?: number | string;
   profit?: number | string;

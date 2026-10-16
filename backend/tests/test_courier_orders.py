@@ -653,12 +653,81 @@ class CourierOrderTests(unittest.TestCase):
         self.assertIn("'answers', COALESCE(answers.list, '[]'::json)", sql)
         self.assertIn('FROM order_item_pharmacy_answers a WHERE a.order_item_id = oi.id', sql)
         self.assertIn('LEFT JOIN order_item_pharmacy_answers cur', sql)
-        self.assertEqual(sql.count('LEFT JOIN LATERAL'), 3)
+        self.assertEqual(sql.count('LEFT JOIN LATERAL'), 4)
         cursor = Mock()
         cursor.fetchall.return_value = []
         with self._tx(cursor):
             list_courier_orders({})
         self.assertEqual(cursor.execute.call_count, 1)
+
+    # --- job 011: assembly marks in the courier projection ------------------------------
+
+    def test_assembly_single_pharmacy(self):
+        waiting, _ = self._courier_row(status='confirmed', website_order=True,
+                                       assembly=[{'pharmacy_id': 1, 'state': 'waiting',
+                                                  'started_at': None, 'assembled_at': None}])
+        self.assertEqual(waiting['assembly'], [{'pharmacy_id': 1, 'state': 'waiting',
+                                                'started_at': None, 'assembled_at': None}])
+        self.assertIs(waiting['assembly_complete'], False)
+        done, _ = self._courier_row(status='confirmed', website_order=True, assembly=[
+            {'pharmacy_id': 1, 'state': 'assembled', 'started_at': '2026-10-16T08:00:00+00:00',
+             'assembled_at': '2026-10-16T08:20:00+00:00'}])
+        self.assertEqual(done['assembly'][0]['state'], 'assembled')
+        self.assertEqual(done['assembly'][0]['assembled_at'], '2026-10-16T08:20:00+00:00')
+        self.assertIs(done['assembly_complete'], True)
+
+    def test_assembly_routed_order_lists_both_pharmacies(self):
+        result, _ = self._courier_row(status='confirmed', website_order=True, assembly=json.dumps([
+            {'pharmacy_id': 2, 'state': 'waiting', 'started_at': None, 'assembled_at': None},
+            {'pharmacy_id': 1, 'state': 'assembled', 'started_at': '2026-10-16T08:00:00+00:00',
+             'assembled_at': '2026-10-16T08:20:00+00:00'}]))
+        self.assertEqual([(entry['pharmacy_id'], entry['state']) for entry in result['assembly']],
+                         [(1, 'assembled'), (2, 'waiting')])
+        self.assertIs(result['assembly_complete'], False)
+        both, _ = self._courier_row(status='confirmed', website_order=True, assembly=[
+            {'pharmacy_id': 1, 'state': 'assembled', 'started_at': None, 'assembled_at': None},
+            {'pharmacy_id': 2, 'state': 'assembling', 'started_at': None, 'assembled_at': None}])
+        self.assertIs(both['assembly_complete'], False)
+
+    def test_assembly_complete_does_not_depend_on_confirmed(self):
+        # Rework 1: assembly happens while the order is pending; «Согласовано» waits for it.
+        done = [{'pharmacy_id': 1, 'state': 'assembled', 'started_at': None, 'assembled_at': None}]
+        waiting = [{'pharmacy_id': 1, 'state': 'assembling', 'started_at': None, 'assembled_at': None}]
+        for status in ('pending', 'confirmed', 'delivering', 'delivered'):
+            with self.subTest(status=status):
+                result, _ = self._courier_row(status=status, website_order=True, assembly=done)
+                self.assertIs(result['assembly_complete'], True)
+                self.assertEqual(len(result['assembly']), 1)  # marks stay visible read-only
+                result, _ = self._courier_row(status=status, website_order=True, assembly=waiting)
+                self.assertIs(result['assembly_complete'], False)
+        cancelled, _ = self._courier_row(status='cancelled', website_order=True, assembly=done)
+        self.assertIs(cancelled['assembly_complete'], False)
+
+    def test_assembly_sql_excludes_pharmacies_with_only_unavailable_items(self):
+        sql = _COURIER_ORDER_SELECT
+        self.assertIn("COALESCE(assembly.list, '[]'::json) AS assembly", sql)
+        self.assertIn("AND cur.answer IS DISTINCT FROM 'unavailable'", sql)
+        self.assertIn('SELECT DISTINCT COALESCE(oi.fulfillment_pharmacy_id,', sql)
+        self.assertIn("'state', COALESCE(asm.state, 'waiting')", sql)
+        self.assertIn('LEFT JOIN order_pharmacy_assembly asm ON asm.order_id = o.id AND asm.pharmacy_id = ph.pharmacy_id', sql)
+        self.assertIn('ORDER BY ph.pharmacy_id', sql)
+        self.assertIn('WHERE oi.order_id = o.id AND o.created_by_staff_account_id IS NULL', sql)
+        # Pharmacy 2 answered every item «Нет в наличии»: SQL returns only pharmacy 1.
+        result, _ = self._courier_row(status='confirmed', website_order=True, assembly=[
+            {'pharmacy_id': 1, 'state': 'assembling', 'started_at': None, 'assembled_at': None}])
+        self.assertEqual([entry['pharmacy_id'] for entry in result['assembly']], [1])
+
+    def test_assembly_empty_for_courier_created_and_old_rows(self):
+        own, _ = self._courier_row(status='confirmed', website_order=False, own_order=True, assembly=[])
+        self.assertEqual(own['assembly'], [])
+        self.assertIs(own['assembly_complete'], True)  # nothing to wait for: no warning
+        # Even if SQL returned marks, a non-website order never shows them.
+        forced, _ = self._courier_row(status='confirmed', website_order=False, assembly=[
+            {'pharmacy_id': 1, 'state': 'waiting', 'started_at': None, 'assembled_at': None}])
+        self.assertEqual(forced['assembly'], [])
+        old, _ = self._courier_row()
+        self.assertEqual(old['assembly'], [])
+        self.assertIs(old['assembly_complete'], True)  # nothing to assemble
 
     def test_item_price_requires_a_price(self):
         with self.assertRaises(ContractError):
