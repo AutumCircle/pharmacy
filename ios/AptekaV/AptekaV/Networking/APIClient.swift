@@ -8,6 +8,15 @@ enum AppConfig {
     #if DEBUG
     /// Debug builds can point at a Vercel preview deployment (set in the «Дизайн» panel).
     static let siteOverrideKey = "debug.siteBaseURL"
+    /// Vercel «Protection Bypass for Automation» secret for protected preview deployments.
+    /// Typed into the debug panel on the device; never committed or used in Release.
+    static let vercelBypassKey = "debug.vercelBypass"
+
+    static var vercelBypassToken: String? {
+        guard UserDefaults.standard.string(forKey: siteOverrideKey) != nil,
+              let token = UserDefaults.standard.string(forKey: vercelBypassKey), !token.isEmpty else { return nil }
+        return token
+    }
     #endif
 
     static var siteBaseURL: URL {
@@ -197,6 +206,11 @@ final class APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        #if DEBUG
+        if let bypass = AppConfig.vercelBypassToken {
+            request.setValue(bypass, forHTTPHeaderField: "x-vercel-protection-bypass")
+        }
+        #endif
 
         let maxAttempts = 3
         var attempt = 0

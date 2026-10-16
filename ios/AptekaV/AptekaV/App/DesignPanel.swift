@@ -116,6 +116,7 @@ struct DesignPanelView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmReset = false
     @State private var siteOverride = UserDefaults.standard.string(forKey: AppConfig.siteOverrideKey) ?? ""
+    @State private var vercelBypass = UserDefaults.standard.string(forKey: AppConfig.vercelBypassKey) ?? ""
 
     var body: some View {
         NavigationStack {
@@ -184,6 +185,9 @@ struct DesignPanelView: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    SecureField("Vercel bypass-ключ (для защищённого preview)", text: $vercelBypass)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                     Button("Применить") {
                         let text = siteOverride.trimmingCharacters(in: .whitespaces)
                         if text.isEmpty {
@@ -192,6 +196,12 @@ struct DesignPanelView: View {
                             UserDefaults.standard.set(text, forKey: AppConfig.siteOverrideKey)
                         }
                         siteOverride = UserDefaults.standard.string(forKey: AppConfig.siteOverrideKey) ?? ""
+                        let token = vercelBypass.trimmingCharacters(in: .whitespaces)
+                        if token.isEmpty {
+                            UserDefaults.standard.removeObject(forKey: AppConfig.vercelBypassKey)
+                        } else {
+                            UserDefaults.standard.set(token, forKey: AppConfig.vercelBypassKey)
+                        }
                     }
                 } header: {
                     Text("Сайт для данных")
