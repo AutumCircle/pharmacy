@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-15T12:56:01Z",
+  "updated": "2026-10-16T04:01:11Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -140,6 +140,62 @@
       "reworks": 0,
       "note": "",
       "updated": "2026-10-15T12:56:01Z"
+    },
+    {
+      "id": "006-tracking-scrape-block",
+      "title": "Отслеживание: 5 запросов/мин, блок 5 ч за перебор номеров",
+      "branch": "factory/006-tracking-scrape-block",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 1,
+      "note": "Владелец: блок в памяти сайта",
+      "updated": "2026-10-16T04:00:27Z"
+    },
+    {
+      "id": "007-orders-overview-drilldown",
+      "title": "Обзор заказов: кликабельные карточки, повторные лекарства, зарплата курьера",
+      "branch": "factory/007-orders-overview-drilldown",
+      "stage": "needs-human",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "Нужен деплой admin Lambda вместе с Vercel; сверить 6 карточек после деплоя",
+      "updated": "2026-10-16T04:01:11Z"
     }
   ]
 }
