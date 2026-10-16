@@ -1859,20 +1859,61 @@ _ORDER_CREATED_TZ = """CASE WHEN pg_typeof(o.created_at) = 'timestamp without ti
                           ELSE o.created_at::timestamptz END"""
 
 
-def orders_insights(query: dict[str, Any]) -> dict[str, Any]:
-    """Everything the admin orders overview needs in one call, in Dushanbe calendar days."""
-    if set(query) - {"days"}:
+# Shared by orders_insights and orders_insights_drilldown so every overview card and
+# its drill-down list use one definition. Change them here, never in a copy.
+_INSIGHTS_PERIODS = {1, 7, 30, 90}
+
+# Per delivered order: sales = item line totals (or order_total without items),
+# base = pharmacy price x quantity with a missing pharmacy price counted as 0.
+_ITEM_TOTALS_JOIN = """LEFT JOIN LATERAL (
+                SELECT SUM(oi.line_total) AS sales, SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity) AS base
+                FROM order_items oi WHERE oi.order_id = e.id
+            ) items ON true"""
+_ITEM_SALES = "COALESCE(items.sales, e.order_total, 0)"
+_ITEM_BASE = "COALESCE(items.base, 0)"
+
+# «Заказали» / «Отменено»: orders created in the period (Dushanbe days), by status.
+_ORDERED_STATUS = "o.status <> 'cancelled'"
+_CANCELLED_STATUS = "o.status = 'cancelled'"
+_CREATED_IN_PERIOD = f"o.deleted_at IS NULL AND {_ORDER_CREATED_TZ} >= %s"
+
+# «Клиенты»: phones with a non-cancelled order created in the period, with the
+# time of each phone's first ever order. One %s parameter: the period start.
+_CLIENTS_PERIOD_CTE = f"""WITH period AS (
+                            SELECT DISTINCT o.phone_normalized FROM orders o
+                            WHERE o.deleted_at IS NULL AND o.status <> 'cancelled' AND o.phone_normalized IS NOT NULL
+                              AND {_ORDER_CREATED_TZ} >= %s
+                        ), first_seen AS (
+                            SELECT o.phone_normalized, MIN({_ORDER_CREATED_TZ}) AS first_at
+                            FROM orders o JOIN period p ON p.phone_normalized = o.phone_normalized
+                            WHERE o.deleted_at IS NULL GROUP BY o.phone_normalized
+                        )"""
+_CLIENTS_SUMMARY_SELECT = """
+                        SELECT COUNT(*) FILTER (WHERE first_at >= %s) AS new_clients,
+                               COUNT(*) FILTER (WHERE first_at < %s) AS returning_clients
+                        FROM first_seen"""
+
+
+def _insights_period(query: dict[str, Any], allowed: set[str]) -> tuple[int, date, date, datetime]:
+    """Validate keys and `days`; return (days, first_day, today, since) in Dushanbe days."""
+    if set(query) - allowed:
         raise ContractError("VALIDATION_ERROR", "Неизвестный параметр")
     try:
         days = int(query.get("days") or 7)
     except (TypeError, ValueError) as exc:
         raise ContractError("VALIDATION_ERROR", "days must be 1, 7, 30 or 90") from exc
-    if days not in {1, 7, 30, 90}:
+    if days not in _INSIGHTS_PERIODS:
         raise ContractError("VALIDATION_ERROR", "days must be 1, 7, 30 or 90")
     zone = ZoneInfo("Asia/Dushanbe")
     today = datetime.now(zone).date()
     first_day = today - timedelta(days=days - 1)
     since = datetime.combine(first_day, time.min, tzinfo=zone)
+    return days, first_day, today, since
+
+
+def orders_insights(query: dict[str, Any]) -> dict[str, Any]:
+    """Everything the admin orders overview needs in one call, in Dushanbe calendar days."""
+    days, first_day, today, since = _insights_period(query, {"days"})
     with transaction() as cur:
         cur.execute("""SELECT COUNT(*) FILTER (WHERE status = 'pending') AS pending,
                               COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
@@ -1885,23 +1926,20 @@ def orders_insights(query: dict[str, Any]) -> dict[str, Any]:
                         FROM orders o WHERE o.deleted_at IS NULL AND o.status = 'pending'
                         ORDER BY o.created_at DESC, o.id DESC LIMIT 12""")
         new_orders = [dict(row) for row in cur.fetchall()]
-        cur.execute(f"""SELECT COUNT(*) FILTER (WHERE o.status <> 'cancelled') AS ordered_count,
-                               COALESCE(SUM(o.order_total) FILTER (WHERE o.status <> 'cancelled'), 0) AS ordered_sum,
-                               COUNT(*) FILTER (WHERE o.status <> 'cancelled' AND o.created_by_staff_account_id IS NULL)
+        cur.execute(f"""SELECT COUNT(*) FILTER (WHERE {_ORDERED_STATUS}) AS ordered_count,
+                               COALESCE(SUM(o.order_total) FILTER (WHERE {_ORDERED_STATUS}), 0) AS ordered_sum,
+                               COUNT(*) FILTER (WHERE {_ORDERED_STATUS} AND o.created_by_staff_account_id IS NULL)
                                    AS website_ordered_count,
-                               COUNT(*) FILTER (WHERE o.status = 'cancelled') AS cancelled_count
-                        FROM orders o WHERE o.deleted_at IS NULL AND {_ORDER_CREATED_TZ} >= %s""", (since,))
+                               COUNT(*) FILTER (WHERE {_CANCELLED_STATUS}) AS cancelled_count
+                        FROM orders o WHERE {_CREATED_IN_PERIOD}""", (since,))
         ordered = dict(cur.fetchone())
-        cur.execute(DELIVERED_DAY_CTE + """
+        cur.execute(DELIVERED_DAY_CTE + f"""
             , delivered AS (
                 SELECT e.id, e.created_by_staff_account_id, e.delivery_courier_amount, e.delivery_owner_amount,
                        (e.delivered_at AT TIME ZONE 'Asia/Dushanbe')::date AS day,
-                       COALESCE(items.sales, e.order_total, 0) AS sales, COALESCE(items.base, 0) AS base
+                       {_ITEM_SALES} AS sales, {_ITEM_BASE} AS base
                 FROM eligible e
-                LEFT JOIN LATERAL (
-                    SELECT SUM(oi.line_total) AS sales, SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity) AS base
-                    FROM order_items oi WHERE oi.order_id = e.id
-                ) items ON true
+                {_ITEM_TOTALS_JOIN}
                 WHERE e.delivered_at >= %s
             )
             SELECT day,
@@ -1932,28 +1970,14 @@ def orders_insights(query: dict[str, Any]) -> dict[str, Any]:
                           AND {_ORDER_CREATED_TZ} >= %s
                         GROUP BY 1""", (since,))
         hours = {int(row["hour"]): int(row["orders"]) for row in cur.fetchall()}
-        cur.execute(f"""WITH period AS (
-                            SELECT DISTINCT o.phone_normalized FROM orders o
-                            WHERE o.deleted_at IS NULL AND o.status <> 'cancelled' AND o.phone_normalized IS NOT NULL
-                              AND {_ORDER_CREATED_TZ} >= %s
-                        ), first_seen AS (
-                            SELECT o.phone_normalized, MIN({_ORDER_CREATED_TZ}) AS first_at
-                            FROM orders o JOIN period p ON p.phone_normalized = o.phone_normalized
-                            WHERE o.deleted_at IS NULL GROUP BY o.phone_normalized
-                        )
-                        SELECT COUNT(*) FILTER (WHERE first_at >= %s) AS new_clients,
-                               COUNT(*) FILTER (WHERE first_at < %s) AS returning_clients
-                        FROM first_seen""", (since, since, since))
+        cur.execute(_CLIENTS_PERIOD_CTE + _CLIENTS_SUMMARY_SELECT, (since, since, since))
         clients = {key: int(value or 0) for key, value in dict(cur.fetchone()).items()}
-        cur.execute(DELIVERED_DAY_CTE + """
+        cur.execute(DELIVERED_DAY_CTE + f"""
             SELECT e.id, e.public_id, e.order_reference, e.customer_name, e.delivered_at,
                    e.created_by_staff_account_id, e.delivery_courier_amount, e.delivery_owner_amount,
-                   COALESCE(items.sales, e.order_total, 0) AS sales, COALESCE(items.base, 0) AS base
+                   {_ITEM_SALES} AS sales, {_ITEM_BASE} AS base
             FROM eligible e
-            LEFT JOIN LATERAL (
-                SELECT SUM(oi.line_total) AS sales, SUM(COALESCE(oi.base_unit_price, 0) * oi.quantity) AS base
-                FROM order_items oi WHERE oi.order_id = e.id
-            ) items ON true
+            {_ITEM_TOTALS_JOIN}
             WHERE e.delivered_at >= %s
             ORDER BY e.delivered_at DESC, e.id DESC LIMIT 200
         """, (since,))
@@ -2000,6 +2024,197 @@ def orders_insights(query: dict[str, Any]) -> dict[str, Any]:
         "clients": clients,
         "delivered_orders": delivered_orders,
     }
+
+_DRILL_ORDER_METRICS = {"ordered", "cancelled", "delivered", "average_check", "profit"}
+_DRILL_DELIVERED_METRICS = {"delivered", "average_check", "profit"}
+_DRILL_METRICS = _DRILL_ORDER_METRICS | {"clients"}
+_DRILL_DEFAULT_LIMIT = 50
+
+# Each metric selects one fixed SQL fragment; request values never reach the SQL text.
+_DRILL_CREATED_ROWS = {
+    "ordered": f"""
+        WITH drill AS (
+            SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.status,
+                   {_ORDER_CREATED_TZ} AS created_at, NULL::timestamptz AS delivered_at,
+                   o.created_by_staff_account_id, o.order_total,
+                   o.delivery_courier_amount, o.delivery_owner_amount
+            FROM orders o WHERE {_ORDERED_STATUS} AND {_CREATED_IN_PERIOD}
+        )""",
+    "cancelled": f"""
+        WITH drill AS (
+            SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.status,
+                   {_ORDER_CREATED_TZ} AS created_at, NULL::timestamptz AS delivered_at,
+                   o.created_by_staff_account_id, o.order_total,
+                   o.delivery_courier_amount, o.delivery_owner_amount
+            FROM orders o WHERE {_CANCELLED_STATUS} AND {_CREATED_IN_PERIOD}
+        )""",
+}
+_DRILL_DELIVERED_ROWS = DELIVERED_DAY_CTE + """
+        , drill AS (
+            SELECT e.id, e.public_id, e.order_reference, e.customer_name, 'delivered'::text AS status,
+                   CASE WHEN pg_typeof(e.created_at) = 'timestamp without time zone'::regtype
+                        THEN e.created_at::timestamp AT TIME ZONE 'UTC'
+                        ELSE e.created_at::timestamptz END AS created_at,
+                   e.delivered_at, e.created_by_staff_account_id, e.order_total,
+                   e.delivery_courier_amount, e.delivery_owner_amount
+            FROM eligible e WHERE e.delivered_at >= %s
+        )"""
+# Same sales/base formulas as orders_insights, applied to whichever row set was chosen.
+_DRILL_PRICED = f"""
+        , priced AS (
+            SELECT e.*, {_ITEM_SALES} AS sales, {_ITEM_BASE} AS base,
+                   {_ITEM_SALES} - {_ITEM_BASE} AS profit
+            FROM drill e
+            {_ITEM_TOTALS_JOIN}
+        )"""
+# metric -> (column summed for `summary.sum`, ORDER BY, keyset predicate, cursor keys)
+_DRILL_ORDERING = {
+    "ordered": ("order_total", "created_at DESC, id DESC", "(created_at, id) < (%s, %s)", ("created_at", "id")),
+    "cancelled": ("order_total", "created_at DESC, id DESC", "(created_at, id) < (%s, %s)", ("created_at", "id")),
+    "delivered": ("sales", "delivered_at DESC, id DESC", "(delivered_at, id) < (%s, %s)", ("delivered_at", "id")),
+    "average_check": ("sales", "delivered_at DESC, id DESC", "(delivered_at, id) < (%s, %s)", ("delivered_at", "id")),
+    "profit": ("sales", "profit ASC, id ASC", "(profit, id) > (%s, %s)", ("profit", "id")),
+}
+_DRILL_SUMMARY_COLUMNS = {
+    "order_total": "COALESCE(SUM(order_total), 0)",
+    "sales": "COALESCE(SUM(sales), 0)",
+}
+# One row per client phone. The tiebreaker is the internal id of the client's first
+# order, so phone numbers never end up in a cursor (and so in URLs or access logs).
+_DRILL_CLIENT_ROWS = _CLIENTS_PERIOD_CTE + f"""
+                        , clients AS (
+                            SELECT f.first_at, first_order.id AS first_order_id, latest.customer_name, latest.phone,
+                                   (SELECT COUNT(*) FROM orders o
+                                    WHERE o.phone_normalized = f.phone_normalized AND {_ORDERED_STATUS}
+                                      AND {_CREATED_IN_PERIOD}) AS orders_in_period
+                            FROM first_seen f
+                            LEFT JOIN LATERAL (
+                                SELECT o.id FROM orders o
+                                WHERE o.phone_normalized = f.phone_normalized AND o.deleted_at IS NULL
+                                ORDER BY {_ORDER_CREATED_TZ}, o.id LIMIT 1
+                            ) first_order ON true
+                            LEFT JOIN LATERAL (
+                                SELECT o.customer_name, o.phone FROM orders o
+                                WHERE o.phone_normalized = f.phone_normalized AND o.deleted_at IS NULL
+                                ORDER BY {_ORDER_CREATED_TZ} DESC, o.id DESC LIMIT 1
+                            ) latest ON true
+                        )"""
+
+
+def _drill_cursor(raw: Any, metric: str, since: datetime) -> tuple[Any, int] | None:
+    """Decode and strictly validate a drill-down keyset cursor for this metric."""
+    cursor = _decode_cursor(raw)
+    if cursor is None:
+        return None
+    key = "first_order_at" if metric == "clients" else _DRILL_ORDERING[metric][3][0]
+    try:
+        if set(cursor) != {key, "id"} or type(cursor["id"]) is not int or cursor["id"] <= 0:
+            raise ValueError()
+        value = cursor[key]
+        if not isinstance(value, str) or len(value) > 64:
+            raise ValueError()
+        if key == "profit":
+            parsed: Any = Decimal(value)
+            if not parsed.is_finite():
+                raise ValueError()
+        else:
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                raise ValueError()
+            if key != "first_order_at" and parsed < since:
+                raise ValueError()
+    except (TypeError, ValueError, ArithmeticError) as exc:
+        raise ContractError("VALIDATION_ERROR", "cursor is invalid") from exc
+    return parsed, cursor["id"]
+
+
+def orders_insights_drilldown(query: dict[str, Any]) -> dict[str, Any]:
+    """The orders (or clients) behind one overview card, for the same period as orders_insights."""
+    days, first_day, today, since = _insights_period(query, {"days", "metric", "cursor", "limit"})
+    metric = query.get("metric")
+    if metric not in _DRILL_METRICS:
+        raise ContractError("VALIDATION_ERROR", "metric is invalid")
+    try:
+        limit = int(query.get("limit") or _DRILL_DEFAULT_LIMIT)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("VALIDATION_ERROR", "limit must be an integer") from exc
+    if not 1 <= limit <= MAX_LIMIT:
+        raise ContractError("VALIDATION_ERROR", f"limit must be between 1 and {MAX_LIMIT}")
+    cursor = _drill_cursor(query.get("cursor"), metric, since)
+    document: dict[str, Any] = {
+        "metric": metric, "period_days": days, "from": first_day.isoformat(), "to": today.isoformat(),
+        "currency": "TJS",
+    }
+
+    if metric == "clients":
+        page_clause = "WHERE (first_at, first_order_id) < (%s, %s)" if cursor else ""
+        with transaction() as cur:
+            cur.execute(_CLIENTS_PERIOD_CTE + _CLIENTS_SUMMARY_SELECT, (since, since, since))
+            summary = {key: int(value or 0) for key, value in dict(cur.fetchone()).items()}
+            cur.execute(_DRILL_CLIENT_ROWS + f"""
+                        SELECT first_at, first_order_id, customer_name, phone, orders_in_period
+                        FROM clients {page_clause}
+                        ORDER BY first_at DESC, first_order_id DESC LIMIT %s""",
+                        (since, since, *(cursor or ()), limit + 1))
+            rows = [dict(row) for row in cur.fetchall()]
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = None
+        if has_more and rows:
+            last = rows[-1]
+            next_cursor = _encode_cursor({"first_order_at": last["first_at"].isoformat(), "id": last["first_order_id"]})
+        data = [{
+            "customer_name": row["customer_name"], "phone": row["phone"],
+            "orders_in_period": int(row["orders_in_period"] or 0),
+            "first_order_at": order_time_iso(row["first_at"]), "is_new": row["first_at"] >= since,
+        } for row in rows]
+        return {**document, "summary": summary, "data": data,
+                "page": {"next_cursor": next_cursor, "has_more": has_more}}
+
+    sum_column, order_by, keyset, cursor_keys = _DRILL_ORDERING[metric]
+    delivered = metric in _DRILL_DELIVERED_METRICS
+    rows_sql = (_DRILL_DELIVERED_ROWS if delivered else _DRILL_CREATED_ROWS[metric]) + _DRILL_PRICED
+    page_clause = f"WHERE {keyset}" if cursor else ""
+    with transaction() as cur:
+        cur.execute(rows_sql + f"""
+            SELECT COUNT(*) AS count, {_DRILL_SUMMARY_COLUMNS[sum_column]} AS sum,
+                   COALESCE(SUM(profit), 0) AS profit
+            FROM priced""", (since,))
+        totals = dict(cur.fetchone())
+        cur.execute(rows_sql + f"""
+            SELECT * FROM priced {page_clause}
+            ORDER BY {order_by} LIMIT %s""", (since, *(cursor or ()), limit + 1))
+        rows = [dict(row) for row in cur.fetchall()]
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        position = last[cursor_keys[0]]
+        next_cursor = _encode_cursor({
+            cursor_keys[0]: str(position) if cursor_keys[0] == "profit" else position.isoformat(),
+            "id": last["id"],
+        })
+    data = []
+    for row in rows:
+        internal_id = row["id"]
+        item = {
+            "order_id": row["public_id"] or f"legacy_{internal_id}",
+            "order_reference": row["order_reference"], "customer_name": row["customer_name"],
+            "status": row["status"], "created_at": order_time_iso(row["created_at"]),
+            "created_by_staff_account_id": row["created_by_staff_account_id"],
+            "order_total": row["order_total"], "sales": row["sales"], "base": row["base"],
+            "profit": row["sales"] - row["base"],
+            "delivery_courier_amount": row["delivery_courier_amount"],
+            "delivery_owner_amount": row["delivery_owner_amount"],
+        }
+        if delivered:
+            item["delivered_at"] = order_time_iso(row["delivered_at"])
+        data.append(item)
+    summary = {"count": int(totals["count"] or 0), "sum": totals["sum"], "profit": totals["profit"]}
+    return {**document, "summary": summary, "data": data,
+            "page": {"next_cursor": next_cursor, "has_more": has_more}}
+
 
 
 def delivered_orders_by_day(query: dict[str, Any]) -> dict[str, Any]:
@@ -4110,6 +4325,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success_document(list_orders(query), request=current_request_id)
         if method == "GET" and tail == ["orders", "insights"]:
             return success(orders_insights(query), request=current_request_id)
+        if method == "GET" and tail == ["orders", "insights", "orders"]:
+            return success_document(orders_insights_drilldown(query), request=current_request_id)
         if method == "GET" and tail == ["orders", "delivered-day"]:
             return success_document(delivered_orders_by_day(query), request=current_request_id)
         if method == "GET" and len(tail) == 2 and tail[0] == "orders":

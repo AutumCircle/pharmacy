@@ -5,6 +5,8 @@ import type { ApiErrorResponse, ApiSuccessResponse, OrderStatus } from './types'
 import type {
   OrdersInsights,
   OrdersInsightsPeriod,
+  OrdersDrillMetric,
+  OrdersDrillResponse,
   AdminApiListResponse,
   AdminCatalogStats,
   AdminCategory,
@@ -188,6 +190,12 @@ export function updateAdminOrderCustomer(orderId: string, body: {
 
 export function getAdminOrdersInsights(days: OrdersInsightsPeriod): Promise<ApiSuccessResponse<OrdersInsights>> {
   return request(`/v1/admin/orders/insights${queryString({ days })}`);
+}
+
+export function getAdminOrdersInsightsDrilldown(
+  days: OrdersInsightsPeriod, metric: OrdersDrillMetric, cursor?: string,
+): Promise<OrdersDrillResponse> {
+  return request(`/v1/admin/orders/insights/orders${queryString({ days, metric, cursor, limit: 50 })}`);
 }
 
 export function listDeliveredAdminOrdersByDay(date: string, cursor?: string): Promise<DeliveredDayResponse> {

@@ -1,12 +1,15 @@
 import Link from 'next/link';
-import { getAdminOrdersInsights, listAdminOrders, listDeliveredAdminOrdersByDay } from '@/lib/api-v1/admin-server';
-import type { OrdersInsightsPeriod } from '@/lib/api-v1/admin-types';
+import {
+  getAdminOrdersInsights, getAdminOrdersInsightsDrilldown, listAdminOrders, listDeliveredAdminOrdersByDay,
+} from '@/lib/api-v1/admin-server';
+import type { OrdersDrillResponse, OrdersInsightsPeriod } from '@/lib/api-v1/admin-types';
 import { requireAdminSession } from '@/lib/admin-auth';
 import type { OrderStatus } from '@/lib/api-v1/types';
 import OrderList from './OrderList';
 import LiveNow from './LiveNow';
 import FinanceView from './FinanceView';
-import { ClientsCard, DailyChart, DayPanel, KpiGrid, PeakHours, TopMedicines } from './OverviewSections';
+import { ClientsCard, DailyChart, DayPanel, DrillPanel, KpiGrid, PeakHours, TopMedicines } from './OverviewSections';
+import { parseDrillMetric, type DrillMetric } from './insights-metrics';
 import './orders-ui.css';
 
 export const dynamic = 'force-dynamic';
@@ -43,7 +46,7 @@ function href(params: Record<string, string | number | undefined>) {
   return `/admin/orders?${query}`;
 }
 
-function Header({ view, days }: { view: View; days: OrdersInsightsPeriod }) {
+function Header({ view, days, drill }: { view: View; days: OrdersInsightsPeriod; drill?: DrillMetric | null }) {
   return <header className="ao-header">
     <div className="ao-title"><h1>Заказы</h1>
       <nav className="ao-tabs" aria-label="Разделы заказов">
@@ -53,14 +56,16 @@ function Header({ view, days }: { view: View; days: OrdersInsightsPeriod }) {
       </nav>
     </div>
     {view !== 'work' && <nav className="ao-periods" aria-label="Период">
-      {periods.map((period) => <Link key={period.value} href={href({ view, days: period.value })}
+      {periods.map((period) => <Link key={period.value}
+        href={drill ? `${href({ view, days: period.value, drill })}#drill` : href({ view, days: period.value })}
         className={days === period.value ? 'active' : ''} aria-current={days === period.value ? 'true' : undefined}>{period.label}</Link>)}
     </nav>}
   </header>;
 }
 
 export default async function AdminOrdersPage({ searchParams }: {
-  searchParams: Promise<{ view?: string; date?: string; q?: string; status?: string; created_from?: string; created_to?: string; cursor?: string; days?: string }>;
+  searchParams: Promise<{ view?: string; date?: string; q?: string; status?: string; created_from?: string; created_to?: string; cursor?: string; days?: string;
+    drill?: string; drill_cursor?: string }>;
 }) {
   await requireAdminSession();
   const params = await searchParams;
@@ -72,19 +77,32 @@ export default async function AdminOrdersPage({ searchParams }: {
     const requested = /^\d{4}-\d{2}-\d{2}$/.test(params.date || '') && !Number.isNaN(Date.parse(`${params.date}T12:00:00Z`))
       ? params.date! : today;
     const selected = requested > today ? today : requested;
-    const [insights, report] = await Promise.all([
+    // An unknown `drill` value is ignored: the overview renders without a panel.
+    const drill = parseDrillMetric(params.drill);
+    const drillCursor = drill && params.drill_cursor ? params.drill_cursor : undefined;
+    const [insights, report, drillResponse] = await Promise.all([
       getAdminOrdersInsights(days), listDeliveredAdminOrdersByDay(selected, params.cursor),
+      // A failed drill-down (e.g. the Lambda route is not deployed yet) must not break the overview.
+      drill ? getAdminOrdersInsightsDrilldown(days, drill, drillCursor)
+        .catch((): OrdersDrillResponse | null => null) : Promise.resolve(null),
     ]);
-    const dayHref = (date: string) => `${href({ view: 'overview', days, date })}#day`;
+    const date = selected === today ? undefined : selected;
+    const dayHref = (value: string) => `${href({ view: 'overview', days, date: value, drill: drill ?? undefined })}#day`;
+    const drillHref = (metric: DrillMetric, cursor?: string) =>
+      `${href({ view: 'overview', days, date, drill: metric, drill_cursor: cursor })}#drill`;
     return <div className="ao">
-      <Header view={view} days={days} />
+      <Header view={view} days={days} drill={drill} />
       <LiveNow live={insights.data.live} renderedAt={requestTime()} />
-      <KpiGrid insights={insights.data} />
+      <KpiGrid insights={insights.data} hrefFor={(metric) => drillHref(metric)} active={drill} />
+      {drill && <DrillPanel metric={drill} response={drillResponse}
+        closeHref={href({ view: 'overview', days, date })}
+        nextHref={drillResponse?.page.has_more && drillResponse.page.next_cursor
+          ? drillHref(drill, drillResponse.page.next_cursor) : null} />}
       <DailyChart insights={insights.data} selected={selected} hrefFor={dayHref} />
       <DayPanel report={report} isToday={selected === today} prevHref={dayHref(shiftDay(selected, -1))}
         nextHref={selected < today ? dayHref(shiftDay(selected, 1)) : null} />
       {report.page.has_more && report.page.next_cursor && <Link className="ao-more"
-        href={`${href({ view: 'overview', days, date: selected, cursor: report.page.next_cursor })}#day`}>Следующие доставки этого дня →</Link>}
+        href={`${href({ view: 'overview', days, date: selected, cursor: report.page.next_cursor, drill: drill ?? undefined })}#day`}>Следующие доставки этого дня →</Link>}
       <div className="ao-three">
         <TopMedicines insights={insights.data} />
         <PeakHours insights={insights.data} />
