@@ -36,8 +36,8 @@ struct CreateOrderRequest: Encodable, Equatable {
 }
 
 /// Server-calculated order returned with `201` (and by order tracking).
-struct PublicOrder: Decodable, Identifiable, Equatable {
-    struct Item: Decodable, Equatable, Identifiable {
+struct PublicOrder: Codable, Identifiable, Hashable {
+    struct Item: Codable, Hashable, Identifiable {
         let medicineId: Int
         let medicineName: String
         let quantity: Double
@@ -74,6 +74,8 @@ struct PublicOrder: Decodable, Identifiable, Equatable {
         case createdAt = "created_at"
     }
 
+    var createdDate: Date? { OrderDates.parse(createdAt) }
+
     /// Customer status labels from UI_DESIGN_SPEC §7.4.
     var statusTitle: String {
         switch status {
@@ -84,6 +86,70 @@ struct PublicOrder: Decodable, Identifiable, Equatable {
         case "cancelled": return "Отменён"
         default: return status
         }
+    }
+}
+
+// The backend serialises non-integer decimals as strings ("1.5", "25.50") and integers as
+// numbers (backend/v1/shared/responses.py), so amounts accept both.
+extension PublicOrder.Item {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        medicineId = try container.decode(Int.self, forKey: .medicineId)
+        medicineName = try container.decode(String.self, forKey: .medicineName)
+        quantity = NSDecimalNumber(decimal: try container.decodeFlexibleDecimal(forKey: .quantity)).doubleValue
+        sellingUnitPrice = try container.decodeFlexibleDecimal(forKey: .sellingUnitPrice)
+        lineTotal = try container.decodeFlexibleDecimal(forKey: .lineTotal)
+    }
+}
+
+extension PublicOrder {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        orderId = try container.decode(String.self, forKey: .orderId)
+        orderReference = try container.decode(String.self, forKey: .orderReference)
+        status = try container.decode(String.self, forKey: .status)
+        items = try container.decodeIfPresent([Item].self, forKey: .items) ?? []
+        itemsSubtotal = try container.decodeFlexibleDecimal(forKey: .itemsSubtotal)
+        orderTotal = try container.decodeFlexibleDecimal(forKey: .orderTotal)
+        createdAt = try container.decode(String.self, forKey: .createdAt)
+    }
+}
+
+extension KeyedDecodingContainer {
+    /// Decimal sent either as a JSON number or as a string.
+    func decodeFlexibleDecimal(forKey key: Key) throws -> Decimal {
+        if let value = try? decode(Decimal.self, forKey: key) { return value }
+        let text = try decode(String.self, forKey: key)
+        guard let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else {
+            throw DecodingError.dataCorruptedError(forKey: key, in: self, debugDescription: "Not a number: \(text)")
+        }
+        return value
+    }
+}
+
+/// ISO 8601 timestamps from the API, with or without fractional seconds.
+enum OrderDates {
+    private static let withFraction: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let plain = ISO8601DateFormatter()
+
+    private static let display: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "d MMMM yyyy, HH:mm"
+        return formatter
+    }()
+
+    static func parse(_ text: String) -> Date? {
+        withFraction.date(from: text) ?? plain.date(from: text)
+    }
+
+    /// «16 октября 2026, 15:21» in the device time zone.
+    static func display(_ text: String) -> String {
+        parse(text).map(display.string(from:)) ?? text
     }
 }
 
@@ -162,7 +228,7 @@ struct SimulatedOrderService: OrderService {
         let total = items.reduce(Decimal(0)) { $0 + $1.lineTotal }
         guard total >= CartStore.minimumOrderTotal else { throw OrderError.minimumNotReached }
         let reference = "TEST-" + String(idempotencyKey.uuidString.prefix(4))
-        return PublicOrder(
+        let order = PublicOrder(
             orderId: "test_" + idempotencyKey.uuidString,
             orderReference: reference,
             status: "pending",
@@ -171,6 +237,39 @@ struct SimulatedOrderService: OrderService {
             orderTotal: total,
             createdAt: ISO8601DateFormatter().string(from: Date())
         )
+        SimulatedOrderStore.add(order)
+        return order
+    }
+}
+#endif
+
+/// Loads the signed-in customer's orders («Мои заказы»).
+protocol OrderTrackingService {
+    func orders(forPhone phone: String) async throws -> [PublicOrder]
+}
+
+struct LiveOrderTrackingService: OrderTrackingService {
+    func orders(forPhone phone: String) async throws -> [PublicOrder] {
+        try await APIClient.shared.trackOrders(phone: phone)
+    }
+}
+
+#if DEBUG
+/// Test orders placed in test mode, kept on the device only.
+enum SimulatedOrderStore {
+    private static let store = JSONFileStore<[PublicOrder]>(fileName: "debug_test_orders_v1.json")
+
+    static func all() -> [PublicOrder] { store.load() ?? [] }
+
+    static func add(_ order: PublicOrder) {
+        store.save(Array(([order] + all()).prefix(20)))
+    }
+}
+
+struct SimulatedOrderTrackingService: OrderTrackingService {
+    func orders(forPhone phone: String) async throws -> [PublicOrder] {
+        try await Task.sleep(nanoseconds: 500_000_000)
+        return SimulatedOrderStore.all()
     }
 }
 #endif
@@ -186,6 +285,14 @@ enum OrderServiceFactory {
         return UserDefaults.standard.bool(forKey: realOrdersKey)
         #else
         return true
+        #endif
+    }
+
+    static func makeTracking() -> OrderTrackingService {
+        #if DEBUG
+        return sendsRealOrders ? LiveOrderTrackingService() : SimulatedOrderTrackingService()
+        #else
+        return LiveOrderTrackingService()
         #endif
     }
 

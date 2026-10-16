@@ -274,6 +274,7 @@ struct CheckoutView: View {
 struct OrderSuccessView: View {
     @Environment(\.popToRoot) private var popToRoot
     @Environment(\.selectTab) private var selectTab
+    @Environment(\.openRoute) private var openRoute
     let order: PublicOrder
     let customerName: String
     let phone: String?
@@ -348,7 +349,8 @@ struct OrderSuccessView: View {
                 VStack(spacing: 10) {
                     Button {
                         popToRoot()
-                        selectTab(.profile)
+                        // Open «Мои заказы» once the stack has popped back to the cart.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openRoute(.orders) }
                     } label: {
                         Text("Отследить заказ")
                             .font(.system(size: 17, weight: .semibold))

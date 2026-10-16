@@ -56,6 +56,21 @@ final class AptekaVTests: XCTestCase {
         XCTAssertEqual(order.items.first?.lineTotal, 50)
     }
 
+    /// The backend sends non-integer decimals as strings (fractional quantities set by staff).
+    func testDecodesTrackedOrderWithStringDecimals() throws {
+        let data = Data("""
+        {"data":[{"order_id":"ord_2","order_reference":"3456-106","status":"delivering",
+        "items":[{"medicine_id":7,"medicine_name":"Но-шпа","quantity":"1.5","selling_unit_price":"32.50","line_total":"48.75"}],
+        "items_subtotal":49,"order_total":49,"created_at":"2026-10-16T09:15:09.484902+00:00"}],"request_id":"r"}
+        """.utf8)
+        let orders = try JSONDecoder().decode(DataEnvelope<[PublicOrder]>.self, from: data).data
+        let item = try XCTUnwrap(orders.first?.items.first)
+        XCTAssertEqual(item.quantity, 1.5)
+        XCTAssertEqual(item.lineTotal, Decimal(string: "48.75"))
+        XCTAssertEqual(orders.first?.statusTitle, "В пути")
+        XCTAssertNotNil(orders.first?.createdDate)
+    }
+
     // MARK: Phone
 
     func testTajikPhoneFormatting() {

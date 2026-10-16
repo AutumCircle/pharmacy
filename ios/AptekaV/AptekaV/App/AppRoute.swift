@@ -5,6 +5,8 @@ enum AppRoute: Hashable {
     case medicine(Medicine)
     case category(MedicineCategory)
     case checkout
+    case orders
+    case order(PublicOrder)
 }
 
 extension View {
@@ -20,6 +22,12 @@ extension View {
                     .toolbarRole(.editor)
             case .checkout:
                 CheckoutView()
+                    .toolbarRole(.editor)
+            case .orders:
+                OrdersView()
+                    .toolbarRole(.editor)
+            case .order(let order):
+                OrderDetailView(order: order)
                     .toolbarRole(.editor)
             }
         }

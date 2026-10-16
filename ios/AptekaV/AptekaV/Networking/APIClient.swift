@@ -205,6 +205,24 @@ final class APIClient {
         return response.data.carousels
     }
 
+    /// `POST /api/tracking` — orders for an exact phone number, newest first (max 20).
+    /// Safe to retry: it only reads.
+    func trackOrders(phone: String) async throws -> [PublicOrder] {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/tracking"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        #if DEBUG
+        if let bypass = AppConfig.vercelBypassToken {
+            request.setValue(bypass, forHTTPHeaderField: "x-vercel-protection-bypass")
+        }
+        #endif
+        let local = phone.hasPrefix(TajikPhone.countryCode) ? String(phone.dropFirst(TajikPhone.countryCode.count)) : phone
+        request.httpBody = try JSONEncoder().encode(["phone": local])
+        let response: DataEnvelope<[PublicOrder]> = try await perform(request)
+        return response.data
+    }
+
     /// `GET /api/site-settings` — public pharmacy contacts (delivery phone).
     func siteSettings() async throws -> SiteSettings {
         try await get("api/site-settings", queryItems: [])

@@ -4,7 +4,7 @@ import SwiftUI
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthStore
     @Environment(\.selectTab) private var selectTab
-    @State private var showTrackingNotice = false
+    @Environment(\.openRoute) private var openRoute
     @State private var confirmSignOut = false
     // Launch argument `-showLogin YES` opens the sign-in sheet (debug screenshots).
     @State private var showLogin = UserDefaults.standard.bool(forKey: "showLogin")
@@ -19,8 +19,8 @@ struct ProfileView: View {
                 }
 
                 VStack(spacing: 0) {
-                    row(icon: "shippingbox.fill", title: "Мои заказы", subtitle: "Поиск по номеру телефона") {
-                        showTrackingNotice = true
+                    row(icon: "shippingbox.fill", title: "Мои заказы", subtitle: "Статус и состав заказов") {
+                        openRoute(.orders)
                     }
                     Divider().padding(.leading, 58)
                     row(icon: "heart.fill", title: "Избранное", subtitle: nil) {
@@ -47,15 +47,16 @@ struct ProfileView: View {
         .navigationTitle("Профиль")
         .designPanelButton()
         .loginSheet(isPresented: $showLogin)
+        .task {
+            #if DEBUG
+            // Launch argument `-openOrders YES` opens «Мои заказы» (simulator screenshots).
+            if UserDefaults.standard.bool(forKey: "openOrders") { openRoute(.orders) }
+            #endif
+        }
         .confirmationDialog("Выйти из аккаунта?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Выйти", role: .destructive) { auth.signOut() }
         } message: {
             Text("Корзина и избранное останутся на этом устройстве.")
-        }
-        .alert("Мои заказы", isPresented: $showTrackingNotice) {
-            Button("Понятно", role: .cancel) {}
-        } message: {
-            Text("Отслеживание заказа по телефону будет следующим этапом разработки.")
         }
     }
 

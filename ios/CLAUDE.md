@@ -90,6 +90,12 @@
   Реальная отправка — переключатель «Отправлять реальные заказы» в панели «Дизайн».
   Release всегда отправляет по-настоящему.
 
+## Мои заказы
+
+- `Views/Orders/OrdersView.swift`: `POST /api/tracking` по подтверждённому номеру (9 цифр), до 20
+  заказов, детали с шагами статуса. Дробные суммы backend присылает строками — модель принимает и то, и другое.
+- В тестовом режиме Debug показываются только тестовые заказы с устройства (не запрашиваем чужие номера).
+
 ## Вход по SMS
 
 - Вход: `+992` и 9 цифр → SMS-код из 5 цифр (`Views/Auth/LoginView.swift`, `App/AuthStore.swift`).
@@ -109,7 +115,7 @@
 - Launch arguments для скриншотов: `-homeStyle N -tabBarStyle N -searchBarStyle N -cardStyle N
   -productStyle N -initialTab N -searchQuery TEXT -openDesignPanel YES -openMedicineId N
   -auth.phone +992XXXXXXXXX -showLogin YES -loginPhone 9ЦИФР
-  -seedCart "id,id" -openCheckout YES -autoSubmitCheckout YES` (последний — только в тестовом режиме).
+  -seedCart "id,id" -openCheckout YES -autoSubmitCheckout YES -openOrders YES -openFirstOrder YES` (autoSubmit — только в тестовом режиме).
 
 ## Рабочий процесс
 
