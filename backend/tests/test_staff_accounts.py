@@ -363,6 +363,20 @@ class StaffTests(unittest.TestCase):
         self.assertIn('waiting_since', row)
         self.assertIn('awaiting_response', row)
 
+    def test_pharmacy_client_fields_returned_when_owner_turns_them_on(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        policies = {'pharmacy_web': {field: True for field in FIELDS}}
+        row = self._pharmacy_rows(policies=policies)[0]['data'][0]
+        self.assertEqual(row['customer_name'], 'PRIVATE')
+        self.assertEqual(row['phone'], '+992917123456')
+        self.assertEqual(row['address'], 'PRIVATE ADDRESS')
+        self.assertEqual(row['landmark'], 'PRIVATE LANDMARK')
+        self.assertEqual(row['order_total'], Decimal('120.00'))
+        self.assertEqual(row['profit'], Decimal('20.00'))
+        self.assertIn('created_by_staff_account_id', row)
+        self.assertEqual(row['source'], 'Сайт')
+        self.assertEqual(row['medicines'][0]['line_total'], 120)
+
     def test_pharmacy_two_queue_is_scoped_by_session_account(self):
         _, cursor = self._pharmacy_rows(pharmacy_id=2)
         sql, args = cursor.execute.call_args_list[-2].args

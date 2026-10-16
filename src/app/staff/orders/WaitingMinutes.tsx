@@ -21,7 +21,7 @@ export default function WaitingMinutes({ since, initialNow }: { since: string; i
   } catch {
     return null;
   }
-  return <span className={`pharmacy-waiting ${waitingLevel(minutes)}`} role="status">
+  return <span className={`pharmacy-waiting ${waitingLevel(minutes)}`}>
     Ожидает обработки {minutes} мин
   </span>;
 }

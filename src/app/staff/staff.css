@@ -90,12 +90,17 @@
 .pharmacy-order-number { color: #b71920; }
 .pharmacy-order-head time { color: #4f5a52; font-size: 14px; }
 .pharmacy-order-status { flex: none; padding: 6px 11px; border-radius: 999px; font-size: 13px; font-weight: 800; }
-.pharmacy-order-status.pending { color: #fff; background: #b71920; }
+.pharmacy-order-status.pending { color: #a3161c; background: #fdeced; }
 .pharmacy-order-status.confirmed { color: #134d86; background: #e3effb; }
 .pharmacy-waiting { justify-self: start; padding: 6px 11px; border-radius: 8px; font-size: 14px; font-weight: 750; color: #3d4740; background: #eff2f0; }
 .pharmacy-waiting.warning { color: #7a4a00; background: #fff1d1; }
 .pharmacy-waiting.urgent { color: #fff; background: #c4161c; }
 .pharmacy-order-meta { margin: 0; color: #4f5a52; }
+.pharmacy-order-client { margin: 0; display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: #f6f8f6; }
+.pharmacy-order-client>div { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 8px; }
+.pharmacy-order-client dt { color: #4f5a52; font-size: 14px; }
+.pharmacy-order-client dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.pharmacy-order-client a { color: #134d86; }
 .pharmacy-order-note { margin: 0; padding: 9px 12px; border-left: 3px solid #e3a008; border-radius: 6px; background: #fffaf0; overflow-wrap: anywhere; }
 .pharmacy-items-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid #e0e5e1; border-radius: 10px; }
 .pharmacy-items { width: 100%; min-width: 320px; border-collapse: collapse; font-size: 15px; }

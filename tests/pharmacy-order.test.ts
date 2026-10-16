@@ -30,24 +30,61 @@ test('waitingLevel thresholds', () => {
   assert.equal(waitingLevel(240), 'urgent');
 });
 
-test('pharmacyOrderView never carries client identity or client finance', () => {
-  const leaky = {
+test('pharmacyOrderView default policy response has no client data', () => {
+  // Lambda defaults: client identity, client totals, profit and creator are OFF, so the keys are absent.
+  const view = pharmacyOrderView({
     order_id: 'ord_x', order_reference: '3456-012', status: 'pending', created_at: '2026-10-16T09:00:00+00:00',
     waiting_since: '2026-10-16T09:00:00+00:00', awaiting_response: true,
-    customer_name: 'SECRET-NAME', phone: 'SECRET-PHONE', address: 'SECRET-ADDRESS', landmark: 'SECRET-LANDMARK',
-    order_total: '999.00', profit: '111.00', created_by_staff_account_id: 777,
-    medicines: [{ medicine_name: 'NOW D3', quantity: 2, line_total: '888.00', base_unit_price: '50.00', base_line_total: '100.00' }],
+    medicines: [{ medicine_name: 'NOW D3', quantity: 2, base_unit_price: '50.00', base_line_total: '100.00' }],
     base_total: '100.00',
-  };
-  const view = pharmacyOrderView(leaky);
-  const serialized = JSON.stringify(view);
-  for (const secret of ['SECRET', '999', '111', '888', '777']) assert.ok(!serialized.includes(secret), secret);
+  });
   assert.equal(view.reference, '3456-012');
   assert.equal(view.status, 'pending');
   assert.equal(view.waitingSince, '2026-10-16T09:00:00+00:00');
   assert.equal(view.showPrices, true);
-  assert.deepEqual(view.medicines, [{ name: 'NOW D3', quantity: 2, unitPrice: '50.00', lineTotal: '100.00' }]);
+  assert.equal(view.showClientPrices, false);
+  assert.deepEqual(view.medicines, [{ name: 'NOW D3', quantity: 2, unitPrice: '50.00', lineTotal: '100.00', clientLineTotal: null }]);
   assert.equal(view.total, '100.00');
+  for (const key of ['customerName', 'phone', 'address', 'landmark', 'clientTotal', 'profit', 'creator'] as const) {
+    assert.equal(view[key], null, key);
+  }
+});
+
+test('pharmacyOrderView shows client fields the owner turned ON in pharmacy_web', () => {
+  const view = pharmacyOrderView({
+    order_id: 'ord_x', order_reference: '3456-012', status: 'confirmed',
+    customer_name: 'Алишер', phone: '+992 917 12 34 56', address: 'Айни 29', landmark: 'у рынка',
+    order_total: '120.00', profit: '20.00', created_by_staff_account_id: null, source: 'Сайт',
+    medicines: [{ medicine_name: 'NOW D3', quantity: 2, line_total: 120, base_unit_price: '50.00', base_line_total: '100.00' }],
+    base_total: '100.00',
+  });
+  assert.equal(view.customerName, 'Алишер');
+  assert.equal(view.phone, '+992 917 12 34 56');
+  assert.equal(view.address, 'Айни 29');
+  assert.equal(view.landmark, 'у рынка');
+  assert.equal(view.clientTotal, '120.00');
+  assert.equal(view.profit, '20.00');
+  assert.equal(view.creator, 'Сайт');
+  assert.equal(view.source, 'Сайт');
+  assert.equal(view.showClientPrices, true);
+  assert.equal(view.medicines?.[0].clientLineTotal, 120);
+  assert.equal(pharmacyOrderView({ order_id: 'z', created_by_staff_account_id: 7 }).creator, 'Сотрудник 7');
+});
+
+test('pharmacyOrderView follows each field independently (partial policy)', () => {
+  const view = pharmacyOrderView({ order_id: 'z', phone: '+992917123456', landmark: null, customer_name: '  ' });
+  assert.equal(view.phone, '+992917123456');
+  assert.equal(view.landmark, null);
+  assert.equal(view.customerName, null);
+  assert.equal(view.address, null);
+  assert.equal(view.creator, null);
+});
+
+test('pharmacyOrderView keeps an empty medicines list distinct from a hidden one', () => {
+  const empty = pharmacyOrderView({ order_id: 'z', medicines: [] });
+  assert.deepEqual(empty.medicines, []);
+  assert.equal(empty.showPrices, false);
+  assert.equal(empty.showClientPrices, false);
 });
 
 test('pharmacyOrderView hides prices and badge for old Lambda responses or disabled policy', () => {
