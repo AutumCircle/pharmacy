@@ -22,6 +22,31 @@ final class AptekaVUITests: XCTestCase {
         // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
+    /// «Профиль» → «Войти» → phone → «Получить код» → test code 12345 → signed in.
+    func testSignInWithTestCode() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-auth.phone", ""]
+        app.launch()
+
+        app.buttons["Профиль"].tap()
+        let signIn = app.buttons["profile.signIn"]
+        XCTAssertTrue(signIn.waitForExistence(timeout: 5))
+        signIn.tap()
+
+        let phone = app.textFields["login.phone"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 5))
+        phone.tap()
+        phone.typeText("931234567")
+        app.buttons["login.sendCode"].tap()
+
+        let code = app.textFields["login.code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        code.tap()
+        code.typeText("12345")
+
+        XCTAssertTrue(app.staticTexts["+992 93 123 45 67"].waitForExistence(timeout: 8))
+    }
+
     func testExample() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()
