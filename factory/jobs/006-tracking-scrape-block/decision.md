@@ -1,0 +1,6 @@
+APPROVE
+All four round-1 reviews (code, security, UI, UX) report VERDICT: PASS and list no blocking findings. Acceptance criteria 1-7 are marked met in build.md: 1-4 by guard unit tests, 5-6 by code review as the spec allows, and 7 by lint, build and test:frontend, with 67 tests passing.
+The owner chose storage Option A, in-memory per instance, in rework-1.md. API_CONTRACT §7 now states plainly that the 5-hour block is per instance, is lost on cold start or redeploy, and can be bypassed by IP rotation. There is no Option B work: no migration, no Lambda change and no new infrastructure.
+The change is self-contained. It touches only Next.js files (the route, the guard, client-reads, the page and a test), plus package.json for the test script only and the docs. No dependency is added, agent.py is untouched, and no auth, secret or deploy config changes.
+The tsconfig.json change adds `allowImportingTsExtensions`. It is a type-check-only flag, valid because `noEmit` is already set, and it does not affect the runtime or infrastructure.
+Non-blocking follow-ups: an empty right-hand panel while an error is shown, misleading aria-invalid on a 429, the existing fail-closed maxKeys cap in rate-limit.ts, and no support contact in the block message.
