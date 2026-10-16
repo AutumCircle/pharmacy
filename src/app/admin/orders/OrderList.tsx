@@ -87,8 +87,9 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
                   disabled={loadingId === order.order_id} onClick={() => changeStatus(order, next)}>
                   {next === 'cancelled' ? 'Отменить' : `→ ${labels[next]}`}</button>)}
               </div>}
-              {(order.status === 'pending' || order.status === 'cancelled') && <OrderDeleteButton
+              {(order.status === 'pending' || order.status === 'cancelled' || order.status === 'delivered') && <OrderDeleteButton
                 orderId={order.order_id} orderReference={order.order_reference || order.order_id}
+                delivered={order.status === 'delivered'}
                 onDeleted={() => setOrderRows((current) => current.filter((item) => item.order_id !== order.order_id))} />}
             </div>
           </li>;

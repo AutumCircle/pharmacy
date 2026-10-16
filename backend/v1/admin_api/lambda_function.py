@@ -51,7 +51,7 @@ DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 MAX_BATCH_ITEMS = 100
 MAX_EXPORT_ROWS = 25_000
-DELETABLE_ORDER_STATUSES = frozenset({"pending", "cancelled"})
+DELETABLE_ORDER_STATUSES = frozenset({"pending", "cancelled", "delivered"})
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 LOGGER = logging.getLogger(__name__)
@@ -2775,7 +2775,7 @@ def delete_order(order_id: str, actor_id: str, current_request_id: str) -> dict[
         if order["status"] not in DELETABLE_ORDER_STATUSES:
             raise ContractError(
                 "ORDER_DELETE_STATE_CONFLICT",
-                "Можно удалить только новый или отменённый заказ",
+                "Можно удалить только новый, отменённый или доставленный заказ",
                 http_status=409,
             )
         cur.execute(
