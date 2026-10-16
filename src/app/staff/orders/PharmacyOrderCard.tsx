@@ -2,12 +2,15 @@ import type { ReactNode } from 'react';
 import type { PharmacyPreparationOrder } from '@/lib/api-v1/staff-types';
 import { formatOrderDateTime } from '@/lib/order-time';
 import { pharmacyAnswerChip } from '@/lib/pharmacy-answers';
+import { assemblyChip } from '@/lib/pharmacy-assembly';
 import { pharmacyOrderView } from '@/lib/pharmacy-order';
 import { money, quantityLabel } from '../format';
 import PharmacyAnswerForm from './PharmacyAnswerForm';
+import PharmacyAssemblyButtons from './PharmacyAssemblyButtons';
 import WaitingMinutes from './WaitingMinutes';
 
-const statusText = { pending: 'Новый', confirmed: 'Собирается' } as const;
+// «Согласован» rather than «Собирается»: the assembly itself is shown by this pharmacy's own mark (job 011).
+const statusText = { pending: 'Новый', confirmed: 'Согласован' } as const;
 
 function safeDateTime(value: string): string | null {
   try {
@@ -23,7 +26,9 @@ function safeDateTime(value: string): string | null {
  * appear only when turned ON in the admin notification settings. Job 010: each item shows this
  * pharmacy's answer chip, and while the order is «Новый» the footer holds PharmacyAnswerForm. With an
  * old Lambda response (no order_item_id) no answer column or controls are rendered.
- * `actions` overrides the footer (reserved for job 011 «Начать сборку» / «Собран»).
+ * Job 011: once the order is confirmed and this pharmacy has something to assemble
+ * (`assembly_available`), the footer holds PharmacyAssemblyButtons («Начать сборку» -> «Собран»).
+ * Without that field (old Lambda) no assembly controls are rendered. `actions` overrides the footer.
  */
 export default function PharmacyOrderCard({ order, now, actions, pharmacyId }: {
   order: PharmacyPreparationOrder; now: number; actions?: ReactNode; pharmacyId?: number;
@@ -37,7 +42,11 @@ export default function PharmacyOrderCard({ order, now, actions, pharmacyId }: {
   const footer = actions ?? (view.canAnswer && view.medicines ? <PharmacyAnswerForm orderId={order.order_id}
     pharmacyId={pharmacyId}
     items={view.medicines.map((item) => ({ orderItemId: item.orderItemId as number, name: item.name,
-      myAnswer: item.myAnswer, myProblem: item.myProblem }))} /> : null);
+      myAnswer: item.myAnswer, myProblem: item.myProblem }))} />
+    : view.assemblyAvailable ? <PharmacyAssemblyButtons orderId={order.order_id} state={view.assemblyState} />
+    : view.assemblyState ? <span className="pa-assembly-mark">Сборка: <span
+      className={`pa-chip pa-tone-${assemblyChip(view.assemblyState).tone}`}>{assemblyChip(view.assemblyState).text}</span></span>
+    : null);
   return <article className="courier-order-card pharmacy-order-card">
     <header className="pharmacy-order-head">
       <div>

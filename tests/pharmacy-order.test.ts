@@ -141,3 +141,33 @@ test('pharmacyOrderView degrades to no actions on an old Lambda response', () =>
     medicines: [{ order_item_id: 81, medicine_name: 'A', my_answer: 'maybe' }] });
   assert.equal(bogus.medicines?.[0].myAnswer, null);
 });
+
+test('pharmacyOrderView exposes assembly_state and assembly_available (job 011)', () => {
+  const base = { order_id: 'ord_x', status: 'confirmed', medicines: [{ order_item_id: 81, medicine_name: 'A', my_answer: 'available' }] };
+  const waiting = pharmacyOrderView({ ...base, assembly_state: null, assembly_available: true });
+  assert.equal(waiting.assemblyAvailable, true);
+  assert.equal(waiting.assemblyState, null);
+  assert.deepEqual(waiting.assemblyAction, { state: 'assembling', label: 'Начать сборку' });
+  const assembling = pharmacyOrderView({ ...base, assembly_state: 'assembling', assembly_available: true });
+  assert.equal(assembling.assemblyState, 'assembling');
+  assert.deepEqual(assembling.assemblyAction, { state: 'assembled', label: 'Собран' });
+  const assembled = pharmacyOrderView({ ...base, assembly_state: 'assembled', assembly_available: true });
+  assert.equal(assembled.assemblyState, 'assembled');
+  assert.equal(assembled.assemblyAction, null);
+  const nothing = pharmacyOrderView({ ...base, assembly_state: null, assembly_available: false });
+  assert.equal(nothing.assemblyAvailable, false);
+  assert.equal(nothing.assemblyAction, null);
+  // Assembly does not depend on the status field, which the pharmacy_web policy may hide.
+  const hiddenStatus = pharmacyOrderView({ order_id: 'ord_x', assembly_state: null, assembly_available: true });
+  assert.equal(hiddenStatus.status, null);
+  assert.equal(hiddenStatus.assemblyAvailable, true);
+});
+
+test('pharmacyOrderView degrades to no assembly actions without the job 011 fields', () => {
+  const old = pharmacyOrderView({ order_id: 'ord_x', status: 'confirmed', medicines: [{ medicine_name: 'A' }] });
+  assert.equal(old.assemblyAvailable, false);
+  assert.equal(old.assemblyState, null);
+  assert.equal(old.assemblyAction, null);
+  const bogus = pharmacyOrderView({ order_id: 'ord_x', status: 'confirmed', assembly_state: 'done', assembly_available: true });
+  assert.equal(bogus.assemblyState, null);
+});

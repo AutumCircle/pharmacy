@@ -405,6 +405,17 @@ label.c-check-row { cursor: pointer; }
 .c-check-text .c-check-warning { color: var(--c-amber); font-weight: 700; }
 .c-row-answers { color: var(--c-muted); font-size: 13px; font-weight: 650; }
 .c-row-answers.done { color: var(--c-ok); }
+/* ---- Job 011: pharmacy assembly marks (pharmacy card + courier screens) ---- */
+.pa-assembly { align-items: center; }
+.pa-assembly-mark { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 100%; color: var(--c-muted); font-size: 14px; font-weight: 700; }
+.pa-btn-start { background: var(--c-card); border-color: var(--c-ok); color: var(--c-ok); }
+.c-assembly-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.c-assembly-line { padding: 8px 12px; border-radius: 10px; font-size: 15px; font-weight: 750; overflow-wrap: anywhere; }
+.c-assembly-waiting { background: var(--c-bg); color: var(--c-muted); }
+.c-assembly-assembling { background: var(--c-amber-soft); color: var(--c-amber); }
+.c-assembly-assembled { background: var(--c-ok-soft); color: var(--c-ok); }
+.c-action-bar { flex-wrap: wrap; }
+.c-action-warning { flex-basis: 100%; margin: 0; padding: 6px 10px; border-radius: 8px; background: var(--c-amber-soft); color: var(--c-amber); font-size: 13px; font-weight: 750; }
 @media (max-width: 380px) {
   .pa-option { flex-basis: 100%; }
 }

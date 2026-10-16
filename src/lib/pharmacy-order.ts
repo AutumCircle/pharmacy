@@ -1,4 +1,5 @@
 import { parseOrderTime } from './order-time.ts';
+import { nextAssemblyAction } from './pharmacy-assembly.ts';
 
 export type WaitingLevel = 'normal' | 'warning' | 'urgent';
 
@@ -19,6 +20,8 @@ export function waitingLevel(minutes: number): WaitingLevel {
 type Money = number | string;
 
 export type ItemAnswer = 'available' | 'unavailable' | 'price_differs';
+
+export type AssemblyMark = 'assembling' | 'assembled';
 
 function itemAnswer(value: unknown): ItemAnswer | null {
   return value === 'available' || value === 'unavailable' || value === 'price_differs' ? value : null;
@@ -47,6 +50,9 @@ export type PharmacyOrderInput = {
     order_item_id?: number; my_answer?: string | null; my_problem?: string | null;
   }>;
   routed_away_count?: number;
+  /** Job 011, not policy-gated: this pharmacy's assembly mark and whether it may mark now. */
+  assembly_state?: string | null;
+  assembly_available?: boolean;
   order_total?: Money | null;
   base_total?: Money;
   profit?: Money | null;
@@ -75,6 +81,12 @@ export type PharmacyOrderView = {
   canAnswer: boolean;
   /** Items this pharmacy routed to «Ватан 2» («Передано в Ватан 2: N поз.»). */
   routedAwayCount: number;
+  /** Job 011: this pharmacy's mark (null = «Ждёт сборки» or an old Lambda). */
+  assemblyState: AssemblyMark | null;
+  /** Job 011: «Начать сборку» / «Собран» controls are shown; false when the field is absent. */
+  assemblyAvailable: boolean;
+  /** Next assembly action, null when there is none (see nextAssemblyAction). */
+  assemblyAction: { state: AssemblyMark; label: string } | null;
   showPrices: boolean;
   showClientPrices: boolean;
   total: Money | null;
@@ -108,6 +120,9 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
   const status = order.status === 'pending' || order.status === 'confirmed' ? order.status : null;
   const waitingSince = order.awaiting_response === true && typeof order.waiting_since === 'string'
     ? order.waiting_since : null;
+  const assemblyState: AssemblyMark | null = order.assembly_state === 'assembling' || order.assembly_state === 'assembled'
+    ? order.assembly_state : null;
+  const assemblyAvailable = order.assembly_available === true;
   let creator: string | null = null;
   if ('created_by_staff_account_id' in order) {
     const id = order.created_by_staff_account_id;
@@ -137,6 +152,9 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
     hasAnswers,
     canAnswer: hasAnswers && status === 'pending',
     routedAwayCount: typeof order.routed_away_count === 'number' && order.routed_away_count > 0 ? order.routed_away_count : 0,
+    assemblyState,
+    assemblyAvailable,
+    assemblyAction: nextAssemblyAction({ assembly_available: assemblyAvailable, assembly_state: assemblyState }),
     showPrices,
     showClientPrices,
     total: amount(order.base_total),

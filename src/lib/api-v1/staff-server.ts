@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { CourierEarnings, CourierOrder, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyAnswersRequest, PharmacyAnswersResult, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
+import type { CourierEarnings, CourierOrder, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyAnswersRequest, PharmacyAnswersResult, PharmacyAssemblyRequest, PharmacyAssemblyResult, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
@@ -154,6 +154,13 @@ export function updateCourierDeliveryAmount(token: string, orderId: string, amou
 export function updateCourierOrderChecklist(token: string, orderId: string, body: { step: number; done: boolean }) {
   return request<ApiSuccessResponse<{ order_id: string; checklist_steps: number[] }>>(
     `orders/${encodeURIComponent(orderId)}/checklist`, { token, method: 'PATCH', body },
+  );
+}
+
+/** «Начать сборку» / «Собран» (job 011). The pharmacy id comes from the staff session in Lambda. */
+export function markPharmacyAssembly(token: string, orderId: string, body: PharmacyAssemblyRequest) {
+  return request<ApiSuccessResponse<PharmacyAssemblyResult>>(
+    `orders/${encodeURIComponent(orderId)}/assembly`, { token, method: 'POST', body },
   );
 }
 

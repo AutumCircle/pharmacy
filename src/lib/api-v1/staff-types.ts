@@ -66,6 +66,29 @@ export type PharmacyAnswersResult = {
   awaiting_response: boolean;
 };
 
+/** A pharmacy's assembly mark on its part of a confirmed order (job 011). No mark = «Ждёт сборки». */
+export type PharmacyAssemblyState = 'assembling' | 'assembled';
+
+/** Courier view of one pharmacy's assembly: 'waiting' while the pharmacy has no mark. */
+export type CourierAssemblyState = 'waiting' | PharmacyAssemblyState;
+
+export type PharmacyAssemblyRequest = { state: PharmacyAssemblyState };
+
+export type PharmacyAssemblyResult = {
+  order_id: string;
+  pharmacy_id: 1 | 2;
+  state: PharmacyAssemblyState | null;
+  started_at: string | null;
+  assembled_at: string | null;
+};
+
+export type CourierAssemblyMark = {
+  pharmacy_id: 1 | 2;
+  state: CourierAssemblyState;
+  started_at: string | null;
+  assembled_at: string | null;
+};
+
 export type CourierOrder = {
   order_id: string;
   order_reference: string | null;
@@ -101,6 +124,11 @@ export type CourierOrder = {
   /** Items answered by their current pharmacy / all items («Ответ аптек: N из M»). */
   answered_count?: number;
   item_count?: number;
+  /** Job 011: one entry per pharmacy that has something to assemble, by pharmacy id; [] for
+   * courier-created orders; absent on older Lambdas (then no marks and no warning are shown). */
+  assembly?: CourierAssemblyMark[];
+  /** Confirmed and every listed pharmacy marked «Собран». */
+  assembly_complete?: boolean;
 };
 
 export type CourierOrderList = {
@@ -131,6 +159,10 @@ export type PharmacyPreparationOrder = {
     order_item_id?: number; my_answer?: PharmacyAnswer | null; my_problem?: string | null }>;
   /** Items this pharmacy answered «Нет в наличии» that were routed to «Ватан 2». */
   routed_away_count?: number;
+  /** Job 011: this pharmacy's assembly mark (null = «Ждёт сборки»); absent on older Lambdas. */
+  assembly_state?: PharmacyAssemblyState | null;
+  /** Job 011: the order is confirmed and this pharmacy has something to assemble. */
+  assembly_available?: boolean;
   order_total?: number | string;
   base_total?: number | string;
   profit?: number | string;

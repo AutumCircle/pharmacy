@@ -9,6 +9,7 @@ import { formatOrderDateTime } from '@/lib/order-time';
 import {
   answersProgressText, confirmedAmountText, courierItemAnswerLabel, courierItemAnswerTone, isAmountConfirmed,
 } from '@/lib/pharmacy-answers';
+import { assemblyWarning, courierAssemblyLines } from '@/lib/pharmacy-assembly';
 import { money, parsePrice, priceInput, quantityLabel } from '../../format';
 import MedicinePicker, { invalidLine, lineTotal, type PickerLine } from '../MedicinePicker';
 import QuantityStepper from '../QuantityStepper';
@@ -44,6 +45,17 @@ function Progress({ status }: { status: CourierOrderStatus }) {
     {statusFlow.map((step, index) => <li key={step} className={index < current ? 'done' : index === current ? 'current' : ''}
       aria-current={index === current ? 'step' : undefined}><span aria-hidden="true" />{statusLabels[step]}</li>)}
   </ol>;
+}
+
+/** Job 011: each pharmacy's assembly mark, read-only for the courier. Hidden for an old Lambda. */
+function AssemblySection({ order }: { order: CourierOrder }) {
+  const lines = courierAssemblyLines(order);
+  if (!lines.length || order.status === 'cancelled') return null;
+  return <section className="c-block c-assembly" aria-labelledby="c-assembly-title">
+    <div className="c-block-title"><h2 id="c-assembly-title">Сборка в аптеках</h2></div>
+    <ul className="c-assembly-lines">{lines.map((line) =>
+      <li key={line.pharmacyId} className={`c-assembly-line c-assembly-${line.state}`}>{line.text}</li>)}</ul>
+  </section>;
 }
 
 function CustomerSection({ order, base, onSaved }: { order: CourierOrder; base: string; onSaved: () => void }) {
@@ -310,11 +322,14 @@ function ChecklistSection({ order, base, statusBusy, onStatus, onConflict }: {
         if (item.status) {
           const linked = item.status;
           const unconfirmed = item.step === 4 && !done && order.status === 'pending' && !isAmountConfirmed(order);
+          // Job 011: a warning only; «Выехал» stays enabled (statuses do not depend on the marks).
+          const notAssembled = item.step === 5 && !done ? assemblyWarning(order) : null;
+          const warning = unconfirmed ? 'Сумма ещё не подтверждена аптекой' : notAssembled;
           return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>
             <div className="c-check-row">
               <span className="c-check-mark" aria-hidden="true">{done ? '✓' : item.step}</span>
-              {unconfirmed ? <span className="c-check-text"><strong>{item.title}</strong><small>{item.hint}</small>
-                <small className="c-check-warning" role="note">Сумма ещё не подтверждена аптекой</small></span> : text}
+              {warning ? <span className="c-check-text"><strong>{item.title}</strong><small>{item.hint}</small>
+                <small className="c-check-warning" role="note">{warning}</small></span> : text}
               {done ? <span className="sr-only">Выполнено</span>
                 : order.status === linked.from && <button type="button" className="c-btn c-btn-outline c-check-action"
                   disabled={statusBusy} onClick={() => onStatus(linked.to)}>{statusBusy ? '…' : linked.action}</button>}
@@ -345,6 +360,7 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
   const base = `/api/staff/orders/${encodeURIComponent(order.order_id)}`;
   const step = nextStep[order.status];
   const refresh = () => router.refresh();
+  const leaveWarning = order.status === 'confirmed' ? assemblyWarning(order) : null;
 
   async function changeStatus(next: CourierOrderStatus, cancelReason?: string) {
     setBusy(true); setError('');
@@ -369,6 +385,7 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
     <ChecklistSection key={`${order.status}:${(order.checklist_steps ?? []).join(',')}:${order.pharmacy_answers_complete ? 1 : 0}`}
       order={order} base={base}
       statusBusy={busy} onStatus={(next) => changeStatus(next)} onConflict={refresh} />
+    <AssemblySection order={order} />
     <CustomerSection order={order} base={base} onSaved={refresh} />
     <ItemsSection order={order} base={base} onSaved={refresh} />
     {order.status !== 'cancelled' && <FeeSection order={order} base={base} />}
@@ -383,6 +400,7 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
       </div>
     </section>}
     {step && !cancelling && <div className="c-action-bar">
+      {leaveWarning && <p className="c-action-warning" role="note">{leaveWarning}</p>}
       <button type="button" className="c-btn c-btn-primary" disabled={busy} onClick={() => changeStatus(step.status)}>
         {busy ? 'Сохраняем…' : step.label}</button>
       <button type="button" className="c-btn c-btn-ghost" disabled={busy} onClick={() => setCancelling(true)}>Отменить</button>
