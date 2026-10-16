@@ -251,6 +251,54 @@ Upstream-коды, сообщения, details, stack traces и значения
 CORS-заголовков нет: нативному URLSession они не нужны. Отдельного rate limiting тоже нет:
 нагрузку на Lambda ограничивают CDN-кеш на 60 с и 60-секундный data cache.
 
+### 5.5 Public homepage banners JSON for iOS (`GET /api/homepage-banners`)
+
+`GET https://www.aptekavatan.tj/api/homepage-banners` — anonymous HTTPS GET. No Vercel
+login, AWS access or API key is needed in the iOS app. Next.js calls the same
+`getPublicHomepageBanners()` server helper as the homepage; only that server helper
+sends the API Gateway key. The route is read-only and does not access RDS directly.
+
+Success (`200`) has a root `banners` array, never `data.banners`:
+
+```json
+{
+  "banners": [{
+    "slot": "mobile",
+    "title": null,
+    "subtitle": null,
+    "image_url": "https://example.com/banner.png",
+    "link_url": "/catalog",
+    "cta_text": null,
+    "alt_text": "Аптека Ватан",
+    "fit_mode": "contain",
+    "mobile_override": false
+  }]
+}
+```
+
+This sample shows the principal fields only. Each actual banner additionally has
+the public presentation fields for image sizing/position, overlay, text layout,
+normalized element coordinates and optional mobile composition, as defined by
+`HomepageBanner` in `src/lib/api-v1/types.ts`. The explicit whitelist is in
+`src/lib/public-banners.ts`; unknown upstream fields, internal metadata and
+`request_id` are dropped. Banner order follows the homepage response and `slot`
+identifies placement: `left`, `center`, `right_top`, `right_bottom`, `mobile`.
+For a phone layout, use the `mobile` slot as the website does. An image-only banner
+has null text and should not create empty text or CTA elements. `image_url` can be
+null on a text-only banner. `link_url` may be a site-relative path; resolve it
+against `https://www.aptekavatan.tj` before opening. Empty or inactive banners
+are omitted; no banners means `200 {"banners": []}`.
+
+Success is cached for 60 seconds at both the upstream fetch and CDN. On upstream
+failure the route returns `503`, `Cache-Control: no-store`, `Retry-After: 30`:
+
+```json
+{ "error": { "code": "BANNERS_UNAVAILABLE", "message": "Баннеры временно недоступны." } }
+```
+
+Native URLSession does not need CORS headers. Treat `503` as an error with a retry,
+not as an empty banner list.
+
 ## 6. `create_order` — критический контракт
 
 `POST /v1/public/orders`
