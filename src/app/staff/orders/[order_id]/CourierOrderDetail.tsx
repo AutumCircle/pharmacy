@@ -6,6 +6,9 @@ import { useRef, useState } from 'react';
 import type { CourierOrder, CourierOrderStatus } from '@/lib/api-v1/staff-types';
 import { CHECKLIST_STEPS, checklistProgress, isStepDone } from '@/lib/courier-checklist';
 import { formatOrderDateTime } from '@/lib/order-time';
+import {
+  answersProgressText, confirmedAmountText, courierItemAnswerLabel, courierItemAnswerTone, isAmountConfirmed,
+} from '@/lib/pharmacy-answers';
 import { money, parsePrice, priceInput, quantityLabel } from '../../format';
 import MedicinePicker, { invalidLine, lineTotal, type PickerLine } from '../MedicinePicker';
 import QuantityStepper from '../QuantityStepper';
@@ -133,10 +136,12 @@ function ItemRow({ item, base, editable, delivered, onSaved }: {
     try { await send(url, 'DELETE'); onSaved(); } catch (cause) { setError(errorText(cause)); setBusy(false); }
   }
 
+  const answerLabel = courierItemAnswerLabel(item);
   const summary = <>
     <span className="c-item-name">{item.medicine_name}</span>
     <span className="c-item-qty">{quantityLabel(item.quantity)} шт. × {money(item.selling_unit_price)}</span>
     <span className="c-item-sum">{money(item.line_total)}</span>
+    {answerLabel && <span className={`c-item-answer pa-tone-${courierItemAnswerTone(item)}`}>{answerLabel}</span>}
   </>;
 
   if (!editable) return <li className="c-item">{summary}</li>;
@@ -200,6 +205,8 @@ function ItemsSection({ order, base, onSaved }: { order: CourierOrder; base: str
       <ItemRow key={`${item.order_item_id}-${item.quantity}-${item.selling_unit_price}`} item={item} base={base}
         editable={editable} delivered={delivered} onSaved={onSaved} />)}</ul>
       : <p className="c-muted">Товаров пока нет.</p>}
+    {order.website_order && order.status !== 'cancelled' && 'confirmed_total' in order && order.medicines.length > 0 &&
+      <p className={`c-confirmed${isAmountConfirmed(order) ? ' ok' : ''}`} role="status">{confirmedAmountText(order)}</p>}
     {editable && order.medicines.length > 0 && !adding && <p className="c-muted c-small">Нажмите на товар, чтобы изменить количество, цену или удалить.</p>}
     {editable && !adding && <button type="button" className="c-btn c-btn-outline c-btn-wide" onClick={() => setAdding(true)}>+ Добавить товар</button>}
     {adding && <div className="c-adder">
@@ -288,8 +295,21 @@ function ChecklistSection({ order, base, statusBusy, onStatus, onConflict }: {
         const current = progress.next?.step === item.step;
         const className = `c-check${done ? ' done' : ''}${current ? ' current' : ''}`;
         const text = <span className="c-check-text"><strong>{item.title}</strong><small>{item.hint}</small></span>;
+        if (item.pharmacy) {
+          // Step 3: derived from the pharmacy answers, never ticked by hand.
+          const answered = answersProgressText(order);
+          return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>
+            <div className="c-check-row">
+              <span className="c-check-mark" aria-hidden="true">{done ? '✓' : item.step}</span>
+              {text}
+              {done ? <span className="sr-only">Выполнено</span>
+                : answered && <span className="c-check-badge">{answered.replace('Ответ аптек: ', '')}</span>}
+            </div>
+          </li>;
+        }
         if (item.status) {
           const linked = item.status;
+          const unconfirmed = item.step === 4 && !done && order.status === 'pending' && !isAmountConfirmed(order);
           return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>
             <div className="c-check-row">
               <span className="c-check-mark" aria-hidden="true">{done ? '✓' : item.step}</span>
@@ -298,6 +318,7 @@ function ChecklistSection({ order, base, statusBusy, onStatus, onConflict }: {
                 : order.status === linked.from && <button type="button" className="c-btn c-btn-outline c-check-action"
                   disabled={statusBusy} onClick={() => onStatus(linked.to)}>{statusBusy ? '…' : linked.action}</button>}
             </div>
+            {unconfirmed && <p className="c-check-warning" role="note">Сумма ещё не подтверждена аптекой</p>}
           </li>;
         }
         return <li key={item.step} className={className} aria-current={current ? 'step' : undefined}>
@@ -345,7 +366,8 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
       <span className={`c-pill c-pill-${order.status}`}>{statusLabels[order.status]}</span>
     </header>
     <Progress status={order.status} />
-    <ChecklistSection key={`${order.status}:${(order.checklist_steps ?? []).join(',')}`} order={order} base={base}
+    <ChecklistSection key={`${order.status}:${(order.checklist_steps ?? []).join(',')}:${order.pharmacy_answers_complete ? 1 : 0}`}
+      order={order} base={base}
       statusBusy={busy} onStatus={(next) => changeStatus(next)} onConflict={refresh} />
     <CustomerSection order={order} base={base} onSaved={refresh} />
     <ItemsSection order={order} base={base} onSaved={refresh} />

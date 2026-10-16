@@ -45,6 +45,27 @@ export type StaffOrderCreated = {
 
 export type CourierOrderStatus = 'pending' | 'confirmed' | 'delivering' | 'delivered' | 'cancelled';
 
+/** A pharmacist's answer about one order item (job 010). */
+export type PharmacyAnswer = 'available' | 'unavailable' | 'price_differs';
+
+export type PharmacyItemAnswer = {
+  pharmacy_id: 1 | 2;
+  answer: PharmacyAnswer;
+  problem: string | null;
+  answered_at: string;
+};
+
+export type PharmacyAnswersRequest = {
+  answers: Array<{ order_item_id: number; answer: PharmacyAnswer; problem?: string | null }>;
+};
+
+export type PharmacyAnswersResult = {
+  order_id: string;
+  items: Array<{ order_item_id: number; my_answer: PharmacyAnswer | null; my_problem: string | null }>;
+  routed_away_count: number;
+  awaiting_response: boolean;
+};
+
 export type CourierOrder = {
   order_id: string;
   order_reference: string | null;
@@ -61,11 +82,25 @@ export type CourierOrder = {
   order_total: number | string | null;
   website_order: boolean;
   own_order: boolean;
-  /** Completed manual courier checklist steps (1, 2, 3, 6), sorted. Steps 4, 5, 7 derive from status. */
+  /** Completed manual courier checklist steps (1, 2, 6), sorted. Steps 4, 5, 7 derive from status,
+   * step 3 from the pharmacy answers. */
   checklist_steps: number[];
   medicines: Array<{ order_item_id: number; medicine_id: number | null; medicine_name: string;
     quantity: number | string; base_unit_price: number | string | null;
-    selling_unit_price: number | string | null; line_total: number | string | null }>;
+    selling_unit_price: number | string | null; line_total: number | string | null;
+    /** Effective pharmacy of the item (job 010); absent on older Lambdas. */
+    pharmacy_id?: 1 | 2;
+    /** Every pharmacy's answer about this item, by pharmacy id; absent on older Lambdas. */
+    answers?: PharmacyItemAnswer[] }>;
+  /** Every item has an answer from its current pharmacy (job 010; absent on older Lambdas). */
+  pharmacy_answers_complete?: boolean;
+  /** Server-computed client sum of «available» items; null until complete and no price differs. */
+  confirmed_total?: string | null;
+  /** Items unavailable at their final pharmacy (excluded from confirmed_total). */
+  unavailable_count?: number;
+  /** Items answered by their current pharmacy / all items («Ответ аптек: N из M»). */
+  answered_count?: number;
+  item_count?: number;
 };
 
 export type CourierOrderList = {
@@ -79,9 +114,10 @@ export type PharmacyPreparationOrder = {
   order_reference?: string | null;
   status?: 'pending' | 'confirmed';
   created_at?: string;
-  /** ISO start of the waiting timer (= created_at). Absent on Lambdas older than job 008. */
+  /** ISO start of the waiting timer: created_at, or the routing time for items moved to «Ватан 2».
+   * Absent on Lambdas older than job 008. */
   waiting_since?: string;
-  /** True while the order still waits for the pharmacy's answer. */
+  /** True while the order is pending and an assigned item has no answer from this pharmacy. */
   awaiting_response?: boolean;
   source?: string;
   customer_name?: string;
@@ -90,7 +126,11 @@ export type PharmacyPreparationOrder = {
   landmark?: string | null;
   notes?: string | null;
   medicines?: Array<{ medicine_name: string; quantity?: number; line_total?: number | string;
-    base_unit_price?: number | string; base_line_total?: number | string }>;
+    base_unit_price?: number | string; base_line_total?: number | string;
+    /** Job 010: absent on older Lambdas (then no answer controls are shown). */
+    order_item_id?: number; my_answer?: PharmacyAnswer | null; my_problem?: string | null }>;
+  /** Items this pharmacy answered «Нет в наличии» that were routed to «Ватан 2». */
+  routed_away_count?: number;
   order_total?: number | string;
   base_total?: number | string;
   profit?: number | string;

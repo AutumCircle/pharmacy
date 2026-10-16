@@ -359,3 +359,52 @@ label.c-check-row { cursor: pointer; }
 .c-row-checklist { min-width: 0; color: var(--c-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .c-row-checklist b { color: var(--c-ink); font-weight: 700; }
 .c-row-checklist.done b { color: var(--c-ok); }
+/* ---- Job 010: pharmacist answers per item (pharmacy card + courier screens) ---- */
+.pharmacy-items td.answer { white-space: nowrap; }
+.pa-chip { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 800; line-height: 1.35; white-space: nowrap; }
+.pa-chip-ok { color: #17632e; background: #e3f5e9; }
+.pa-chip-bad { color: #a3161c; background: #fdeced; }
+.pa-chip-warn { color: #8a5a00; background: #fff3d6; }
+.pa-chip-wait { color: #4f5a52; background: #eef1ef; }
+.pa-item-problem { display: block; margin-top: 2px; color: #8a5a00; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.pa-routed { margin: 0; padding: 8px 12px; border-radius: 10px; background: #e3effb; color: #134d86; font-size: 14px; font-weight: 700; }
+.pa-actions { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+.pa-btn { flex: 1 1 200px; min-height: 48px; padding: 10px 14px; border-radius: 12px; border: 1.5px solid transparent; font: inherit; font-size: 15px; font-weight: 750; cursor: pointer; }
+.pa-btn:disabled { opacity: .6; cursor: progress; }
+.pa-btn small { font-weight: 600; }
+.pa-btn-ok { background: #187a3c; color: #fff; }
+.pa-btn-problem { background: #fff; border-color: #c4161c; color: #9f1117; }
+.pa-btn-ghost { flex: 0 1 auto; background: #fff; border-color: #dfe5e1; color: #4f5a52; }
+.pa-error { flex-basis: 100%; margin: 0; color: #a3161c; font-size: 14px; font-weight: 650; }
+.pa-panel { display: grid; gap: 10px; width: 100%; padding: 12px; border: 1.5px solid #c4161c; border-radius: 12px; background: #fff; }
+.pa-panel-title { margin: 0; font-weight: 800; }
+.pa-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.pa-item { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #edf0ee; }
+.pa-item:last-child { padding-bottom: 0; border-bottom: 0; }
+.pa-item-name { font-weight: 700; overflow-wrap: anywhere; }
+.pa-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.pa-option { position: relative; flex: 1 1 96px; display: grid; place-items: center; min-height: 44px; padding: 6px 8px; border: 1.5px solid #dfe5e1; border-radius: 10px; font-size: 14px; font-weight: 700; text-align: center; cursor: pointer; }
+.pa-option input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.pa-option:focus-within { outline: 3px solid rgba(196,22,28,.3); outline-offset: 1px; }
+.pa-option-available.selected { border-color: #187a3c; background: #e3f5e9; color: #17632e; }
+.pa-option-unavailable.selected { border-color: #c4161c; background: #fdeced; color: #a3161c; }
+.pa-option-price_differs.selected { border-color: #d38b00; background: #fff3d6; color: #8a5a00; }
+.pa-hint { margin: 0; color: #134d86; font-size: 13px; font-weight: 650; }
+.pa-problem { display: grid; gap: 4px; font-size: 13px; color: #4f5a52; }
+.pa-problem input { min-height: 44px; padding: 8px 10px; border: 1.5px solid #dfe5e1; border-radius: 10px; font: inherit; font-size: 15px; }
+.pa-problem input:focus { border-color: #c4161c; outline: none; box-shadow: 0 0 0 3px rgba(196,22,28,.12); }
+.c-item-answer { grid-row: 3; grid-column: 1 / -1; margin-top: 4px; justify-self: start; max-width: 100%; padding: 3px 9px; border-radius: 8px; font-size: 12px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.pa-tone-ok { color: #17632e; background: #e3f5e9; }
+.pa-tone-bad { color: #a3161c; background: #fdeced; }
+.pa-tone-warn { color: #8a5a00; background: #fff3d6; }
+.pa-tone-wait { color: #4f5a52; background: #eef1ef; }
+.c-confirmed { margin: 0 0 10px; padding: 9px 12px; border-radius: 10px; background: #fff3d6; color: #8a5a00; font-size: 14px; font-weight: 750; }
+.c-confirmed.ok { background: var(--c-ok-soft); color: var(--c-ok); }
+.c-check-badge { flex: none; padding: 4px 9px; border-radius: 999px; background: #eef1ef; color: var(--c-muted); font-size: 12px; font-weight: 800; white-space: nowrap; }
+.c-check-warning { margin: -2px 12px 10px 52px; color: #8a5a00; font-size: 13px; font-weight: 700; }
+.c-row-answers { color: var(--c-muted); font-size: 13px; font-weight: 650; }
+.c-row-answers.done { color: var(--c-ok); }
+@media (max-width: 380px) {
+  .pa-option { flex-basis: 100%; }
+  .c-check-warning { margin-left: 12px; }
+}

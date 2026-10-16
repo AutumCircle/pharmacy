@@ -43,7 +43,8 @@ test('pharmacyOrderView default policy response has no client data', () => {
   assert.equal(view.waitingSince, '2026-10-16T09:00:00+00:00');
   assert.equal(view.showPrices, true);
   assert.equal(view.showClientPrices, false);
-  assert.deepEqual(view.medicines, [{ name: 'NOW D3', quantity: 2, unitPrice: '50.00', lineTotal: '100.00', clientLineTotal: null }]);
+  assert.deepEqual(view.medicines, [{ name: 'NOW D3', quantity: 2, unitPrice: '50.00', lineTotal: '100.00', clientLineTotal: null,
+    orderItemId: null, myAnswer: null, myProblem: null }]);
   assert.equal(view.total, '100.00');
   for (const key of ['customerName', 'phone', 'address', 'landmark', 'clientTotal', 'profit', 'creator'] as const) {
     assert.equal(view[key], null, key);
@@ -100,4 +101,43 @@ test('pharmacyOrderView hides prices and badge for old Lambda responses or disab
   assert.equal(view.waitingSince, null);
   assert.equal(pharmacyOrderView({ order_id: 'z', awaiting_response: false, waiting_since: '2026-10-16T09:00:00Z' }).waitingSince, null);
   assert.equal(pharmacyOrderView({ order_id: 'z' }).medicines, null);
+});
+
+test('pharmacyOrderView exposes order_item_id and my_answer per item (job 010)', () => {
+  const view = pharmacyOrderView({
+    order_id: 'ord_x', status: 'pending', routed_away_count: 1,
+    medicines: [
+      { order_item_id: 81, medicine_name: 'A', quantity: 1, my_answer: 'available', my_problem: null },
+      { order_item_id: 82, medicine_name: 'B', quantity: 2, my_answer: 'price_differs', my_problem: 'дороже на 5' },
+      { order_item_id: 83, medicine_name: 'C', quantity: 1, my_answer: null, my_problem: null },
+    ],
+  });
+  assert.equal(view.hasAnswers, true);
+  assert.equal(view.canAnswer, true);
+  assert.equal(view.routedAwayCount, 1);
+  assert.deepEqual(view.medicines?.map((item) => [item.orderItemId, item.myAnswer, item.myProblem]), [
+    [81, 'available', null], [82, 'price_differs', 'дороже на 5'], [83, null, null],
+  ]);
+  const confirmed = pharmacyOrderView({ order_id: 'ord_x', status: 'confirmed',
+    medicines: [{ order_item_id: 81, medicine_name: 'A', my_answer: 'available' }] });
+  assert.equal(confirmed.hasAnswers, true);
+  assert.equal(confirmed.canAnswer, false, 'answers only while «Новый»');
+});
+
+test('pharmacyOrderView degrades to no actions on an old Lambda response', () => {
+  const old = pharmacyOrderView({ order_id: 'ord_x', status: 'pending',
+    medicines: [{ medicine_name: 'A', quantity: 1 }] });
+  assert.equal(old.hasAnswers, false);
+  assert.equal(old.canAnswer, false);
+  assert.equal(old.routedAwayCount, 0);
+  assert.equal(old.medicines?.[0].orderItemId, null);
+  // One item without an id disables the controls for the whole card.
+  const partial = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines: [
+    { order_item_id: 81, medicine_name: 'A', my_answer: null }, { medicine_name: 'B' }] });
+  assert.equal(partial.canAnswer, false);
+  assert.equal(pharmacyOrderView({ order_id: 'z', status: 'pending', medicines: [] }).canAnswer, false);
+  assert.equal(pharmacyOrderView({ order_id: 'z', status: 'pending' }).canAnswer, false);
+  const bogus = pharmacyOrderView({ order_id: 'z', status: 'pending',
+    medicines: [{ order_item_id: 81, medicine_name: 'A', my_answer: 'maybe' }] });
+  assert.equal(bogus.medicines?.[0].myAnswer, null);
 });

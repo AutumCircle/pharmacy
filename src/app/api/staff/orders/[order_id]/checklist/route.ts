@@ -24,6 +24,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ or
     if (!Number.isInteger(data.step) || (data.step as number) < 1 || (data.step as number) > 7) {
       return NextResponse.json({ error: { message: 'Шаг должен быть числом от 1 до 7' } }, { status: 400 });
     }
+    if (data.step === 3) {
+      return NextResponse.json({ error: { message: 'Этот шаг отмечается ответом аптеки' } }, { status: 400 });
+    }
     if (!isManualStep(data.step)) {
       return NextResponse.json({ error: { message: 'Этот шаг отмечается сменой статуса заказа' } }, { status: 400 });
     }
