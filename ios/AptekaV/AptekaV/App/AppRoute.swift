@@ -7,6 +7,7 @@ enum AppRoute: Hashable {
     case checkout
     case orders
     case order(PublicOrder)
+    case about
 }
 
 extension View {
@@ -28,6 +29,9 @@ extension View {
                     .toolbarRole(.editor)
             case .order(let order):
                 OrderDetailView(order: order)
+                    .toolbarRole(.editor)
+            case .about:
+                AboutView()
                     .toolbarRole(.editor)
             }
         }

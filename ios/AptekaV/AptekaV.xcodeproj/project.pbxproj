@@ -47,6 +47,7 @@
 		6817A3860E91AB45ACA65A92 /* CheckoutViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD9A84259E05638D3AA9226 /* CheckoutViewModel.swift */; };
 		A2B622C5F9FCD2C1AA0D13B1 /* CheckoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D0C0AC2379F4099D7E3B994 /* CheckoutView.swift */; };
 		09E2985F1D2B740587B19104 /* OrdersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 214F4513E93C06C6AA5CD1CD /* OrdersView.swift */; };
+		254A96213FA037BFB4C11CE8 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EFDBE11B66F17675E812E8A /* AboutView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -110,6 +111,7 @@
 		EFD9A84259E05638D3AA9226 /* CheckoutViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutViewModel.swift; sourceTree = "<group>"; };
 		2D0C0AC2379F4099D7E3B994 /* CheckoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutView.swift; sourceTree = "<group>"; };
 		214F4513E93C06C6AA5CD1CD /* OrdersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrdersView.swift; sourceTree = "<group>"; };
+		1EFDBE11B66F17675E812E8A /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -219,6 +221,7 @@
 		8B012B36307D0600005277E3 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				849DD7BC3D3F23CEEC18A03F /* About */,
 				5366F8BD83EC728460FE4222 /* Orders */,
 				0AE279D771456F792DEBBA99 /* Checkout */,
 				59FF05999F88E5CD1DA1CFD5 /* Auth */,
@@ -362,6 +365,14 @@
 			path = Orders;
 			sourceTree = "<group>";
 		};
+		849DD7BC3D3F23CEEC18A03F /* About */ = {
+			isa = PBXGroup;
+			children = (
+				1EFDBE11B66F17675E812E8A /* AboutView.swift */,
+			);
+			path = About;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -492,6 +503,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				254A96213FA037BFB4C11CE8 /* AboutView.swift in Sources */,
 				09E2985F1D2B740587B19104 /* OrdersView.swift in Sources */,
 				A2B622C5F9FCD2C1AA0D13B1 /* CheckoutView.swift in Sources */,
 				6817A3860E91AB45ACA65A92 /* CheckoutViewModel.swift in Sources */,

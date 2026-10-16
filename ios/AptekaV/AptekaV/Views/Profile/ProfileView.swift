@@ -26,6 +26,10 @@ struct ProfileView: View {
                     row(icon: "heart.fill", title: "Избранное", subtitle: nil) {
                         selectTab(.favorites)
                     }
+                    Divider().padding(.leading, 58)
+                    row(icon: "info.circle.fill", title: "О аптеке и контакты", subtitle: "Адрес, телефоны, часы работы") {
+                        openRoute(.about)
+                    }
                 }
                 .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.surfaceCard))
 
@@ -51,6 +55,7 @@ struct ProfileView: View {
             #if DEBUG
             // Launch argument `-openOrders YES` opens «Мои заказы» (simulator screenshots).
             if UserDefaults.standard.bool(forKey: "openOrders") { openRoute(.orders) }
+            if UserDefaults.standard.bool(forKey: "openAbout") { openRoute(.about) }
             #endif
         }
         .confirmationDialog("Выйти из аккаунта?", isPresented: $confirmSignOut, titleVisibility: .visible) {
