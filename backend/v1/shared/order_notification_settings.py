@@ -23,6 +23,7 @@ DEFAULT_ENABLED = {
     }),
     "pharmacy_web": frozenset({
         "order_reference", "created_at", "comment", "items", "quantity", "status",
+        "item_base_total", "base_total",
     }),
 }
 
