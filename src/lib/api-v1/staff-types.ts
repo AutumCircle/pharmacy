@@ -190,6 +190,11 @@ export type PharmacyPreparationOrder = {
   assembly_state?: PharmacyAssemblyState | null;
   /** Job 011: the order is confirmed and this pharmacy has something to assemble. */
   assembly_available?: boolean;
+  /** Job 012, not policy-gated: this pharmacy has not reacted yet (no answer, no collected item, no
+   * assembly mark). Absent on older Lambdas = no reminders. */
+  needs_attention?: boolean;
+  /** Job 012: when the reminder clock started (creation, or routing time for «Ватан 2»); null once reacted. */
+  attention_since?: string | null;
   order_total?: number | string;
   base_total?: number | string;
   profit?: number | string;

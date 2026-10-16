@@ -402,6 +402,63 @@ class StaffTests(unittest.TestCase):
         })[0]['data'][0]
         self.assertEqual(mixed['waiting_since'], mixed['created_at'])
 
+    def test_pharmacy_needs_attention_for_unreacted_order(self):
+        row = self._pharmacy_rows(extra={'reacted_count': 0, 'assembly_state': None})[0]['data'][0]
+        self.assertIs(row['needs_attention'], True)
+        self.assertEqual(row['attention_since'], row['created_at'])
+        self.assertEqual(row['attention_since'], '2026-10-10T08:30:00+00:00')
+        self.assertNotIn('reacted_count', row)
+
+    def test_pharmacy_needs_attention_false_after_answer(self):
+        row = self._pharmacy_rows(extra={'reacted_count': 1, 'unanswered_count': 0})[0]['data'][0]
+        self.assertIs(row['needs_attention'], False)
+        self.assertIsNone(row['attention_since'])
+
+    def test_pharmacy_needs_attention_false_after_answer_routed_away(self):
+        # «Ватан 1» answered «Нет в наличии»: the item left its assigned set but it still reacted.
+        row = self._pharmacy_rows(extra={'reacted_count': 0, 'routed_away_count': 1})[0]['data'][0]
+        self.assertIs(row['needs_attention'], False)
+        self.assertIsNone(row['attention_since'])
+
+    def test_pharmacy_needs_attention_false_with_assembly_mark(self):
+        for state in ('assembling', 'assembled'):
+            for status in ('pending', 'confirmed'):
+                row = self._pharmacy_rows(status=status, extra={'reacted_count': 0, 'assembly_state': state})[0]
+                row = row['data'][0]
+                self.assertIs(row['needs_attention'], False)
+                self.assertIsNone(row['attention_since'])
+
+    def test_pharmacy_needs_attention_vatan2_routed_order_uses_routing_time(self):
+        from datetime import datetime, timezone
+        routed_at = datetime(2026, 10, 10, 9, 15, tzinfo=timezone.utc)
+        row = self._pharmacy_rows(pharmacy_id=2, extra={
+            'reacted_count': 0, 'unanswered_count': 1, 'unanswered_unrouted': False,
+            'unanswered_routed_since': routed_at})[0]['data'][0]
+        self.assertIs(row['needs_attention'], True)
+        self.assertEqual(row['attention_since'], '2026-10-10T09:15:00+00:00')
+
+    def test_pharmacy_needs_attention_sql_counts_answers_and_collected_items(self):
+        _, cursor = self._pharmacy_rows()
+        sql, args = cursor.execute.call_args_list[-2].args
+        self.assertIn('COUNT(*) FILTER (WHERE mine.answer IS NOT NULL OR col.order_item_id IS NOT NULL)', sql)
+        self.assertEqual(args, (1, 1, 1, 1, 1, 1, 1, 21))
+        # Read-only: the queue issues exactly the list SELECT and the policy SELECT.
+        self.assertEqual(cursor.execute.call_count, 2)
+        for call in cursor.execute.call_args_list:
+            self.assertTrue(call.args[0].lstrip().upper().startswith('SELECT'))
+
+    def test_pharmacy_needs_attention_survives_all_off_policy(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        policies = {'pharmacy_web': {field: False for field in FIELDS}}
+        unreacted = self._pharmacy_rows(policies=policies, extra={'reacted_count': 0})[0]['data'][0]
+        self.assertIs(unreacted['needs_attention'], True)
+        self.assertEqual(unreacted['attention_since'], '2026-10-10T08:30:00+00:00')
+        self.assertNotIn('created_at', unreacted)
+        reacted = self._pharmacy_rows(policies=policies, extra={'reacted_count': 2})[0]['data'][0]
+        self.assertIs(reacted['needs_attention'], False)
+        self.assertIn('attention_since', reacted)
+        self.assertIsNone(reacted['attention_since'])
+
     def test_pharmacy_price_fields_hidden_when_policy_disables_them(self):
         from backend.v1.shared.order_notification_settings import default_policies
         policies = default_policies()

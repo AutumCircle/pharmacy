@@ -4,6 +4,8 @@ import { listCourierOrders, listPharmacyPreparationOrders } from '@/lib/api-v1/s
 import type { CourierOrderStatus } from '@/lib/api-v1/staff-types';
 import CourierOrderList from './CourierOrderList';
 import PharmacyOrderCard from './PharmacyOrderCard';
+import PharmacyAlertBanner from './PharmacyAlertBanner';
+import NotificationPermission from './NotificationPermission';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +36,8 @@ export default async function CourierOrdersPage({ searchParams }: {
         <p>Аптека {account.account_id} · заказы с сайта, ожидающие подготовки</p></div>
         <Link className="courier-new-order" href="/staff/orders">Обновить</Link>
       </div>
+      <PharmacyAlertBanner initialCount={response.data.filter((order) => order.needs_attention === true).length} />
+      <NotificationPermission />
       {response.data.length === 0 ? <div className="staff-order-form">Сейчас заказов на сборку нет.</div>
         : <div className="courier-order-list">{response.data.map((order) =>
           <PharmacyOrderCard key={order.order_id} order={order} now={now} pharmacyId={account.account_id} />)}</div>}

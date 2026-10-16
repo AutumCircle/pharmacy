@@ -1603,6 +1603,7 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                        COALESCE(routed.routed_away_count, 0) AS routed_away_count,
                        COALESCE(routed.routed_away, '[]'::json) AS routed_away,
                        COALESCE(items.assemblable_count, 0) AS assemblable_count,
+                       COALESCE(items.reacted_count, 0) AS reacted_count,
                        asm.state AS assembly_state
                 FROM orders o
                 LEFT JOIN LATERAL (
@@ -1619,7 +1620,9 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                         bool_or(oi.pharmacy_assigned_at IS NULL) FILTER (WHERE mine.answer IS NULL)
                             AS unanswered_unrouted,
                         MIN(oi.pharmacy_assigned_at) FILTER (WHERE mine.answer IS NULL) AS unanswered_routed_since,
-                        COUNT(*) FILTER (WHERE mine.answer IS DISTINCT FROM 'unavailable') AS assemblable_count
+                        COUNT(*) FILTER (WHERE mine.answer IS DISTINCT FROM 'unavailable') AS assemblable_count,
+                        COUNT(*) FILTER (WHERE mine.answer IS NOT NULL OR col.order_item_id IS NOT NULL)
+                            AS reacted_count
                     FROM order_items oi
                     LEFT JOIN order_item_pharmacy_answers mine
                            ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
@@ -1677,6 +1680,18 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         row["assembly_state"] = row.get("assembly_state") if row.get("assembly_state") in ASSEMBLY_STATES else None
         # Rework 1: assembly starts while the order is still «Новый» (and stays possible once confirmed).
         row["assembly_available"] = row["status"] in ASSEMBLY_ORDER_STATUSES and assemblable > 0
+        # Job 012 reminders, ungated and client-free. The pharmacy has reacted once it has any assembly mark,
+        # answered or collected any of its assigned items, or answered an item that has since been routed
+        # away (an «Нет в наличии» from «Ватан 1» moves the item out of its assigned set). With no reaction
+        # every assigned item is unanswered, so the unanswered aggregates cover all of them: the clock starts
+        # at the earliest routing time when every assigned item was routed here («Ватан 2»), else at creation.
+        reacted = (int(row.pop("reacted_count", 0) or 0) > 0 or row["routed_away_count"] > 0
+                   or row["assembly_state"] is not None)
+        row["needs_attention"] = not reacted
+        row["attention_since"] = None
+        if row["needs_attention"]:
+            row["attention_since"] = (order_time_iso(routed_since) if not unrouted and routed_since is not None
+                                      else row["created_at"])
         row["profit"] = (row["order_total"] or Decimal("0")) - row["base_total"]
         if policy["source"]:
             utm_source = row.pop("utm_source")
