@@ -5,6 +5,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var design: DesignSettings
     @EnvironmentObject private var cart: CartStore
+    @EnvironmentObject private var network: NetworkMonitor
     @State private var selection: AppTab
     /// Tabs whose visible screen asked to hide the tab bar.
     @State private var tabsHidingBar: Set<AppTab> = []
@@ -31,6 +32,12 @@ struct RootView: View {
                     .accessibilityHidden(selection != tab)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !network.isOnline {
+                OfflineBanner().transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: network.isOnline)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !tabsHidingBar.contains(selection) {
                 AppTabBar(style: design.tabBar, selection: $selection, cartCount: cart.totalQuantity)

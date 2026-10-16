@@ -8,6 +8,7 @@ struct HomeView: View {
     @Environment(\.selectTab) private var selectTab
     @StateObject private var search = SearchViewModel()
     @StateObject private var feed = HomeFeedViewModel()
+    @EnvironmentObject private var network: NetworkMonitor
 
     var body: some View {
         Group {
@@ -33,6 +34,12 @@ struct HomeView: View {
         .task {
             await feed.loadIfNeeded()
         }
+        .onChange(of: network.isOnline) { online in
+            // Reload automatically when the connection comes back after a failure.
+            guard online else { return }
+            if case .failed = feed.state { Task { await feed.load() } }
+            if case .failed = search.state { Task { await search.retry() } }
+        }
         .task {
             #if DEBUG
             // Launch argument `-openMedicineId N` opens that product page (simulator screenshots).
@@ -54,9 +61,7 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 80)
             case .failed(let message):
-                StateMessageView(icon: "wifi.exclamationmark", title: "Не удалось загрузить главную", text: message, actionTitle: "Повторить") {
-                    Task { await feed.load() }
-                }
+                ErrorStateView(kind: .failed(message: message), retry: { Task { await feed.load() } }, showsHomeButton: false)
             case .loaded:
                 HomeFeedLayout(
                     layout: design.home,
@@ -97,9 +102,7 @@ struct HomeView: View {
                 suggestion
             }
         case .failed(let text):
-            StateMessageView(icon: "wifi.exclamationmark", title: "Ошибка поиска", text: text, actionTitle: "Повторить") {
-                Task { await search.retry() }
-            }
+            ErrorStateView(kind: .failed(message: text), retry: { Task { await search.retry() } }, showsHomeButton: false)
         case .loaded:
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {

@@ -25,5 +25,6 @@ struct ContentView_Previews: PreviewProvider {
             .environmentObject(FavoritesStore(fileName: "preview_favorites.json"))
             .environmentObject(DesignPanelState())
             .environmentObject(AuthStore())
+            .environmentObject(NetworkMonitor())
     }
 }

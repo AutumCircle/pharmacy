@@ -3,6 +3,7 @@ import SwiftUI
 /// «Каталог» tab: live categories from `/api/categories`.
 struct CatalogView: View {
     @Environment(\.openRoute) private var openRoute
+    @EnvironmentObject private var network: NetworkMonitor
     @State private var categories: [MedicineCategory] = []
     @State private var state: LoadState = .loading
 
@@ -15,6 +16,9 @@ struct CatalogView: View {
         .designPanelButton()
         .refreshable { await load() }
         .task { if categories.isEmpty { await load() } }
+        .onChange(of: network.isOnline) { online in
+            if online, case .failed = state { Task { await load() } }
+        }
     }
 
     @ViewBuilder
@@ -25,9 +29,7 @@ struct CatalogView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 60)
         case .failed(let message):
-            StateMessageView(icon: "wifi.exclamationmark", title: "Не удалось загрузить каталог", text: message, actionTitle: "Повторить") {
-                Task { await load() }
-            }
+            ErrorStateView(kind: .failed(message: message), retry: { Task { await load() } })
         case .loaded:
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                 ForEach(categories) { category in
@@ -112,9 +114,7 @@ struct CategoryProductsView: View {
                 case .loading:
                     ProgressView().frame(maxWidth: .infinity).padding(.vertical, 60)
                 case .failed(let message):
-                    StateMessageView(icon: "wifi.exclamationmark", title: "Не удалось загрузить товары", text: message, actionTitle: "Повторить") {
-                        Task { await model.reload() }
-                    }
+                    ErrorStateView(kind: .failed(message: message), retry: { Task { await model.reload() } })
                 case .loaded where model.medicines.isEmpty:
                     StateMessageView(icon: "shippingbox", title: "В этой категории пока нет доступных товаров")
                 case .loaded:

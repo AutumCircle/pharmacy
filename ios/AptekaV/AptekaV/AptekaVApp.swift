@@ -14,6 +14,7 @@ struct AptekaVApp: App {
     @StateObject private var favorites = FavoritesStore()
     @StateObject private var designPanel = DesignPanelState()
     @StateObject private var auth = AuthStore()
+    @StateObject private var network = NetworkMonitor()
 
     var body: some Scene {
         WindowGroup {
@@ -23,6 +24,7 @@ struct AptekaVApp: App {
                 .environmentObject(favorites)
                 .environmentObject(designPanel)
                 .environmentObject(auth)
+                .environmentObject(network)
         }
     }
 }

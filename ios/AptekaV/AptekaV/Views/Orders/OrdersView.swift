@@ -66,9 +66,7 @@ struct OrdersView: View {
             case .loading where model.orders.isEmpty:
                 ForEach(0..<3, id: \.self) { _ in OrderRowSkeleton() }
             case .failed(let message) where model.orders.isEmpty:
-                StateMessageView(icon: "wifi.exclamationmark", title: "Не удалось загрузить заказы", text: message, actionTitle: "Повторить") {
-                    Task { await model.load(phone: auth.phone) }
-                }
+                ErrorStateView(kind: .failed(message: message), retry: { Task { await model.load(phone: auth.phone) } })
             default:
                 if model.orders.isEmpty {
                     StateMessageView(icon: "shippingbox", title: "Заказы для этого номера не найдены")

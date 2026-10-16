@@ -48,6 +48,8 @@
 		A2B622C5F9FCD2C1AA0D13B1 /* CheckoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D0C0AC2379F4099D7E3B994 /* CheckoutView.swift */; };
 		09E2985F1D2B740587B19104 /* OrdersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 214F4513E93C06C6AA5CD1CD /* OrdersView.swift */; };
 		254A96213FA037BFB4C11CE8 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EFDBE11B66F17675E812E8A /* AboutView.swift */; };
+		DD0565D8F4F8EE2A9EB69A8A /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9F2E5581AF8CAEE94FBC6F0 /* NetworkMonitor.swift */; };
+		3FB046D9466ACA69F867ED27 /* ErrorStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C1E0792E9E2F346E91AA2F /* ErrorStateView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,6 +114,8 @@
 		2D0C0AC2379F4099D7E3B994 /* CheckoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutView.swift; sourceTree = "<group>"; };
 		214F4513E93C06C6AA5CD1CD /* OrdersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrdersView.swift; sourceTree = "<group>"; };
 		1EFDBE11B66F17675E812E8A /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		B9F2E5581AF8CAEE94FBC6F0 /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
+		B2C1E0792E9E2F346E91AA2F /* ErrorStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorStateView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -282,6 +286,7 @@
 		D1D0524B025E57AFFF263442 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				B9F2E5581AF8CAEE94FBC6F0 /* NetworkMonitor.swift */,
 				F1171025B2928DD67B94BE2B /* AuthStore.swift */,
 				EB658D43B4601B2B9DC277C7 /* DesignPanel.swift */,
 				92432B8C1D407E054140A102 /* RootView.swift */,
@@ -295,6 +300,7 @@
 		F4F2BA776A0C7F929FA2D0A5 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				B2C1E0792E9E2F346E91AA2F /* ErrorStateView.swift */,
 				59336516FB87C31B2A305A25 /* MedicineCollectionView.swift */,
 			);
 			path = Shared;
@@ -503,6 +509,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3FB046D9466ACA69F867ED27 /* ErrorStateView.swift in Sources */,
+				DD0565D8F4F8EE2A9EB69A8A /* NetworkMonitor.swift in Sources */,
 				254A96213FA037BFB4C11CE8 /* AboutView.swift in Sources */,
 				09E2985F1D2B740587B19104 /* OrdersView.swift in Sources */,
 				A2B622C5F9FCD2C1AA0D13B1 /* CheckoutView.swift in Sources */,

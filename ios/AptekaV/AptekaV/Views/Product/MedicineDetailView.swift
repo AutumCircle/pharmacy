@@ -8,6 +8,8 @@ struct MedicineDetailView: View {
     @EnvironmentObject private var favorites: FavoritesStore
 
     @State private var medicine: Medicine
+    /// The product no longer exists in the catalogue (404 from the API).
+    @State private var isMissing = false
 
     init(medicine: Medicine) {
         _medicine = State(initialValue: medicine)
@@ -18,18 +20,33 @@ struct MedicineDetailView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             // The page has its own bottom purchase bar; the tab bar would cover it.
-            .preference(key: HidesTabBarKey.self, value: true)
+            .preference(key: HidesTabBarKey.self, value: !isMissing)
             .task {
-                // Fresh price and availability; keep the passed snapshot if this fails.
-                if let fresh = try? await APIClient.shared.medicine(id: medicine.id) {
+                // Fresh price and availability; keep the passed snapshot on network errors.
+                do {
+                    let fresh = try await APIClient.shared.medicine(id: medicine.id)
                     medicine = fresh
                     cart.refresh(with: [fresh])
-                }
+                } catch APIError.notFound {
+                    isMissing = true
+                } catch {}
             }
     }
 
     @ViewBuilder
     private var content: some View {
+        if isMissing {
+            ScrollView {
+                ErrorStateView(kind: .notFound(title: "Товар не найден"))
+            }
+            .background(AppBackground())
+        } else {
+            pageStyle
+        }
+    }
+
+    @ViewBuilder
+    private var pageStyle: some View {
         switch design.productPage {
         case .classic: ClassicProductPage(medicine: medicine)
         case .hero: HeroProductPage(medicine: medicine)
