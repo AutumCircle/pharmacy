@@ -59,9 +59,9 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     private func applyBanners(_ outcome: Result<[HomeBanner], Error>) {
+        // The app shows only the banner designed for phones (`mobile` slot), like the website on mobile.
         let live = ((try? outcome.get()) ?? [])
-            .filter { $0.secureImageURL != nil || !($0.title ?? "").isEmpty }
-            .sorted { Self.slotRank($0.slot) < Self.slotRank($1.slot) }
+            .filter { $0.slot == "mobile" && ($0.secureImageURL != nil || !($0.title ?? "").isEmpty) }
         #if DEBUG
         bannersAreDemo = live.isEmpty
         banners = live.isEmpty ? HomeBanner.demo : live
@@ -69,10 +69,6 @@ final class HomeFeedViewModel: ObservableObject {
         bannersAreDemo = false
         banners = live
         #endif
-    }
-
-    private static func slotRank(_ slot: String) -> Int {
-        HomeBanner.slotOrder.firstIndex(of: slot) ?? HomeBanner.slotOrder.count
     }
 
     /// One product row per leading category, fetched in parallel, kept in category order.

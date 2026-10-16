@@ -417,29 +417,10 @@ struct SectionHeader: View {
 
 // MARK: - «Как на сайте» (mirrors src/app/page.tsx on phones)
 
-/// Website phone layout shows only the `mobile` banner slot, at the image's own aspect ratio.
-/// When no mobile banner is configured, the app falls back to a carousel of the other slots.
-struct WebsiteHeroBanner: View {
-    let banners: [HomeBanner]
-    var isDemo = false
-    let onTap: (HomeBanner) -> Void
-
-    var body: some View {
-        if let mobile = banners.first(where: { $0.slot == "mobile" }) {
-            Button { onTap(mobile) } label: {
-                WebsiteBannerImage(banner: mobile)
-            }
-            .buttonStyle(PressDimButtonStyle())
-            .padding(.horizontal, 16)
-        } else if !banners.isEmpty {
-            BannerCarousel(banners: banners, look: .rounded, height: 170, isDemo: isDemo, onTap: onTap)
-        }
-    }
-}
-
-/// Banner image shown whole (designed artwork usually contains its own text).
-private struct WebsiteBannerImage: View {
+/// Banner image shown whole at its own aspect ratio (designed artwork contains its own text).
+struct WebsiteBannerImage: View {
     let banner: HomeBanner
+    var cornerRadius: CGFloat = 12
 
     var body: some View {
         Group {
@@ -476,8 +457,8 @@ private struct WebsiteBannerImage: View {
                     .frame(height: 170)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityLabel(banner.altText ?? banner.title ?? "Баннер")
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .accessibilityLabel(banner.altText ?? banner.title ?? "Баннер аптеки")
     }
 }
 
@@ -545,5 +526,56 @@ struct WebsiteCategoryGrid: View {
             }
         }
         .padding(.horizontal, 16)
+    }
+}
+
+// MARK: - Live banner per layout
+
+/// The website's mobile banner(s) as images, styled for each home layout.
+/// Demo banners (debug only, when the API has none) keep the text carousel.
+struct HomeBannerSection: View {
+    enum Look { case rounded, edgeToEdge, peek, glass }
+
+    let banners: [HomeBanner]
+    let isDemo: Bool
+    var look: Look = .rounded
+    let onTap: (HomeBanner) -> Void
+
+    var body: some View {
+        if banners.isEmpty {
+            EmptyView()
+        } else if isDemo {
+            switch look {
+            case .rounded: BannerCarousel(banners: banners, look: .rounded, height: 170, isDemo: true, onTap: onTap)
+            case .edgeToEdge: BannerCarousel(banners: banners, look: .edgeToEdge, height: 230, isDemo: true, onTap: onTap)
+            case .peek: BannerPeekRow(banners: banners, isDemo: true, onTap: onTap)
+            case .glass: BannerCarousel(banners: banners, look: .glass, height: 180, isDemo: true, onTap: onTap)
+            }
+        } else {
+            VStack(spacing: 12) {
+                ForEach(banners) { banner in
+                    Button { onTap(banner) } label: { image(banner) }
+                        .buttonStyle(PressDimButtonStyle())
+                        .disabled(banner.linkUrl == nil)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func image(_ banner: HomeBanner) -> some View {
+        switch look {
+        case .rounded:
+            WebsiteBannerImage(banner: banner, cornerRadius: 16).padding(.horizontal, 16)
+        case .edgeToEdge:
+            WebsiteBannerImage(banner: banner, cornerRadius: 0)
+        case .peek:
+            WebsiteBannerImage(banner: banner, cornerRadius: 20).padding(.horizontal, 16)
+        case .glass:
+            WebsiteBannerImage(banner: banner, cornerRadius: 22)
+                .padding(8)
+                .background(GlassCardBackground(cornerRadius: 30))
+                .padding(.horizontal, 12)
+        }
     }
 }

@@ -162,13 +162,13 @@ struct HomeFeedLayout: View {
         VStack(alignment: .leading, spacing: 20) {
             switch layout {
             case .classic:
-                banners(look: .rounded, height: 170)
+                banners(.rounded)
                     .padding(.top, 8)
                 CategoryChipsRow(categories: feed.categories, onAll: onAllCategories, onSelect: onCategory)
                 BenefitsRow()
                 carousels(glass: false)
             case .showcase:
-                banners(look: .edgeToEdge, height: 230)
+                banners(.edgeToEdge)
                 if !feed.categories.isEmpty {
                     SectionHeader(title: "Категории", actionTitle: "Все", action: onAllCategories)
                     CategoryTilesGrid(categories: feed.categories, onSelect: onCategory)
@@ -176,15 +176,13 @@ struct HomeFeedLayout: View {
                 carousels(glass: false)
                 BenefitsRow()
             case .compact:
-                if !feed.banners.isEmpty {
-                    BannerPeekRow(banners: feed.banners, isDemo: feed.bannersAreDemo, onTap: onBanner)
-                        .padding(.top, 8)
-                }
+                banners(.peek)
+                    .padding(.top, 8)
                 CategoryCirclesRow(categories: feed.categories, onSelect: onCategory)
                 carousels(glass: false)
                 BenefitsRow()
             case .website:
-                WebsiteHeroBanner(banners: feed.banners, isDemo: feed.bannersAreDemo, onTap: onBanner)
+                banners(.rounded)
                     .padding(.top, 8)
                 carousels(glass: false)
                 WebsiteBenefits()
@@ -193,7 +191,7 @@ struct HomeFeedLayout: View {
                     WebsiteCategoryGrid(categories: feed.categories, onSelect: onCategory)
                 }
             case .glass:
-                banners(look: .glass, height: 180)
+                banners(.glass)
                     .padding(.top, 8)
                 CategoryChipsRow(categories: feed.categories, glass: true, onAll: onAllCategories, onSelect: onCategory)
                 BenefitsRow(glass: true)
@@ -202,11 +200,8 @@ struct HomeFeedLayout: View {
         }
     }
 
-    @ViewBuilder
-    private func banners(look: BannerCarousel.Look, height: CGFloat) -> some View {
-        if !feed.banners.isEmpty {
-            BannerCarousel(banners: feed.banners, look: look, height: height, isDemo: feed.bannersAreDemo, onTap: onBanner)
-        }
+    private func banners(_ look: HomeBannerSection.Look) -> some View {
+        HomeBannerSection(banners: feed.banners, isDemo: feed.bannersAreDemo, look: look, onTap: onBanner)
     }
 
     private func carousels(glass: Bool) -> some View {

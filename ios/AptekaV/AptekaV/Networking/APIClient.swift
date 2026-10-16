@@ -197,10 +197,11 @@ final class APIClient {
         )
     }
 
-    /// `GET /api/homepage-banners` — throws `.notFound` until the website exposes this route.
+    /// `GET /api/homepage-banners` — active homepage banners, no key or login.
+    /// Live format: `{"banners": [...]}` at the JSON root (src/lib/public-banners.ts on main).
     func homepageBanners() async throws -> [HomeBanner] {
-        let response: DataEnvelope<BannersPayload> = try await get("api/homepage-banners", queryItems: [])
-        return response.data.banners
+        let response: BannersPayload = try await get("api/homepage-banners", queryItems: [])
+        return response.banners
     }
 
     /// `GET /api/product-carousels` — the website's homepage carousels, no key or login.
