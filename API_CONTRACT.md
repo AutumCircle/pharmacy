@@ -10,6 +10,7 @@ Homepage content routes:
 - `GET /v1/admin/homepage-banners` — all four banner slots (admin authorization required).
 - `PATCH /v1/admin/homepage-banners/{slot}` — update title, subtitle, HTTPS image URL, link, or active state.
 - `GET /v1/public/product-carousels` — active carousel sections in configured order with their available products.
+- `GET /api/product-carousels` (Next.js, public, no auth) — whitelisted JSON copy of the homepage carousels for the iOS app; see §5.4.
 - `GET|POST /v1/admin/product-carousels` — list compact carousel metadata (`product_count`) or create a section.
 - `PATCH|DELETE /v1/admin/product-carousels/{carousel_id}` — edit, activate/deactivate, reorder, or delete a section.
 - `PATCH /v1/admin/product-carousels/reorder` — save the complete section order in one transaction.
@@ -169,6 +170,86 @@ Medicine response item:
 - `GET /v1/public/categories/{slug}/medicines?page=1&limit=24` возвращает только sellable medicines и numbered page: `number`, `size`, `total_items`, `total_pages`.
 - Total считается по действующим `category_medicines.medicine_id` links, связанным с medicines в наличии; ordering: `medicine.name ASC, medicine.id ASC`.
 - Неизвестная или отключённая категория возвращает `404 CATEGORY_NOT_FOUND`.
+
+### 5.4 Public product carousels JSON for iOS (`GET /api/product-carousels`)
+
+`GET https://www.aptekavatan.tj/api/product-carousels` — Next.js route handler
+(`src/app/api/product-carousels/route.ts`) для iOS-приложения и других публичных клиентов. Он
+отдаёт те же активные карусели, что и главная страница сайта.
+
+- **Без авторизации:** обычный HTTPS GET (URLSession). API-ключ, логин Vercel и доступ к AWS не нужны.
+  Сервер Next.js вызывает `getPublicProductCarousels()` → `GET /v1/public/product-carousels` в
+  API Gateway с серверным `API_KEY`. Ключ в ответ и в клиент не попадает. Путь данных не меняется:
+  Next.js → API Gateway → Python Lambda → RDS.
+- **Порядок:** как в Lambda (карусели по `sort_order, id`, товары по `sort_order, id`). Route
+  ничего не пересортировывает.
+- **Whitelist:** ответ строится через `toPublicCarouselsPayload` (`src/lib/public-carousels.ts`).
+  `country`, `vendor`, `catalog_updated_at`, `request_id`, базовая цена, прибыль, `is_active`,
+  внутренние ID и любые новые поля upstream не передаются.
+- **Пустые карусели:** карусели без товаров опускаются (как на главной). Если не осталось ни одной
+  карусели, ответ `200 {"carousels": []}`: массив, никогда не `null`.
+
+Поля успешного ответа `200`:
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `carousels` | array | Активные карусели в порядке показа |
+| `carousels[].slug` | string | Идентификатор секции |
+| `carousels[].title` | string | Заголовок секции |
+| `carousels[].sort_order` | integer | Порядок секции |
+| `carousels[].products` | array | Товары секции, не пустой |
+| `products[].medicine_id` | integer | ID товара (как в `/medicine/...` и в заказе) |
+| `products[].medicine_name` | string | Название |
+| `products[].selling_unit_price` | integer (JSON number) | Цена продажи в TJS, как на сайте |
+| `products[].currency` | string | Всегда `"TJS"` |
+| `products[].in_stock` | boolean | Есть ли в наличии |
+| `products[].image_url` | string \| null | URL изображения или `null` |
+| `products[].sort_order` | integer | Порядок товара в секции |
+
+Сейчас `selling_unit_price` — целое число (Lambda приводит его через `int()`). Если контракт
+Lambda когда-нибудь перейдёт на дробные цены, iOS должен декодировать поле как `Decimal`/`Double`.
+Поэтому лучше сразу декодировать его как число без привязки к `Int`.
+
+```json
+{
+  "carousels": [
+    {
+      "slug": "items-of-the-day",
+      "title": "Товары дня",
+      "sort_order": 10,
+      "products": [
+        {
+          "medicine_id": 1234,
+          "medicine_name": "Парацетамол 500 мг №10",
+          "selling_unit_price": 12,
+          "currency": "TJS",
+          "in_stock": true,
+          "image_url": "https://example.com/paracetamol.jpg",
+          "sort_order": 10
+        }
+      ]
+    }
+  ]
+}
+```
+
+Ошибка: любая ошибка upstream (ошибка конфигурации, timeout, недоступный или некорректный ответ
+API Gateway/Lambda, неожиданное исключение) → `503`, `Cache-Control: no-store`, `Retry-After: 30`:
+
+```json
+{ "error": { "code": "CAROUSELS_UNAVAILABLE", "message": "Секции товаров временно недоступны." } }
+```
+
+Upstream-коды, сообщения, details, stack traces и значения env не передаются. Клиент должен
+ориентироваться на HTTP status и `error.code`, а не на текст `message`.
+
+Кеширование: как на главной странице. Upstream fetch использует data cache Next.js с
+`revalidate: 60`. Успешный ответ отдаётся с
+`Cache-Control: public, s-maxage=60, stale-while-revalidate=300` (CDN Vercel). Route
+`force-dynamic`, поэтому на этапе build он не пререндерится.
+
+CORS-заголовков нет: нативному URLSession они не нужны. Отдельного rate limiting тоже нет:
+нагрузку на Lambda ограничивают CDN-кеш на 60 с и 60-секундный data cache.
 
 ## 6. `create_order` — критический контракт
 
