@@ -444,24 +444,37 @@ label.c-check-row { cursor: pointer; }
 .pa-sound.wait { border-color: #b54708; color: #b54708; background: #fff0e3; }
 .pa-stack { position: fixed; z-index: 70; top: 12px; right: 12px; display: grid; gap: 8px; width: min(380px, calc(100vw - 24px)); }
 .pa-toast { display: flex; align-items: flex-start; gap: 8px; padding: 14px; border-radius: 14px; background: #c4161c; color: #fff;
-  box-shadow: 0 12px 30px rgba(0,0,0,.28); animation: pa-in .25s ease-out, pa-pulse 1.2s ease-in-out .25s 3; }
+  box-shadow: 0 12px 30px rgba(0,0,0,.28); animation: pa-in .25s ease-out; }
 .pa-toast a { display: grid; gap: 3px; flex: 1; min-width: 0; color: inherit; text-decoration: none; }
 .pa-toast strong { font-size: 16px; overflow-wrap: anywhere; }
 .pa-toast span { color: #ffe3e3; font-size: 14px; }
-.pa-toast button { min-width: 32px; min-height: 32px; border: 0; background: none; color: #ffe3e3; font-size: 24px; line-height: 1; cursor: pointer; }
+.pa-toast { padding-right: 6px; }
+.pa-toast button { flex: none; min-width: 44px; min-height: 44px; margin: -8px 0; border: 0; border-radius: 10px; background: none; color: #ffe3e3;
+  font-size: 26px; line-height: 1; cursor: pointer; }
+.pa-toast button:hover { background: rgba(255,255,255,.14); color: #fff; }
+.pa-toast a:focus-visible, .pa-toast button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; border-radius: 8px; }
 .pa-more { justify-self: end; padding: 6px 12px; border-radius: 999px; background: #14201a; color: #fff; font-size: 13px; font-weight: 700; }
 @keyframes pa-in { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes pa-pulse { 50% { box-shadow: 0 0 0 6px rgba(196,22,28,.3), 0 12px 30px rgba(0,0,0,.28); } }
 .pa-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; padding: 14px 16px;
   border-radius: 12px; background: #c4161c; color: #fff; font-size: 16px; }
-.pa-banner button { padding: 9px 16px; border: 0; border-radius: 10px; background: #fff; color: #9f1117; font: inherit; font-size: 14px; font-weight: 750; cursor: pointer; }
+.pa-banner button { min-height: 44px; padding: 9px 16px; border: 0; border-radius: 10px; background: #fff; color: #9f1117; font: inherit; font-size: 14px; font-weight: 750; cursor: pointer; }
+.pa-banner button:hover:not(:disabled) { background: #fdecec; }
+.pa-banner button:disabled { cursor: default; opacity: .75; }
+.pa-banner button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .pa-permission { display: grid; gap: 6px; margin-bottom: 16px; padding: 12px 14px; border: 1px solid #e3e8e4; border-radius: 12px; background: #fff; font-size: 14px; }
 .pa-permission p { margin: 0; color: #66706a; }
 .pa-permission-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .pa-permission.granted strong { color: #187a3c; }
 .pa-permission.denied strong, .pa-permission.unsupported strong { color: #b54708; }
-.pa-permission-row button { padding: 9px 14px; border: 0; border-radius: 10px; background: #14201a; color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.pa-permission-row button { min-height: 44px; padding: 9px 14px; border: 0; border-radius: 10px; background: #14201a; color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.pa-permission-row button:hover:not(:disabled) { background: #2a3a31; }
 .pa-permission-row button:disabled { opacity: .6; cursor: default; }
+.pa-permission-row button:focus-visible, .pa-sound:focus-visible { outline: 3px solid rgba(196,22,28,.35); outline-offset: 2px; }
+.pa-sound { min-height: 44px; }
+.pa-sound:not(.on):not(.wait):hover { border-color: #9aa59e; }
+.pa-sound-note { position: fixed; z-index: 60; right: 12px; bottom: calc(66px + env(safe-area-inset-bottom)); max-width: min(320px, calc(100vw - 24px));
+  margin: 0; padding: 10px 12px; border-radius: 12px; background: #fff0e3; color: #8a3a00; font-size: 13px; font-weight: 650;
+  box-shadow: 0 6px 18px rgba(20,32,26,.14); }
 .pa-permission-hint { color: #8a5a00 !important; font-weight: 650; }
 .pa-permission-note { font-size: 13px; }
 @media (max-width: 420px) {

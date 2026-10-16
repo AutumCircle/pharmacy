@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  IOS_HINT, PHARMACY_SOUND_KEY, REMIND_MS, alertText, attentionCount, dueAlerts, permissionView, soundLabel,
+  IOS_HINT, PHARMACY_SOUND_KEY, REMIND_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE, alertText, attentionCount, dueAlerts,
+  permissionView, soundClickAction, soundLabel,
   titleWithCount,
 } from '../src/lib/pharmacy-alerts.ts';
 
@@ -136,4 +137,14 @@ test('soundLabel follows preference and the first-tap unlock', () => {
   assert.equal(soundLabel(false, true), 'Включить звук');
   assert.equal(soundLabel(true, false), 'Нажмите, чтобы включить звук');
   assert.equal(soundLabel(true, true), 'Звук включён');
+});
+
+test('soundClickAction never dead-ends on the unlock prompt', () => {
+  assert.equal(soundClickAction(false, false, false), 'enable');
+  assert.equal(soundClickAction(false, false, true), 'enable');
+  assert.equal(soundClickAction(true, false, false), 'unlock');
+  assert.equal(soundClickAction(true, false, true), 'disable');
+  assert.equal(soundClickAction(true, true, false), 'disable');
+  assert.ok(SOUND_UNAVAILABLE.includes('Сигнал на экране работает'));
+  assert.ok(SOUND_BLOCKED.includes('выключить звук'));
 });

@@ -5,7 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { chime } from '@/components/NewOrderAlerts';
 import {
-  PHARMACY_SOUND_KEY, POLL_MS, alertText, dueAlerts, soundLabel, titleWithCount, type AlertQueueOrder,
+  PHARMACY_SOUND_KEY, POLL_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE, alertText, dueAlerts, soundClickAction, soundLabel,
+  titleWithCount, type AlertQueueOrder,
 } from '@/lib/pharmacy-alerts';
 import { setAttentionCount } from '@/lib/pharmacy-alert-store';
 
@@ -48,6 +49,11 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
   const [sound, setSound] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // A tap on the control did not get running audio: the next tap switches the sound off (no dead-end).
+  const [unlockFailed, setUnlockFailed] = useState(false);
+  const [soundNote, setSoundNote] = useState<string | null>(null);
+  // Screen-reader announcement of newly due orders only (the toast minutes change every poll).
+  const [announcement, setAnnouncement] = useState('');
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setSound(readSoundPreference()));
@@ -55,7 +61,7 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
   }, []);
 
   /** Creates/resumes the AudioContext; must run inside a tap or keypress (autoplay rules). */
-  const unlock = useCallback(() => {
+  const unlock = useCallback((): { context: AudioContext; running: Promise<boolean> } | null => {
     try {
       if (!audio.current) {
         const Context = window.AudioContext
@@ -66,8 +72,9 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
         audio.current = context;
       }
       const context = audio.current;
-      void context.resume().then(() => setUnlocked(context.state === 'running'), () => setUnlocked(false));
-      return context;
+      const running = context.resume().then(() => context.state === 'running', () => false);
+      void running.then((ok) => setUnlocked(ok));
+      return { context, running };
     } catch {
       return null;
     }
@@ -114,6 +121,7 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
             .map((toast) => ({ id: toast.id, ...alertText(attention.get(toast.id)!, now) })),
         ]);
         if (!result.due.length) return;
+        setAnnouncement(result.due.map((id) => alertText(attention.get(id)!, now).title).join('. '));
         const context = audio.current;
         if (readSoundPreference() && context && context.state === 'running') {
           try { chime(context); } catch { /* the on-screen signal is still shown */ }
@@ -143,22 +151,42 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
     };
   }, [enabled]);
 
+  function setPreference(value: boolean) {
+    setSound(value);
+    writeSoundPreference(value);
+    setUnlockFailed(false);
+  }
+
+  /** This tap is the gesture: unlock, confirm with the chime, and report a failure instead of dead-ending. */
+  function tryUnlock(): boolean {
+    const audioState = unlock();
+    if (!audioState) {
+      setPreference(false);
+      setSoundNote(SOUND_UNAVAILABLE);
+      return false;
+    }
+    try { chime(audioState.context); } catch { /* blocked */ }
+    void audioState.running.then((ok) => {
+      setUnlockFailed(!ok);
+      setSoundNote(ok ? null : SOUND_BLOCKED);
+    });
+    return true;
+  }
+
   function onSoundClick() {
-    if (!sound) {
-      setSound(true);
-      writeSoundPreference(true);
-      const context = unlock();
-      if (context) { try { chime(context); } catch { /* blocked */ } }
+    const action = soundClickAction(sound, unlocked, unlockFailed);
+    if (action === 'disable') {
+      setPreference(false);
+      setSoundNote(null);
       return;
     }
-    if (!unlocked) {
-      // «Нажмите, чтобы включить звук»: this tap is the gesture; confirm with the chime.
-      const context = unlock();
-      if (context) { try { chime(context); } catch { /* blocked */ } }
+    if (action === 'enable') {
+      setSoundNote(null);
+      if (tryUnlock()) setPreference(true);
       return;
     }
-    setSound(false);
-    writeSoundPreference(false);
+    // «Нажмите, чтобы включить звук» after a reload.
+    tryUnlock();
   }
 
   function dismiss(id: string) {
@@ -171,10 +199,12 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
     <button type="button" className={`pa-sound${sound ? (unlocked ? ' on' : ' wait') : ''}`} onClick={onSoundClick}
       // Keep the window-level unlock listener from flipping the state before this click is handled.
       onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}
-      aria-pressed={sound && unlocked} title={sound && unlocked ? 'Нажмите, чтобы выключить звук' : label}>
+      title={sound && unlocked ? 'Нажмите, чтобы выключить звук' : label}>
       <span aria-hidden="true">{sound && unlocked ? '🔔' : '🔕'}</span><span>{label}</span>
     </button>
-    {toasts.length > 0 && <div className="pa-stack" role="alert">
+    {soundNote && <p className="pa-sound-note" role="status">{soundNote}</p>}
+    <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
+    {toasts.length > 0 && <div className="pa-stack">
       {toasts.slice(0, MAX_TOASTS).map((toast) => <div key={toast.id} className="pa-toast">
         <Link href="/staff/orders" onClick={() => { dismiss(toast.id); router.refresh(); }}>
           <strong>{toast.title}</strong><span>{toast.body}</span></Link>

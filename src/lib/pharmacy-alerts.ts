@@ -132,3 +132,19 @@ export function soundLabel(preference: boolean, unlocked: boolean): SoundLabel {
   if (!preference) return 'Включить звук';
   return unlocked ? 'Звук включён' : 'Нажмите, чтобы включить звук';
 }
+
+export const SOUND_UNAVAILABLE = 'Звук недоступен в этом браузере. Сигнал на экране работает.';
+export const SOUND_BLOCKED = 'Браузер не дал включить звук. Нажмите ещё раз, чтобы выключить звук. Сигнал на экране работает.';
+
+export type SoundClickAction = 'enable' | 'unlock' | 'disable';
+
+/**
+ * What a tap on the sound control does. With the preference on but no running audio, the first tap
+ * tries to unlock; if an earlier tap on the control already failed to unlock, the tap switches the
+ * sound off so the control never dead-ends on «Нажмите, чтобы включить звук».
+ */
+export function soundClickAction(preference: boolean, unlocked: boolean, unlockFailed: boolean): SoundClickAction {
+  if (!preference) return 'enable';
+  if (unlocked || unlockFailed) return 'disable';
+  return 'unlock';
+}
