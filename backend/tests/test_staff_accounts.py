@@ -272,7 +272,7 @@ class StaffTests(unittest.TestCase):
         sql, args = order_cursor.execute.call_args_list[-2].args
         self.assertIn('o.created_by_staff_account_id IS NULL', sql)
         self.assertIn('COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1) = %s', sql)
-        self.assertEqual(args, (1, 1, 1, 1, 1, 21))
+        self.assertEqual(args, (1, 1, 1, 1, 1, 1, 21))
         self.assertIn('o.phone', sql)
 
     def test_pharmacy_web_policy_is_enforced_by_lambda(self):
@@ -368,7 +368,7 @@ class StaffTests(unittest.TestCase):
         self.assertIn("'order_item_id', oi.id", sql)
         self.assertIn("'my_answer', mine.answer, 'my_problem', mine.problem", sql)
         self.assertNotIn('COALESCE(o.fulfillment_pharmacy_id, 1) = %s', sql)
-        self.assertEqual(args, (1, 1, 1, 1, 1, 21))
+        self.assertEqual(args, (1, 1, 1, 1, 1, 1, 21))
 
     def test_pharmacy_item_fields_and_routed_away_count(self):
         row = self._pharmacy_rows(extra={'routed_away_count': 1})[0]['data'][0]
@@ -429,11 +429,52 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(row['source'], 'Сайт')
         self.assertEqual(row['medicines'][0]['line_total'], 120)
 
+    # --- job 011: assembly marks in the pharmacy queue ------------------------------------
+
+    def test_pharmacy_queue_assembly_fields(self):
+        cases = [
+            # (status, assemblable_count, assembly_state) -> (assembly_state, assembly_available)
+            (('pending', 1, None), (None, False)),
+            (('confirmed', 1, None), (None, True)),
+            (('confirmed', 2, 'assembling'), ('assembling', True)),
+            (('confirmed', 1, 'assembled'), ('assembled', True)),
+            (('confirmed', 0, None), (None, False)),  # only «Нет в наличии» items: nothing to assemble
+        ]
+        for (status, assemblable, state), expected in cases:
+            with self.subTest(status=status, assemblable=assemblable, state=state):
+                row = self._pharmacy_rows(status=status, extra={
+                    'assemblable_count': assemblable, 'assembly_state': state})[0]['data'][0]
+                self.assertEqual((row['assembly_state'], row['assembly_available']), expected)
+                self.assertNotIn('assemblable_count', row)
+
+    def test_pharmacy_queue_assembly_fields_survive_all_off_policy(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        policies = {'pharmacy_web': {field: False for field in FIELDS}}
+        row = self._pharmacy_rows(policies=policies, status='confirmed', extra={
+            'assemblable_count': 1, 'assembly_state': 'assembling'})[0]['data'][0]
+        self.assertNotIn('status', row)
+        self.assertEqual(row['assembly_state'], 'assembling')
+        self.assertIs(row['assembly_available'], True)
+        for key in ('routed_away_count', 'awaiting_response', 'waiting_since'):
+            self.assertIn(key, row)
+
+    def test_pharmacy_queue_old_rows_default_assembly_fields(self):
+        row = self._pharmacy_rows(status='confirmed')[0]['data'][0]
+        self.assertIsNone(row['assembly_state'])
+        self.assertIs(row['assembly_available'], False)
+
+    def test_pharmacy_queue_sql_reads_own_assembly_mark(self):
+        _, cursor = self._pharmacy_rows(pharmacy_id=2)
+        sql, args = cursor.execute.call_args_list[-2].args
+        self.assertIn('LEFT JOIN order_pharmacy_assembly asm ON asm.order_id = o.id AND asm.pharmacy_id = %s', sql)
+        self.assertIn("COUNT(*) FILTER (WHERE mine.answer IS DISTINCT FROM 'unavailable') AS assemblable_count", sql)
+        self.assertEqual(args, (2, 2, 2, 2, 2, 2, 21))
+
     def test_pharmacy_two_queue_is_scoped_by_session_account(self):
         _, cursor = self._pharmacy_rows(pharmacy_id=2)
         sql, args = cursor.execute.call_args_list[-2].args
         self.assertIn('COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1) = %s', sql)
-        self.assertEqual(args, (2, 2, 2, 2, 2, 21))
+        self.assertEqual(args, (2, 2, 2, 2, 2, 2, 21))
         pharmacy_two = {**self.account, 'account_id': 2, 'catalog_access': False}
         self.cursor.fetchone.return_value = pharmacy_two
         with patch('backend.v1.admin_api.lambda_function.list_pharmacy_preparation_orders',
