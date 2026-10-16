@@ -11,7 +11,8 @@ from backend.v1.admin_api.lambda_function import (
     add_courier_order_items, add_manual_order_items, courier_earnings, list_courier_orders, update_courier_order_status,
     get_courier_order, update_courier_order_checklist, update_courier_order_customer, update_courier_order_item,
     update_order_delivery, update_order_item_price,
-    COURIER_CHECKLIST_MARKER, _COURIER_CHECKLIST_STEP_SQL, _COURIER_ORDER_SELECT, _checklist_steps,
+    COURIER_CHECKLIST_MANUAL_STEPS, COURIER_CHECKLIST_MARKER, _COURIER_CHECKLIST_STEP_SQL, _COURIER_ORDER_SELECT,
+    _checklist_steps,
 )
 from backend.v1.shared.contract import ContractError
 
@@ -425,7 +426,7 @@ class CourierOrderTests(unittest.TestCase):
     _WEBSITE_ORDER = {'id': 7, 'status': 'confirmed', 'created_by_staff_account_id': None}
 
     def test_checklist_tick_upserts_parameterized_and_audits(self):
-        for step in (3, 6):
+        for step in (2, 6):
             cursor = Mock()
             cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), {'step': step}, {'steps': [1, step]}]
             order_id = 'ord_' + 'a' * 32
@@ -490,10 +491,10 @@ class CourierOrderTests(unittest.TestCase):
     def test_checklist_repeated_request_is_noop_success_without_audit(self):
         for done in (True, False):
             cursor = Mock()
-            cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), None, {'steps': [3] if done else []}]
+            cursor.fetchone.side_effect = [dict(self._WEBSITE_ORDER), None, {'steps': [6] if done else []}]
             with self._tx(cursor):
-                result = update_courier_order_checklist('ord_' + 'a' * 32, {'step': 3, 'done': done}, 'req')
-            self.assertEqual(result['checklist_steps'], [3] if done else [])
+                result = update_courier_order_checklist('ord_' + 'a' * 32, {'step': 6, 'done': done}, 'req')
+            self.assertEqual(result['checklist_steps'], [6] if done else [])
             self.assertNotIn('admin_audit_log', ' '.join(call.args[0] for call in cursor.execute.call_args_list))
 
     def test_checklist_validates_payload_before_database(self):
@@ -522,7 +523,7 @@ class CourierOrderTests(unittest.TestCase):
                  ({'id': 7, 'status': 'pending', 'created_by_staff_account_id': 1}, 409, 'CHECKLIST_NOT_AVAILABLE'),
                  (None, 404, 'ORDER_NOT_FOUND'))
         for order, status, code in cases:
-            for step in (1, 3, 6):
+            for step in (1, 2, 6):
                 cursor = Mock()
                 cursor.fetchone.return_value = order
                 with self._tx(cursor), self.assertRaises(ContractError) as raised:
@@ -554,7 +555,7 @@ class CourierOrderTests(unittest.TestCase):
 
     def test_courier_select_contains_legacy_case_mapping(self):
         sql = _COURIER_ORDER_SELECT
-        self.assertIn("WHEN c.completed_by = 'staff:3/v2' THEN CASE WHEN c.step IN (1, 2, 3, 6)", sql)
+        self.assertIn("WHEN c.completed_by = 'staff:3/v2' THEN CASE WHEN c.step IN (1, 2, 6)", sql)
         self.assertIn('WHEN c.step = 1 THEN 1', sql)
         self.assertIn('WHEN c.step = 4 THEN 2', sql)
         self.assertIn('array_agg(DISTINCT CASE', sql)
@@ -576,14 +577,88 @@ class CourierOrderTests(unittest.TestCase):
         legacy = [(1, 'staff:3'), (2, 'staff:3'), (4, 'staff:3'), (5, 'staff:3'), (7, 'staff:3')]
         self.assertEqual(mapped(legacy), [1, 2])
         self.assertEqual(mapped([(2, 'staff:3/v2'), (4, 'staff:3')]), [2])
-        self.assertEqual(mapped([(1, 'staff:3/v2'), (3, 'staff:3/v2'), (6, 'staff:3/v2'), (5, 'staff:3/v2')]), [1, 3, 6])
+        # A stored v2 step-3 row (ticked before job 010) is ignored: step 3 now derives from pharmacy answers.
+        self.assertEqual(mapped([(1, 'staff:3/v2'), (3, 'staff:3/v2'), (6, 'staff:3/v2'), (5, 'staff:3/v2')]), [1, 6])
         self.assertEqual(mapped([(1, 'staff:3'), (2, 'staff:3')]), [1])
         # After unticking step 2 (v2 row 2 and legacy row 4 deleted) only the legacy step 1 remains.
         self.assertEqual(mapped([(1, 'staff:3'), (5, 'staff:3'), (7, 'staff:3')]), [1])
 
     def test_checklist_steps_drops_values_outside_manual_set(self):
-        self.assertEqual(_checklist_steps([7, 6, 5, 4, 3, 2, 1, 8, 0, 2]), [1, 2, 3, 6])
+        self.assertEqual(_checklist_steps([7, 6, 5, 4, 3, 2, 1, 8, 0, 2]), [1, 2, 6])
         self.assertEqual(_checklist_steps(None), [])
+
+    # --- job 010: step 3 derived from pharmacy answers, confirmed amount ------------------
+
+    def test_manual_steps_are_one_two_six(self):
+        self.assertEqual(COURIER_CHECKLIST_MANUAL_STEPS, frozenset({1, 2, 6}))
+
+    def test_step_three_patch_is_rejected_before_database(self):
+        for done in (True, False):
+            cursor = Mock()
+            with self._tx(cursor), self.assertRaises(ContractError) as raised:
+                update_courier_order_checklist('ord_' + 'a' * 32, {'step': 3, 'done': done}, 'req')
+            self.assertEqual((raised.exception.code, raised.exception.http_status), ('VALIDATION_ERROR', 400))
+            self.assertIn('Этот шаг отмечается ответом аптеки', str(raised.exception.__dict__))
+            cursor.execute.assert_not_called()
+
+    def test_stored_step_three_row_is_ignored_on_read(self):
+        cursor = Mock()
+        cursor.fetchone.return_value = {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'medicines': [],
+            'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': [1, 3, 6]}
+        with self._tx(cursor):
+            result = get_courier_order('ord_' + 'a' * 32)
+        self.assertEqual(result['checklist_steps'], [1, 6])
+
+    def _courier_row(self, **extra):
+        cursor = Mock()
+        cursor.fetchone.return_value = {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'medicines': [],
+            'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': [], **extra}
+        with self._tx(cursor):
+            return get_courier_order('ord_' + 'a' * 32), cursor
+
+    def test_confirmed_total_is_null_until_answers_complete(self):
+        result, _ = self._courier_row(pharmacy_answers_complete=False, confirmed_total=None,
+                                      unavailable_count=0, answered_count=1, item_count=2)
+        self.assertIs(result['pharmacy_answers_complete'], False)
+        self.assertIsNone(result['confirmed_total'])
+        self.assertEqual((result['answered_count'], result['item_count']), (1, 2))
+
+    def test_confirmed_total_is_null_when_a_price_differs(self):
+        # SQL returns NULL for confirmed_total when any current answer is price_differs.
+        result, cursor = self._courier_row(pharmacy_answers_complete=True, confirmed_total=None,
+                                           unavailable_count=0, answered_count=2, item_count=2)
+        self.assertIs(result['pharmacy_answers_complete'], True)
+        self.assertIsNone(result['confirmed_total'])
+        sql = cursor.execute.call_args.args[0]
+        self.assertIn("COUNT(*) FILTER (WHERE cur.answer = 'price_differs') = 0", sql)
+
+    def test_confirmed_total_is_decimal_string_when_complete(self):
+        result, cursor = self._courier_row(pharmacy_answers_complete=True, confirmed_total=Decimal('57.50'),
+                                           unavailable_count=1, answered_count=3, item_count=3)
+        self.assertEqual(result['confirmed_total'], '57.50')
+        self.assertEqual(result['unavailable_count'], 1)
+        sql = cursor.execute.call_args.args[0]
+        self.assertIn("SUM(oi.line_total) FILTER (WHERE cur.answer = 'available')", sql)
+        self.assertIn("COUNT(*) FILTER (WHERE cur.answer = 'unavailable') AS unavailable_count", sql)
+
+    def test_old_rows_without_answer_fields_default_safely(self):
+        result, _ = self._courier_row()
+        self.assertIs(result['pharmacy_answers_complete'], False)
+        self.assertIsNone(result['confirmed_total'])
+        self.assertEqual(result['unavailable_count'], 0)
+
+    def test_courier_select_projects_item_pharmacy_and_answers_without_n_plus_one(self):
+        sql = _COURIER_ORDER_SELECT
+        self.assertIn("'pharmacy_id', COALESCE(oi.fulfillment_pharmacy_id,", sql)
+        self.assertIn("'answers', COALESCE(answers.list, '[]'::json)", sql)
+        self.assertIn('FROM order_item_pharmacy_answers a WHERE a.order_item_id = oi.id', sql)
+        self.assertIn('LEFT JOIN order_item_pharmacy_answers cur', sql)
+        self.assertEqual(sql.count('LEFT JOIN LATERAL'), 3)
+        cursor = Mock()
+        cursor.fetchall.return_value = []
+        with self._tx(cursor):
+            list_courier_orders({})
+        self.assertEqual(cursor.execute.call_count, 1)
 
     def test_item_price_requires_a_price(self):
         with self.assertRaises(ContractError):

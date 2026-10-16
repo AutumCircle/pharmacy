@@ -1174,21 +1174,31 @@ def create_staff_order(
 
 
 # Courier checklist v2 (the owner's 7 steps). Steps 4, 5 and 7 are derived from orders.status and are
-# never stored; the courier ticks steps 1, 2, 3 and 6. Rows written by v2 carry
+# never stored; step 3 («Получить подтверждение наличия и цены») is derived from the pharmacy answers
+# (job 010: pharmacy_answers_complete or status past pending), so stored step-3 rows are ignored on read.
+# The courier ticks steps 1, 2 and 6. Rows written by v2 carry
 # completed_by = 'staff:3/v2'; any other marker is a job-001 (8-step) row, mapped on read:
 # old 1 -> new 1, old 4 -> new 2, everything else is ignored. No migration, no data rewrite.
-COURIER_CHECKLIST_MANUAL_STEPS = frozenset({1, 2, 3, 6})
+COURIER_CHECKLIST_MANUAL_STEPS = frozenset({1, 2, 6})
 COURIER_CHECKLIST_MARKER = "staff:3/v2"
 # Maps one stored row (alias c) to its v2 step number, or NULL when the row is ignored. The marker is a
 # server-side constant, not client input; it must equal COURIER_CHECKLIST_MARKER.
 _COURIER_CHECKLIST_STEP_SQL = """CASE
-            WHEN c.completed_by = 'staff:3/v2' THEN CASE WHEN c.step IN (1, 2, 3, 6) THEN c.step::integer END
+            WHEN c.completed_by = 'staff:3/v2' THEN CASE WHEN c.step IN (1, 2, 6) THEN c.step::integer END
             WHEN c.step = 1 THEN 1
             WHEN c.step = 4 THEN 2
         END"""
 _COURIER_CHECKLIST_AGG_SQL = (f"array_agg(DISTINCT {_COURIER_CHECKLIST_STEP_SQL})"
                               f" FILTER (WHERE {_COURIER_CHECKLIST_STEP_SQL} IS NOT NULL)")
 
+# Order-level pharmacy as the courier sees it (pharmacy-entered orders default to their creator).
+_COURIER_ORDER_PHARMACY_SQL = """COALESCE(o.fulfillment_pharmacy_id,
+               CASE WHEN o.created_by_staff_account_id IN (1, 2)
+                    THEN o.created_by_staff_account_id ELSE 1 END)"""
+
+# Per-item pharmacy answers (job 010). Effective item pharmacy = the item's own assignment, else the
+# order's. The "current" answer is the one from that pharmacy; pharmacy_answers_complete and
+# confirmed_total (client sum of items answered «available») are computed here, never by a client.
 _COURIER_ORDER_SELECT = f"""
     SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
            o.address, o.landmark, o.notes, o.order_source, o.status, o.created_at,
@@ -1196,18 +1206,40 @@ _COURIER_ORDER_SELECT = f"""
            o.created_by_staff_account_id IS NULL AS website_order,
            COALESCE(o.created_by_staff_account_id = 3, false) AS own_order,
            COALESCE(items.medicines, '[]'::json) AS medicines,
+           COALESCE(items.pharmacy_answers_complete, false) AS pharmacy_answers_complete,
+           items.confirmed_total,
+           COALESCE(items.unavailable_count, 0) AS unavailable_count,
+           COALESCE(items.answered_count, 0) AS answered_count,
+           COALESCE(items.item_count, 0) AS item_count,
            COALESCE(checklist.steps, ARRAY[]::integer[]) AS checklist_steps,
-           COALESCE(o.fulfillment_pharmacy_id,
-               CASE WHEN o.created_by_staff_account_id IN (1, 2)
-                    THEN o.created_by_staff_account_id ELSE 1 END) AS pharmacy_id
+           {_COURIER_ORDER_PHARMACY_SQL} AS pharmacy_id
     FROM orders o
     LEFT JOIN LATERAL (
         SELECT json_agg(json_build_object('order_item_id', oi.id, 'medicine_id', oi.medicine_id,
             'medicine_name', oi.medicine_name, 'quantity', oi.quantity,
             'base_unit_price', COALESCE(oi.base_unit_price, oi.price),
             'selling_unit_price', COALESCE(oi.selling_unit_price, oi.price),
-            'line_total', oi.line_total) ORDER BY oi.id) AS medicines
-        FROM order_items oi WHERE oi.order_id = o.id
+            'line_total', oi.line_total,
+            'pharmacy_id', COALESCE(oi.fulfillment_pharmacy_id, {_COURIER_ORDER_PHARMACY_SQL}),
+            'answers', COALESCE(answers.list, '[]'::json)) ORDER BY oi.id) AS medicines,
+            COUNT(*) AS item_count,
+            COUNT(cur.answer) AS answered_count,
+            COUNT(*) FILTER (WHERE cur.answer = 'unavailable') AS unavailable_count,
+            (COUNT(*) > 0 AND COUNT(cur.answer) = COUNT(*)) AS pharmacy_answers_complete,
+            CASE WHEN COUNT(*) > 0 AND COUNT(cur.answer) = COUNT(*)
+                      AND COUNT(*) FILTER (WHERE cur.answer = 'price_differs') = 0
+                 THEN COALESCE(SUM(oi.line_total) FILTER (WHERE cur.answer = 'available'), 0)
+            END AS confirmed_total
+        FROM order_items oi
+        LEFT JOIN order_item_pharmacy_answers cur
+               ON cur.order_item_id = oi.id
+              AND cur.pharmacy_id = COALESCE(oi.fulfillment_pharmacy_id, {_COURIER_ORDER_PHARMACY_SQL})
+        LEFT JOIN LATERAL (
+            SELECT json_agg(json_build_object('pharmacy_id', a.pharmacy_id, 'answer', a.answer,
+                'problem', a.problem, 'answered_at', a.answered_at) ORDER BY a.pharmacy_id) AS list
+            FROM order_item_pharmacy_answers a WHERE a.order_item_id = oi.id
+        ) answers ON true
+        WHERE oi.order_id = o.id
     ) items ON true
     LEFT JOIN LATERAL (
         SELECT {_COURIER_CHECKLIST_AGG_SQL} AS steps
@@ -1225,6 +1257,13 @@ def _courier_order_row(row: dict[str, Any]) -> dict[str, Any]:
     row.pop("id")
     row["checklist_steps"] = _checklist_steps(row.get("checklist_steps"))
     row["created_at"] = order_time_iso(row["created_at"])
+    row["pharmacy_answers_complete"] = bool(row.get("pharmacy_answers_complete"))
+    confirmed = row.get("confirmed_total")
+    # Decimal string from the SQL sum; null while answers are incomplete or a price differs.
+    row["confirmed_total"] = None if confirmed is None or not row["pharmacy_answers_complete"] else str(confirmed)
+    row["unavailable_count"] = int(row.get("unavailable_count") or 0)
+    row["answered_count"] = int(row.get("answered_count") or 0)
+    row["item_count"] = int(row.get("item_count") or 0)
     return row
 
 
@@ -1390,6 +1429,7 @@ def add_courier_order_items(
                                                                       unit_price numeric)
                            WHERE oi.id = data.order_item_id AND oi.order_id = %s""",
                         (json.dumps(updates), order["id"]))
+            _invalidate_pharmacy_answers(cur, order["id"], [update["order_item_id"] for update in updates])
         if inserts:
             cur.execute("""INSERT INTO order_items (order_id, medicine_id, medicine_name, price, quantity,
                            base_unit_price, selling_unit_price, line_total)
@@ -1480,13 +1520,33 @@ def add_manual_order_items(
     return result
 
 
+# Effective pharmacy of an order item (job 010): its own assignment, else the order's, else «Ватан 1».
+_ITEM_PHARMACY_SQL = "COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1)"
+
+
+def _invalidate_pharmacy_answers(cur: Any, order_db_id: int, order_item_ids: list[int]) -> None:
+    """An admin change of quantity or pharmacy (base) price voids the answer of the item's current
+    pharmacy, so it must be answered again. The assignment and other pharmacies' answers are kept."""
+    if not order_item_ids:
+        return
+    cur.execute(f"""DELETE FROM order_item_pharmacy_answers a
+                    USING order_items oi JOIN orders o ON o.id = oi.order_id
+                    WHERE a.order_item_id = oi.id AND oi.order_id = %s AND oi.id = ANY(%s)
+                      AND a.pharmacy_id = {_ITEM_PHARMACY_SQL}""",
+                (order_db_id, [int(item_id) for item_id in order_item_ids]))
+
+
 def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) -> dict[str, Any]:
-    """Only live website orders assigned to this pharmacy; no courier/admin financial data."""
+    """Only live website orders with at least one item assigned to this pharmacy; only those items.
+
+    No courier/admin financial data. Per item: order_item_id, my_answer, my_problem (this pharmacy's
+    own answer). routed_away_count = items this pharmacy answered and that now sit at another pharmacy.
+    """
     if set(query) - {"limit", "cursor"}:
         raise ContractError("VALIDATION_ERROR", "Unknown order filter")
     limit = min(_limit(query), 50)
     cursor = _decode_cursor(query.get("cursor"))
-    params: list[Any] = [pharmacy_id]
+    params: list[Any] = [pharmacy_id, pharmacy_id, pharmacy_id, pharmacy_id, pharmacy_id]
     cursor_filter = ""
     if cursor:
         try:
@@ -1504,20 +1564,40 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                        o.notes, o.customer_name, o.phone, o.address, o.landmark,
                        o.order_source, o.utm_source, o.order_total, o.created_by_staff_account_id,
                        COALESCE(items.base_total, 0) AS base_total,
-                       COALESCE(items.medicines, '[]'::json) AS medicines
+                       COALESCE(items.medicines, '[]'::json) AS medicines,
+                       COALESCE(items.unanswered_count, 0) AS unanswered_count,
+                       COALESCE(items.unanswered_unrouted, false) AS unanswered_unrouted,
+                       items.unanswered_routed_since,
+                       COALESCE(routed.routed_away_count, 0) AS routed_away_count
                 FROM orders o
                 LEFT JOIN LATERAL (
-                    SELECT json_agg(json_build_object('medicine_name', oi.medicine_name,
+                    SELECT json_agg(json_build_object('order_item_id', oi.id, 'medicine_name', oi.medicine_name,
                         'quantity', oi.quantity, 'line_total', oi.line_total,
                         'base_unit_price', COALESCE(oi.base_unit_price, oi.price)::text,
-                        'base_line_total', (COALESCE(oi.base_unit_price, oi.price) * oi.quantity)::text)
+                        'base_line_total', (COALESCE(oi.base_unit_price, oi.price) * oi.quantity)::text,
+                        'my_answer', mine.answer, 'my_problem', mine.problem)
                         ORDER BY oi.id) AS medicines,
-                        SUM(COALESCE(oi.base_unit_price, oi.price) * oi.quantity) AS base_total
-                    FROM order_items oi WHERE oi.order_id = o.id
+                        SUM(COALESCE(oi.base_unit_price, oi.price) * oi.quantity) AS base_total,
+                        COUNT(*) FILTER (WHERE mine.answer IS NULL) AS unanswered_count,
+                        bool_or(oi.pharmacy_assigned_at IS NULL) FILTER (WHERE mine.answer IS NULL)
+                            AS unanswered_unrouted,
+                        MIN(oi.pharmacy_assigned_at) FILTER (WHERE mine.answer IS NULL) AS unanswered_routed_since
+                    FROM order_items oi
+                    LEFT JOIN order_item_pharmacy_answers mine
+                           ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                    WHERE oi.order_id = o.id AND {_ITEM_PHARMACY_SQL} = %s
                 ) items ON true
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS routed_away_count
+                    FROM order_items oi
+                    JOIN order_item_pharmacy_answers mine
+                      ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                    WHERE oi.order_id = o.id AND {_ITEM_PHARMACY_SQL} <> %s
+                ) routed ON true
                 WHERE o.deleted_at IS NULL AND o.created_by_staff_account_id IS NULL
                   AND o.status IN ('pending', 'confirmed')
-                  AND COALESCE(o.fulfillment_pharmacy_id, 1) = %s
+                  AND EXISTS (SELECT 1 FROM order_items oi
+                              WHERE oi.order_id = o.id AND {_ITEM_PHARMACY_SQL} = %s)
                   {cursor_filter}
                 ORDER BY o.id DESC LIMIT %s""",
             tuple(params),
@@ -1535,9 +1615,17 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
         row.pop("id")
         row["created_at"] = order_time_iso(row["created_at"])
-        # Not policy-gated and free of client data: drive the pharmacy "waiting N min" badge.
-        row["waiting_since"] = row["created_at"]
-        row["awaiting_response"] = row["status"] == "pending"
+        # Not policy-gated and free of client data: drive the pharmacy "waiting N min" badge and actions.
+        # Waiting = pending and at least one assigned item without this pharmacy's answer; it starts at
+        # the earliest of those items' assignment (routing) time, or at order creation.
+        unanswered = int(row.pop("unanswered_count", 0) or 0)
+        unrouted = bool(row.pop("unanswered_unrouted", False))
+        routed_since = row.pop("unanswered_routed_since", None)
+        row["awaiting_response"] = row["status"] == "pending" and unanswered > 0
+        row["waiting_since"] = (order_time_iso(routed_since)
+                                if row["awaiting_response"] and not unrouted and routed_since is not None
+                                else row["created_at"])
+        row["routed_away_count"] = int(row.get("routed_away_count") or 0)
         row["profit"] = (row["order_total"] or Decimal("0")) - row["base_total"]
         if policy["source"]:
             utm_source = row.pop("utm_source")
@@ -1564,6 +1652,143 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                     if not policy[field]:
                         item.pop(key, None)
     return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
+
+
+PHARMACY_ANSWERS = ("available", "unavailable", "price_differs")
+PHARMACY_ANSWER_MAX_ITEMS = 50
+PHARMACY_PROBLEM_MIN, PHARMACY_PROBLEM_MAX = 3, 300
+_ORDER_ITEM_ID_MAX = 9223372036854775807
+
+
+def validate_pharmacy_answers(payload: Any) -> list[dict[str, Any]]:
+    """Body {"answers": [{order_item_id, answer, problem?}]}; no prices, no pharmacy id, no other keys."""
+    if not isinstance(payload, dict) or set(payload) != {"answers"} or not isinstance(payload["answers"], list):
+        raise ContractError("VALIDATION_ERROR", "Укажите ответы по позициям")
+    entries = payload["answers"]
+    if not 1 <= len(entries) <= PHARMACY_ANSWER_MAX_ITEMS:
+        raise ContractError("VALIDATION_ERROR", f"Можно ответить от 1 до {PHARMACY_ANSWER_MAX_ITEMS} позиций за раз")
+    answers: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for entry in entries:
+        if (not isinstance(entry, dict)
+                or not {"order_item_id", "answer"} <= set(entry) <= {"order_item_id", "answer", "problem"}):
+            raise ContractError("VALIDATION_ERROR", "Проверьте позиции и ответы")
+        item_id = entry["order_item_id"]
+        if type(item_id) is not int or not 0 < item_id <= _ORDER_ITEM_ID_MAX:
+            raise ContractError("VALIDATION_ERROR", "Неверная позиция заказа")
+        if item_id in seen:
+            raise ContractError("VALIDATION_ERROR", "Позиция указана дважды")
+        seen.add(item_id)
+        answer = entry["answer"]
+        if not isinstance(answer, str) or answer not in PHARMACY_ANSWERS:
+            raise ContractError("VALIDATION_ERROR", "Неверный ответ по позиции")
+        raw_problem = entry.get("problem")
+        if raw_problem is not None and not isinstance(raw_problem, str):
+            raise ContractError("VALIDATION_ERROR", "Описание проблемы должно быть текстом")
+        if answer == "available":
+            if raw_problem is not None:
+                raise ContractError("VALIDATION_ERROR", "Для «В наличии» проблема не указывается")
+            problem = None
+        else:
+            problem = " ".join(raw_problem.split()) if raw_problem is not None else ""
+            if "\x00" in problem:
+                raise ContractError("VALIDATION_ERROR", "Описание проблемы содержит недопустимые символы")
+            if not problem:
+                if answer == "price_differs":
+                    raise ContractError("VALIDATION_ERROR", "Опишите, чем отличается цена")
+                problem = None
+            elif not PHARMACY_PROBLEM_MIN <= len(problem) <= PHARMACY_PROBLEM_MAX:
+                raise ContractError("VALIDATION_ERROR",
+                                    f"Описание проблемы: от {PHARMACY_PROBLEM_MIN} до {PHARMACY_PROBLEM_MAX} символов")
+        answers.append({"order_item_id": item_id, "answer": answer, "problem": problem})
+    return answers
+
+
+def answer_pharmacy_order_items(
+    order_id: str, payload: Any, pharmacy_id: int, current_request_id: str,
+) -> dict[str, Any]:
+    """A pharmacy answers availability/price per item of a pending website order (job 010).
+
+    pharmacy_id comes from the HMAC staff session only. «Нет в наличии» from «Ватан 1» routes that item
+    to «Ватан 2» in the same transaction; «Ватан 2» «Нет в наличии» is final; «Цена отличается» never
+    routes. orders.status and order_status_history are never touched. Repeating the same request is a
+    no-op (no writes, no audit) and returns the same projection.
+    """
+    if pharmacy_id not in (1, 2):
+        raise ContractError("FORBIDDEN", "Доступ только для аптеки", http_status=403)
+    answers = validate_pharmacy_answers(payload)
+    lookup, lookup_values = _order_lookup(order_id)
+    actor = f"staff:{pharmacy_id}"
+    with transaction() as cur:
+        cur.execute(f"""SELECT id, status, created_by_staff_account_id, fulfillment_pharmacy_id
+                        FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
+        order = cur.fetchone()
+        if not order or order["created_by_staff_account_id"] is not None:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        cur.execute(f"""SELECT oi.id, {_ITEM_PHARMACY_SQL} AS pharmacy_id, mine.answer, mine.problem
+                        FROM order_items oi
+                        JOIN orders o ON o.id = oi.order_id
+                        LEFT JOIN order_item_pharmacy_answers mine
+                               ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
+                        WHERE oi.order_id = %s ORDER BY oi.id FOR UPDATE OF oi""",
+                    (pharmacy_id, order["id"]))
+        items = {int(row["id"]): dict(row) for row in cur.fetchall()}
+        if not any(int(item["pharmacy_id"]) == pharmacy_id for item in items.values()):
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        if order["status"] != "pending":
+            raise ContractError("ORDER_STATUS_CONFLICT",
+                                "Ответить можно только по новому заказу", http_status=409)
+        changes: list[dict[str, Any]] = []
+        routed: list[int] = []
+        for entry in answers:
+            item = items.get(entry["order_item_id"])
+            if not item:
+                raise ContractError("ORDER_ITEM_NOT_FOUND", "Позиция не найдена в заказе", http_status=404)
+            same = item["answer"] == entry["answer"] and item["problem"] == entry["problem"]
+            if int(item["pharmacy_id"]) != pharmacy_id:
+                # An item this pharmacy already routed away may be re-sent unchanged (idempotent);
+                # anything else on another pharmacy's item is forbidden.
+                if same:
+                    continue
+                raise ContractError("FORBIDDEN", "Эта позиция передана другой аптеке", http_status=403)
+            if same:
+                continue
+            changes.append(entry)
+            if pharmacy_id == 1 and entry["answer"] == "unavailable":
+                routed.append(entry["order_item_id"])
+        if changes:
+            cur.execute("""INSERT INTO order_item_pharmacy_answers
+                               (order_item_id, pharmacy_id, answer, problem, answered_by)
+                           SELECT data.order_item_id, %s, data.answer, data.problem, %s
+                           FROM jsonb_to_recordset(%s::jsonb) AS data(order_item_id bigint, answer text, problem text)
+                           ON CONFLICT (order_item_id, pharmacy_id) DO UPDATE
+                           SET answer = EXCLUDED.answer, problem = EXCLUDED.problem,
+                               answered_by = EXCLUDED.answered_by, answered_at = now()""",
+                        (pharmacy_id, actor, json.dumps(changes, ensure_ascii=False)))
+            if routed:
+                cur.execute("""UPDATE order_items SET fulfillment_pharmacy_id = 2, pharmacy_assigned_at = now()
+                               WHERE order_id = %s AND id = ANY(%s)""",
+                            (order["id"], routed))
+            _write_admin_audit(cur, actor_id=actor, action="pharmacy.order.items_answered",
+                               resource_type="order", resource_id=order_id, request=current_request_id,
+                               details={"pharmacy_id": pharmacy_id,
+                                        "items": [{"order_item_id": entry["order_item_id"], "answer": entry["answer"]}
+                                                  for entry in changes],
+                                        "routed_to_pharmacy_2": routed})
+        for entry in changes:
+            item = items[entry["order_item_id"]]
+            item["answer"], item["problem"] = entry["answer"], entry["problem"]
+            if entry["order_item_id"] in routed:
+                item["pharmacy_id"] = 2
+    mine = [item for item in items.values() if int(item["pharmacy_id"]) == pharmacy_id]
+    away = [item for item in items.values() if int(item["pharmacy_id"]) != pharmacy_id and item["answer"]]
+    return {
+        "order_id": order_id,
+        "items": [{"order_item_id": int(item["id"]), "my_answer": item["answer"], "my_problem": item["problem"]}
+                  for item in sorted(mine, key=lambda value: int(value["id"]))],
+        "routed_away_count": len(away),
+        "awaiting_response": any(item["answer"] is None for item in mine),
+    }
 
 
 def courier_earnings(query: dict[str, Any]) -> dict[str, Any]:
@@ -1709,6 +1934,8 @@ def update_courier_order_checklist(order_id: str, payload: dict[str, Any], curre
     step, done = payload["step"], payload["done"]
     if isinstance(step, bool) or not isinstance(step, int) or not 1 <= step <= 7:
         raise ContractError("VALIDATION_ERROR", "Шаг должен быть числом от 1 до 7")
+    if step == 3:
+        raise ContractError("VALIDATION_ERROR", "Этот шаг отмечается ответом аптеки")
     if step not in COURIER_CHECKLIST_MANUAL_STEPS:
         raise ContractError("VALIDATION_ERROR", "Этот шаг отмечается сменой статуса заказа")
     if not isinstance(done, bool):
@@ -2594,6 +2821,9 @@ def update_order_item_price(
             "UPDATE order_items SET selling_unit_price = %s, base_unit_price = %s, line_total = %s WHERE id = %s",
             (new_price, base_price, line_total, item["id"]),
         )
+        previous_base = item["base_unit_price"]
+        if new_base is not None and (previous_base is None or Decimal(str(previous_base)) != new_base):
+            _invalidate_pharmacy_answers(cur, order["id"], [item["id"]])
         cur.execute(
             "SELECT COALESCE(SUM(line_total), 0) AS items_subtotal FROM order_items WHERE order_id = %s",
             (order["id"],),
@@ -2669,6 +2899,8 @@ def adjust_admin_order_item(
                    WHERE id = %s AND order_id = %s""",
                 (quantity, quantity, item["id"], order["id"]),
             )
+            if quantity != expected_quantity:
+                _invalidate_pharmacy_answers(cur, order["id"], [item["id"]])
         cur.execute("SELECT COALESCE(SUM(line_total), 0) AS total FROM order_items WHERE order_id = %s", (order["id"],))
         total = cur.fetchone()["total"]
         if total > Decimal("99999999.99"):
@@ -4224,6 +4456,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 )
                 payload = {**result, "_notification": notification} if notification else result
                 return success(payload, status_code=status_code, request=current_request_id)
+            answers_match = re.fullmatch(
+                r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/pharmacy-answers", staff_path)
+            if staff_method == "POST" and answers_match:
+                account = staff_accounts.session_account(event, pharmacy=True)
+                return success(answer_pharmacy_order_items(answers_match.group(1), _body(event),
+                    account["account_id"], current_request_id), request=current_request_id)
             items_match = re.fullmatch(r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/items", staff_path)
             if staff_method == "POST" and items_match:
                 staff_accounts.session_account(event, courier=True)
