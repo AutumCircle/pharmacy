@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-16T10:16:43Z",
+  "updated": "2026-10-16T12:21:19Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -261,6 +261,43 @@
       "reworks": 0,
       "note": "",
       "updated": "2026-10-16T10:16:43Z"
+    },
+    {
+      "id": "010-pharmacist-actions-routing",
+      "title": "Действия фармацевта и авто-перенаправление в Ватан 2",
+      "branch": "factory/010-pharmacist-actions-routing",
+      "stage": "merged",
+      "round": 2,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "CHANGES",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-16T12:21:19Z"
     }
   ]
 }
