@@ -1,27 +1,113 @@
 import Link from 'next/link';
-import type { DeliveredDayResponse, OrdersInsights } from '@/lib/api-v1/admin-types';
+import type { DeliveredDayResponse, OrdersDrillResponse, OrdersInsights } from '@/lib/api-v1/admin-types';
 import { formatOrderDateTime } from '@/lib/order-time';
-import { ORIGIN_COLORS, count, dayLabel, money, origin, percent } from './ui';
+import { DRILL_TITLES, drillExplanation, type DrillMetric } from './insights-metrics';
+import { ORIGIN_COLORS, count, dayLabel, money, origin, percent, statusLabels } from './ui';
 
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Звонок' } as const;
 
-export function KpiGrid({ insights }: { insights: OrdersInsights }) {
+export function KpiGrid({ insights, hrefFor, active }: {
+  insights: OrdersInsights; hrefFor: (metric: DrillMetric) => string; active: DrillMetric | null;
+}) {
   const t = insights.totals;
   const clientsTotal = insights.clients.new_clients + insights.clients.returning_clients;
-  const cards = [
-    { label: 'Заказали', value: money(t.ordered_sum), hint: count(t.ordered_count, 'заказ', 'заказа', 'заказов') },
-    { label: 'Доставлено', value: money(t.delivered_sum), hint: count(t.delivered_count, 'доставка', 'доставки', 'доставок'), accent: true },
-    { label: 'Средний чек', value: money(t.average_check), hint: 'по доставленным' },
-    { label: 'Прибыль с товаров', value: money(t.profit), hint: 'цена клиента − цена аптеки' },
-    { label: 'Отменено', value: String(t.cancelled_count), hint: t.ordered_count + t.cancelled_count
+  const cards: Array<{ metric: DrillMetric; value: string; hint: string; accent?: boolean }> = [
+    { metric: 'ordered', value: money(t.ordered_sum),
+      hint: `${count(t.ordered_count, 'заказ', 'заказа', 'заказов')} · созданы за период, кроме отменённых` },
+    { metric: 'delivered', value: money(t.delivered_sum),
+      hint: `${count(t.delivered_count, 'доставка', 'доставки', 'доставок')} · по дате доставки`, accent: true },
+    { metric: 'average_check', value: money(t.average_check), hint: 'по доставленным' },
+    { metric: 'profit', value: money(t.profit), hint: 'цена клиента − цена аптеки' },
+    { metric: 'cancelled', value: String(t.cancelled_count), hint: t.ordered_count + t.cancelled_count
       ? `${percent(t.cancelled_count, t.ordered_count + t.cancelled_count)}% заказов` : 'заказов' },
-    { label: 'Клиенты', value: String(clientsTotal),
+    { metric: 'clients', value: String(clientsTotal),
       hint: `${insights.clients.new_clients} новых · ${insights.clients.returning_clients} постоянных` },
   ];
   return <section className="ao-kpis" aria-label="Итоги периода">
-    {cards.map((card) => <article key={card.label} className={card.accent ? 'ao-kpi ao-kpi-accent' : 'ao-kpi'}>
-      <span>{card.label}</span><strong>{card.value}</strong><small>{card.hint}</small>
-    </article>)}
+    {cards.map((card) => {
+      const open = active === card.metric;
+      return <Link key={card.metric} href={hrefFor(card.metric)}
+        className={['ao-kpi', card.accent ? 'ao-kpi-accent' : '', open ? 'ao-kpi-open' : ''].filter(Boolean).join(' ')}
+        aria-current={open ? 'true' : undefined}
+        aria-label={`${DRILL_TITLES[card.metric]}: ${card.value}, ${card.hint}. Показать список`}>
+        <span>{DRILL_TITLES[card.metric]}</span><strong>{card.value}</strong><small>{card.hint}</small>
+      </Link>;
+    })}
+  </section>;
+}
+
+function DrillSummary({ response }: { response: OrdersDrillResponse }) {
+  if (response.metric === 'clients') {
+    const { new_clients: fresh, returning_clients: returning } = response.summary;
+    return <div className="ao-drill-summary">
+      <article><span>Всего клиентов</span><strong>{fresh + returning}</strong></article>
+      <article><span>Новые</span><strong>{fresh}</strong></article>
+      <article><span>Постоянные</span><strong>{returning}</strong></article>
+    </div>;
+  }
+  const s = response.summary;
+  const delivered = response.metric !== 'ordered' && response.metric !== 'cancelled';
+  const average = s.count ? Number(s.sum) / s.count : 0;
+  return <div className="ao-drill-summary">
+    <article><span>Заказов</span><strong>{s.count}</strong></article>
+    <article><span>{delivered ? 'Сумма доставленных' : 'Сумма заказов'}</span><strong>{money(s.sum)}</strong></article>
+    {response.metric === 'average_check' && <article><span>Средний чек</span><strong>{money(average)}</strong>
+      <small>{money(s.sum)} ÷ {s.count}</small></article>}
+    {delivered && <article className={Number(s.profit) < 0 ? 'ao-loss' : undefined}>
+      <span>Прибыль с товаров</span><strong>{money(s.profit)}</strong></article>}
+  </div>;
+}
+
+function DrillTable({ response }: { response: OrdersDrillResponse }) {
+  if (response.data.length === 0) return <p className="ao-empty">За этот период ничего нет.</p>;
+  if (response.metric === 'clients') {
+    return <div className="ao-table-wrap"><table className="ao-table ao-drill-table">
+      <thead><tr><th>Клиент</th><th>Телефон</th><th className="num">Заказов за период</th><th>Первый заказ</th><th>Тип</th></tr></thead>
+      <tbody>{response.data.map((client, index) => <tr key={`${client.first_order_at}-${index}`}>
+        <td>{client.customer_name || 'Без имени'}</td>
+        <td>{client.phone || '—'}</td>
+        <td className="num">{client.orders_in_period}</td>
+        <td>{formatOrderDateTime(client.first_order_at)}</td>
+        <td><span className={client.is_new ? 'ao-drill-tag ao-drill-new' : 'ao-drill-tag'}>{client.is_new ? 'Новый' : 'Постоянный'}</span></td>
+      </tr>)}</tbody>
+    </table></div>;
+  }
+  const delivered = response.metric !== 'ordered' && response.metric !== 'cancelled';
+  return <div className="ao-table-wrap"><table className="ao-table ao-drill-table">
+    <thead><tr><th>Заказ</th><th>Статус</th><th>{delivered ? 'Доставлен' : 'Создан'}</th><th>Откуда</th>
+      <th className="num">Сумма</th><th className="num">Цена аптеки</th><th className="num">Прибыль</th></tr></thead>
+    <tbody>{response.data.map((order) => {
+      const from = origin(order.created_by_staff_account_id);
+      const loss = Number(order.profit) < 0;
+      return <tr key={order.order_id} className={loss ? 'ao-drill-loss' : undefined}>
+        <td><Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`}>№ {order.order_reference || order.order_id.slice(-6)}</Link>
+          <small>{order.customer_name || 'Без имени'}</small></td>
+        <td><span className={`ao-status ao-status-${order.status}`}>{statusLabels[order.status]}</span></td>
+        <td>{formatOrderDateTime(delivered && order.delivered_at ? order.delivered_at : order.created_at)}</td>
+        <td><span className={`ao-origin ao-origin-${from.key}`}>{from.label}</span></td>
+        <td className="num">{money(delivered ? order.sales : order.order_total)}</td>
+        <td className="num">{money(order.base)}</td>
+        <td className={loss ? 'num ao-loss' : 'num'}>{loss && <span className="ao-sr">Убыток: </span>}<b>{money(order.profit)}</b></td>
+      </tr>;
+    })}</tbody>
+  </table></div>;
+}
+
+export function DrillPanel({ metric, response, closeHref, nextHref }: {
+  metric: DrillMetric; response: OrdersDrillResponse | null; closeHref: string; nextHref: string | null;
+}) {
+  return <section className="ao-card ao-drill" id="drill" aria-labelledby="drill-title">
+    <div className="ao-card-head">
+      <div><span className="ao-eyebrow">Из чего состоит</span>
+        <h2 id="drill-title">{DRILL_TITLES[metric]}</h2>
+        <p>{drillExplanation(metric)}</p></div>
+      <Link href={closeHref} scroll={false} className="ao-drill-close">Закрыть</Link>
+    </div>
+    {response ? <>
+      <DrillSummary response={response} />
+      <DrillTable response={response} />
+      {nextHref && <Link className="ao-more" href={nextHref}>Следующая страница →</Link>}
+    </> : <p className="ao-drill-error" role="alert">Не удалось загрузить список. Попробуйте обновить страницу.</p>}
   </section>;
 }
 

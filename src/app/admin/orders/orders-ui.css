@@ -323,3 +323,30 @@
   .od-item-fields .mp-money { width: 100%; }
   .od-facts div { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* Clickable KPI cards and the drill-down panel (#drill). */
+a.ao-kpi { color: var(--ao-ink); text-decoration: none; align-content: start; transition: border-color .15s, box-shadow .15s, transform .15s; }
+a.ao-kpi:hover { border-color: #b9c3bd; box-shadow: 0 4px 14px rgba(20,32,26,.08); transform: translateY(-1px); }
+a.ao-kpi:focus-visible { outline: 3px solid var(--ao-blue); outline-offset: 2px; }
+a.ao-kpi-accent:hover { border-color: var(--ao-ink); box-shadow: 0 4px 14px rgba(20,32,26,.25); }
+a.ao-kpi.ao-kpi-open { border-color: var(--ao-brand); box-shadow: 0 0 0 2px var(--ao-brand) inset; }
+a.ao-kpi.ao-kpi-accent.ao-kpi-open { box-shadow: 0 0 0 2px var(--ao-brand); }
+.ao-drill { scroll-margin-top: 16px; }
+.ao-drill .ao-card-head p { max-width: 760px; }
+.ao-drill-close { flex: none; padding: 8px 14px; border: 1px solid #d5dbd7; border-radius: 10px; background: #fff; color: var(--ao-ink); font-weight: 700; font-size: 14px; text-decoration: none; }
+.ao-drill-close:hover { background: var(--ao-bg); }
+.ao-drill-close:focus-visible, .ao-drill-table a:focus-visible { outline: 3px solid var(--ao-blue); outline-offset: 2px; }
+.ao-drill-summary { display: flex; flex-wrap: wrap; gap: 10px; }
+.ao-drill-summary article { display: grid; gap: 2px; min-width: 150px; padding: 10px 14px; border-radius: 12px; background: var(--ao-bg); }
+.ao-drill-summary span, .ao-drill-summary small { color: var(--ao-muted); font-size: 12px; }
+.ao-drill-summary strong { font-size: 19px; }
+.ao-drill-summary .ao-loss strong { color: var(--ao-brand-dark); }
+.ao-drill-table tr.ao-drill-loss td { background: var(--ao-brand-soft); }
+.ao-drill-table tr.ao-drill-loss td:first-child { box-shadow: 3px 0 0 var(--ao-brand) inset; }
+.ao-drill-table td.ao-loss b { color: var(--ao-brand-dark); }
+.ao-drill-tag { padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: var(--ao-ok-soft); color: var(--ao-ok); }
+.ao-drill-tag.ao-drill-new { background: var(--ao-blue-soft); color: var(--ao-blue); }
+.ao-drill-error { padding: 12px 14px; border-radius: 12px; background: var(--ao-brand-soft); color: var(--ao-brand-dark); font-weight: 700; }
+.ao-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.ao-money-card dt small { display: block; color: rgba(255,255,255,.65); font-size: 12px; font-weight: 400; }
+@media (prefers-reduced-motion: reduce) { a.ao-kpi { transition: none; } a.ao-kpi:hover { transform: none; } }

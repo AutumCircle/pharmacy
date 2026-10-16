@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { OrdersInsights } from '@/lib/api-v1/admin-types';
 import { formatOrderDateTime } from '@/lib/order-time';
+import { courierAveragePerDay } from './insights-metrics';
 import { count, dayLabel, money, origin } from './ui';
 
 function DayBars({ title, hint, values, color }: {
@@ -33,6 +34,7 @@ export default function FinanceView({ insights }: { insights: OrdersInsights }) 
   const t = insights.totals;
   const ownerTotal = Number(t.profit) + Number(t.owner_fee);
   const courierDeliveries = t.delivered_count - t.owner_delivered;
+  const courierPerDay = courierAveragePerDay(insights.daily);
   return <>
     <section className="ao-finance-top">
       <article className="ao-money-card ao-money-owner">
@@ -50,6 +52,8 @@ export default function FinanceView({ insights }: { insights: OrdersInsights }) 
         <dl>
           <div><dt>Доставил заказов</dt><dd>{courierDeliveries}</dd></div>
           <div><dt>В среднем за доставку</dt><dd>{money(courierDeliveries ? Number(t.courier_fee) / courierDeliveries : 0)}</dd></div>
+          <div><dt>В среднем за день<small>за {count(courierPerDay.workingDays, 'день', 'дня', 'дней')} с доставками</small></dt>
+            <dd>{money(courierPerDay.average)}</dd></div>
           <div><dt>Оборот доставленных</dt><dd>{money(t.delivered_sum)}</dd></div>
         </dl>
       </article>

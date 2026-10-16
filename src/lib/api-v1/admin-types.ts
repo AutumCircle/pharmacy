@@ -402,6 +402,33 @@ export type OrdersInsights = {
     owner_total: number | string }>;
 };
 
+export type OrdersDrillMetric = 'ordered' | 'delivered' | 'average_check' | 'profit' | 'cancelled' | 'clients';
+
+export type OrdersDrillOrder = {
+  order_id: string; order_reference: string | null; customer_name: string | null; status: OrderStatus;
+  created_at: string; delivered_at?: string; created_by_staff_account_id: 1 | 2 | 3 | null;
+  order_total: number | string | null; sales: number | string; base: number | string; profit: number | string;
+  delivery_courier_amount: number | string | null; delivery_owner_amount: number | string | null;
+};
+
+export type OrdersDrillClient = {
+  customer_name: string | null; phone: string | null; orders_in_period: number; first_order_at: string; is_new: boolean;
+};
+
+type OrdersDrillBase = {
+  period_days: OrdersInsightsPeriod; from: string; to: string; currency: 'TJS'; page: CursorPage; request_id: string;
+};
+
+export type OrdersDrillResponse = OrdersDrillBase & ({
+  metric: Exclude<OrdersDrillMetric, 'clients'>;
+  summary: { count: number; sum: number | string; profit: number | string };
+  data: OrdersDrillOrder[];
+} | {
+  metric: 'clients';
+  summary: { new_clients: number; returning_clients: number };
+  data: OrdersDrillClient[];
+});
+
 export type DeliveredDayResponse = {
   date: string;
   time_zone: 'Asia/Dushanbe';

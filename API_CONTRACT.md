@@ -367,6 +367,15 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
   - `clients` — новые и постоянные номера;
   - `delivered_orders` — до 200 доставленных заказов с прибылью и долями доставки.
 - `GET /v1/admin/orders/delivered-day` дополнительно отдаёт в `summary` поля `total_sales`, `website_sales`, `courier_sales`, `pharmacy_sales`, `courier_fee`, `owner_fee`, `owner_delivered`.
+- `GET /v1/admin/orders/insights/orders?days=1|7|30|90&metric=…&limit=1..100&cursor=…` — заказы (или клиенты), из которых состоит одна карточка обзора. Начало периода, фильтры и формулы `sales`/`base` — те же общие SQL-фрагменты, что в `orders/insights`, поэтому `summary` совпадает с карточкой.
+  - `days` — по умолчанию 7; `metric` — обязателен; `limit` — по умолчанию 50, максимум 100. Любой другой параметр, неверный `days`/`metric`/`limit` или испорченный `cursor` — `400 VALIDATION_ERROR`. `metric` выбирает один из фиксированных SQL-фрагментов и никогда не подставляется в SQL.
+  - `ordered` — не удалённые заказы, созданные за период, `status <> 'cancelled'`, по `created_at DESC, id DESC`. `summary`: `count` = `totals.ordered_count`, `sum` (по `order_total`) = `totals.ordered_sum`.
+  - `cancelled` — то же, но `status = 'cancelled'`. `summary.count` = `totals.cancelled_count`.
+  - `delivered` и `average_check` — доставленные заказы с датой доставки в периоде (`DELIVERED_DAY_CTE`), по `delivered_at DESC, id DESC`. `summary`: `count` = `totals.delivered_count`, `sum` (по `sales`) = `totals.delivered_sum`; средний чек = `sum / count`.
+  - `profit` — те же доставленные заказы, по `profit ASC, id ASC` (сначала убыточные). `summary.profit` = `totals.profit`.
+  - Строка заказа: `order_id` (`ord_…` или `legacy_N`), `order_reference`, `customer_name`, `status`, `created_at`, `delivered_at` (только для доставленных метрик), `created_by_staff_account_id`, `order_total`, `sales`, `base`, `profit` (= `sales − base`), `delivery_courier_amount`, `delivery_owner_amount`. `summary` заказных метрик: `count`, `sum`, `profit` по всем строкам, а не только по странице.
+  - `clients` — по одной строке на `phone_normalized` с неотменённым заказом, созданным в периоде: `customer_name` и `phone` из последнего заказа, `orders_in_period`, `first_order_at`, `is_new` (`first_order_at >=` начала периода). Порядок `first_order_at DESC`, при равенстве — по внутреннему id первого заказа (телефон не попадает в `cursor`). `summary`: `new_clients`, `returning_clients` = `clients`.
+  - Ответ: `{ metric, period_days, from, to, currency, summary, data, page: { next_cursor, has_more }, request_id }`. Пагинация keyset; `cursor` действителен только для той же `metric`.
 - Только чтение. Новые маршруты покрыты `ANY /v1/admin/{proxy+}`.
 
 ### 8.2 Categories
