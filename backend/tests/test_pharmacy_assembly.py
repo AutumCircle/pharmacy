@@ -25,8 +25,9 @@ def mark(state):
 
 
 class PharmacyAssemblyTests(unittest.TestCase):
-    def _run(self, state, pharmacy_id=1, order=None, item_counts=None, current=None, saved=None):
+    def _run(self, state, pharmacy_id=1, order=None, item_counts=None, current=None, saved=None, answered=()):
         cursor = self.last_cursor = Mock()
+        cursor.fetchall.return_value = [{'order_item_id': item_id} for item_id in answered]
         sequence = [dict(CONFIRMED) if order is None else order,
                     counts() if item_counts is None else item_counts,
                     current,
@@ -110,12 +111,38 @@ class PharmacyAssemblyTests(unittest.TestCase):
         exception = self._error('assembling', pharmacy_id=2, item_counts=counts(0, 0))
         self.assertEqual((exception.code, exception.http_status), ('ORDER_NOT_FOUND', 404))
 
-    def test_only_confirmed_orders_accept_marks(self):
-        for status in ('pending', 'delivering', 'delivered', 'cancelled'):
+    def test_only_pending_and_confirmed_orders_accept_marks(self):
+        # Rework 1: assembly starts while the order is «Новый»; confirmed orders still accept marks.
+        for status in ('delivering', 'delivered', 'cancelled'):
             with self.subTest(status=status):
                 exception = self._error('assembling', order={**CONFIRMED, 'status': status})
                 self.assertEqual((exception.code, exception.http_status), ('ORDER_STATUS_CONFLICT', 409))
-                self.assertEqual(str(exception), 'Сборка доступна после согласования заказа')
+                self.assertEqual(str(exception), 'Сборка доступна только для нового или согласованного заказа')
+        for status in ('pending', 'confirmed'):
+            with self.subTest(status=status):
+                result, cursor = self._run('assembling', order={**CONFIRMED, 'status': status})
+                self.assertEqual(result['state'], 'assembling')
+                self._assert_never_touches_status(cursor)
+
+    def test_assembled_on_pending_order_answers_remaining_items_available(self):
+        result, cursor = self._run('assembled', order={**CONFIRMED, 'status': 'pending'},
+                                   current=mark('assembling'), answered=(83, 81))
+        auto = next(call for call in cursor.execute.call_args_list
+                    if 'INSERT INTO order_item_pharmacy_answers' in call.args[0])
+        self.assertIn("SELECT oi.id, %s, 'available', %s", auto.args[0])
+        self.assertIn('mine.answer IS NULL', auto.args[0])
+        self.assertIn('COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1) = %s', auto.args[0])
+        self.assertIn('ON CONFLICT (order_item_id, pharmacy_id) DO NOTHING', auto.args[0])
+        self.assertEqual(auto.args[1], (1, 'staff:1', 1, 9, 1))
+        audit = next(call for call in cursor.execute.call_args_list if 'admin_audit_log' in call.args[0])
+        self.assertEqual(json.loads(audit.args[1][5]), {'pharmacy_id': 1, 'from_state': 'assembling',
+                                                       'to_state': 'assembled', 'answered_available': [81, 83]})
+        self.assertEqual(result['state'], 'assembled')
+        self._assert_never_touches_status(cursor)
+
+    def test_assembled_on_confirmed_order_does_not_write_answers(self):
+        _, cursor = self._run('assembled', current=mark('assembling'))
+        self.assertFalse(any('order_item_pharmacy_answers (' in sql for sql in self._statements(cursor)))
 
     def test_all_items_unavailable_is_nothing_to_assemble(self):
         exception = self._error('assembling', pharmacy_id=2, item_counts=counts(2, 0))

@@ -689,13 +689,19 @@ class CourierOrderTests(unittest.TestCase):
             {'pharmacy_id': 2, 'state': 'assembling', 'started_at': None, 'assembled_at': None}])
         self.assertIs(both['assembly_complete'], False)
 
-    def test_assembly_complete_only_while_confirmed(self):
-        marks = [{'pharmacy_id': 1, 'state': 'assembled', 'started_at': None, 'assembled_at': None}]
-        for status in ('pending', 'delivering', 'delivered', 'cancelled'):
+    def test_assembly_complete_does_not_depend_on_confirmed(self):
+        # Rework 1: assembly happens while the order is pending; «Согласовано» waits for it.
+        done = [{'pharmacy_id': 1, 'state': 'assembled', 'started_at': None, 'assembled_at': None}]
+        waiting = [{'pharmacy_id': 1, 'state': 'assembling', 'started_at': None, 'assembled_at': None}]
+        for status in ('pending', 'confirmed', 'delivering', 'delivered'):
             with self.subTest(status=status):
-                result, _ = self._courier_row(status=status, website_order=True, assembly=marks)
-                self.assertIs(result['assembly_complete'], False)
+                result, _ = self._courier_row(status=status, website_order=True, assembly=done)
+                self.assertIs(result['assembly_complete'], True)
                 self.assertEqual(len(result['assembly']), 1)  # marks stay visible read-only
+                result, _ = self._courier_row(status=status, website_order=True, assembly=waiting)
+                self.assertIs(result['assembly_complete'], False)
+        cancelled, _ = self._courier_row(status='cancelled', website_order=True, assembly=done)
+        self.assertIs(cancelled['assembly_complete'], False)
 
     def test_assembly_sql_excludes_pharmacies_with_only_unavailable_items(self):
         sql = _COURIER_ORDER_SELECT
@@ -721,7 +727,7 @@ class CourierOrderTests(unittest.TestCase):
         self.assertEqual(forced['assembly'], [])
         old, _ = self._courier_row()
         self.assertEqual(old['assembly'], [])
-        self.assertIs(old['assembly_complete'], False)
+        self.assertIs(old['assembly_complete'], True)  # nothing to assemble
 
     def test_item_price_requires_a_price(self):
         with self.assertRaises(ContractError):
