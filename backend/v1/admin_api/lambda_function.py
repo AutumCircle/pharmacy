@@ -1509,7 +1509,8 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                 LEFT JOIN LATERAL (
                     SELECT json_agg(json_build_object('medicine_name', oi.medicine_name,
                         'quantity', oi.quantity, 'line_total', oi.line_total,
-                        'base_line_total', COALESCE(oi.base_unit_price, oi.price) * oi.quantity)
+                        'base_unit_price', COALESCE(oi.base_unit_price, oi.price)::text,
+                        'base_line_total', (COALESCE(oi.base_unit_price, oi.price) * oi.quantity)::text)
                         ORDER BY oi.id) AS medicines,
                         SUM(COALESCE(oi.base_unit_price, oi.price) * oi.quantity) AS base_total
                     FROM order_items oi WHERE oi.order_id = o.id
@@ -1534,6 +1535,9 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
         row.pop("id")
         row["created_at"] = order_time_iso(row["created_at"])
+        # Not policy-gated and free of client data: drive the pharmacy "waiting N min" badge.
+        row["waiting_since"] = row["created_at"]
+        row["awaiting_response"] = row["status"] == "pending"
         row["profit"] = (row["order_total"] or Decimal("0")) - row["base_total"]
         if policy["source"]:
             utm_source = row.pop("utm_source")
@@ -1555,6 +1559,7 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         else:
             for item in row["medicines"]:
                 for field, key in (("quantity", "quantity"), ("item_client_total", "line_total"),
+                                   ("item_base_total", "base_unit_price"),
                                    ("item_base_total", "base_line_total")):
                     if not policy[field]:
                         item.pop(key, None)

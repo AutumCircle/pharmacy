@@ -73,8 +73,6 @@
 .staff-selected-items input { padding: 8px; text-align: center; }
 .courier-new-order { align-self: center; padding: 11px 16px; border-radius: 10px; background: #b71920; color: #fff; text-decoration: none; font-weight: 750; }
 .courier-order-list { display: grid; gap: 14px; }
-.pharmacy-preparation-items { margin: 15px 0 0; padding-left: 22px; display: grid; gap: 8px; }
-.pharmacy-preparation-items li { overflow-wrap: anywhere; }
 .courier-order-card { padding: 20px; border: 1px solid #e0e5e1; border-radius: 14px; background: #fff; box-shadow: 0 3px 14px rgba(20,35,25,.04); }
 .courier-order-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .courier-order-heading>div { display: grid; gap: 4px; }
@@ -83,6 +81,39 @@
 .courier-order-status.pending { color: #a4141b; background: #fff0f0; }
 .courier-order-status.delivering { color: #165887; background: #e7f3fb; }
 .courier-order-status.delivered { color: #17632e; background: #effaf2; }
+
+/* ---------- Pharmacy order card (job 008) ---------- */
+.pharmacy-order-card { display: grid; grid-template-columns: minmax(0,1fr); gap: 12px; }
+.pharmacy-order-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.pharmacy-order-head>div { display: grid; gap: 3px; min-width: 0; }
+.pharmacy-order-head h2 { margin: 0; font-size: 19px; line-height: 1.25; overflow-wrap: anywhere; }
+.pharmacy-order-number { color: #b71920; }
+.pharmacy-order-head time { color: #4f5a52; font-size: 14px; }
+.pharmacy-order-status { flex: none; padding: 6px 11px; border-radius: 999px; font-size: 13px; font-weight: 800; }
+.pharmacy-order-status.pending { color: #a3161c; background: #fdeced; }
+.pharmacy-order-status.confirmed { color: #134d86; background: #e3effb; }
+.pharmacy-waiting { justify-self: start; padding: 6px 11px; border-radius: 8px; font-size: 14px; font-weight: 750; color: #3d4740; background: #eff2f0; }
+.pharmacy-waiting.warning { color: #7a4a00; background: #fff1d1; }
+.pharmacy-waiting.urgent { color: #fff; background: #c4161c; }
+.pharmacy-order-meta { margin: 0; color: #4f5a52; }
+.pharmacy-order-client { margin: 0; display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: #f6f8f6; }
+.pharmacy-order-client>div { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 8px; }
+.pharmacy-order-client dt { color: #4f5a52; font-size: 14px; }
+.pharmacy-order-client dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.pharmacy-order-client a { color: #134d86; }
+.pharmacy-order-note { margin: 0; padding: 9px 12px; border-left: 3px solid #e3a008; border-radius: 6px; background: #fffaf0; overflow-wrap: anywhere; }
+.pharmacy-items-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid #e0e5e1; border-radius: 10px; }
+.pharmacy-items { width: 100%; min-width: 320px; border-collapse: collapse; font-size: 15px; }
+.pharmacy-items th, .pharmacy-items td { padding: 9px 10px; border-bottom: 1px solid #edf0ee; text-align: left; vertical-align: top; }
+.pharmacy-items thead th { background: #f6f8f6; color: #4f5a52; font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; }
+.pharmacy-items .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pharmacy-items td.name { font-weight: 650; overflow-wrap: anywhere; min-width: 120px; }
+.pharmacy-items td.qty { font-weight: 800; color: #134d86; }
+.pharmacy-items tfoot th, .pharmacy-items tfoot td { border-bottom: 0; background: #effaf2; font-weight: 800; }
+.pharmacy-items tfoot th { text-align: right; }
+.pharmacy-items td.total { color: #17632e; font-size: 17px; }
+.pharmacy-order-actions:empty { display: none; }
+.pharmacy-order-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* ---------- Courier ---------- */
 .c-page { display: grid; grid-template-columns: minmax(0,1fr); gap: 14px; }
@@ -192,6 +223,8 @@
   .staff-table td:nth-child(3) { margin-top: 5px; }
   .staff-order-form { padding: 20px 16px; }
   .courier-order-card { padding: 16px; }
+  .pharmacy-items { font-size: 14px; }
+  .pharmacy-items th, .pharmacy-items td { padding: 8px 7px; }
   .c-page-head h1 { font-size: 23px; }
 }
 @media (max-width: 380px) {

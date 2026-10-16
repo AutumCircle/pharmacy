@@ -43,6 +43,14 @@ class NotificationSettingsTests(unittest.TestCase):
             yield cursor
         return patch('backend.v1.admin_api.lambda_function.transaction', fake_transaction)
 
+    def test_pharmacy_web_defaults_show_base_prices_but_no_client_identity(self):
+        web = default_policies()['pharmacy_web']
+        self.assertTrue(web['item_base_total'])
+        self.assertTrue(web['base_total'])
+        for field in ('customer_name', 'phone', 'address', 'landmark', 'client_total',
+                      'item_client_total', 'profit', 'creator'):
+            self.assertFalse(web[field], field)
+
     def test_policy_is_allowlisted_and_order_number_cannot_be_hidden(self):
         policies = default_policies()
         enabled, result, revision = validate_update({

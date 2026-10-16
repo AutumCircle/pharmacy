@@ -79,13 +79,18 @@ export type PharmacyPreparationOrder = {
   order_reference?: string | null;
   status?: 'pending' | 'confirmed';
   created_at?: string;
+  /** ISO start of the waiting timer (= created_at). Absent on Lambdas older than job 008. */
+  waiting_since?: string;
+  /** True while the order still waits for the pharmacy's answer. */
+  awaiting_response?: boolean;
   source?: string;
   customer_name?: string;
   phone?: string;
   address?: string;
   landmark?: string | null;
   notes?: string | null;
-  medicines?: Array<{ medicine_name: string; quantity?: number; line_total?: number | string; base_line_total?: number | string }>;
+  medicines?: Array<{ medicine_name: string; quantity?: number; line_total?: number | string;
+    base_unit_price?: number | string; base_line_total?: number | string }>;
   order_total?: number | string;
   base_total?: number | string;
   profit?: number | string;

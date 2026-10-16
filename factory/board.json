@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-16T05:21:50Z",
+  "updated": "2026-10-16T10:11:09Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -196,6 +196,61 @@
       "reworks": 0,
       "note": "approved by human",
       "updated": "2026-10-16T05:21:50Z"
+    },
+    {
+      "id": "008-pharmacy-order-screen",
+      "title": "Экран заказа для аптек 1 и 2",
+      "branch": "factory/008-pharmacy-order-screen",
+      "stage": "merged",
+      "round": 2,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 1,
+      "note": "approved by human",
+      "updated": "2026-10-16T10:11:09Z"
+    },
+    {
+      "id": "009-ios-carousels-endpoint",
+      "title": "Публичный JSON каруселей для iOS",
+      "branch": "factory/009-ios-carousels-endpoint",
+      "stage": "build",
+      "round": 1,
+      "reviews": {
+        "security": "pending",
+        "ux": "pending",
+        "ui": "pending",
+        "code": "pending"
+      },
+      "history": [],
+      "decision": null,
+      "reworks": 0,
+      "note": "",
+      "updated": "2026-10-16T10:05:39Z"
     }
   ]
 }
