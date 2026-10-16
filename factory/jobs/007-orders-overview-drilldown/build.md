@@ -58,3 +58,14 @@
   - **Profit keyset at 90 days:** profit is computed per order, so no index can serve that ordering. Each page recomputes the delivered set for the period, as `orders_insights` already does. This should be fine at current volumes. No migration was added.
   - Extra row field `order_total` is returned. «Заказали»/«Отменено» rows show it as «Сумма», since the card sums `order_total`.
   - Courier average placement («Финансы», not «Обзор») and the repeat-medicines follow-up (job 008) still need owner confirmation, as the spec notes.
+
+## Round 1b — merge main
+- Note: the worktree had been removed; recreated it with `git worktree add .factory-worktrees/007-orders-overview-drilldown factory/007-orders-overview-drilldown`.
+- Commits: d71997a Merge main into factory/007-orders-overview-drilldown
+- Changed: package.json (conflict only). `test:frontend` now lists both `tests/tracking-guard.test.ts` (job 006) and `tests/orders-insights-metrics.test.ts`. No other conflicts; everything else from main (API_CONTRACT.md, tracking route/page, tracking-guard, client-reads, tsconfig, factory files) auto-merged cleanly. No conflict markers left.
+- Tests run (in worktree):
+  - `npm run test:frontend` → 72 pass, 0 fail
+  - `npm run lint` → exit 0, no findings
+  - `npm run build` → exit 0
+  - `python3 -m unittest discover -s backend/tests -t .` → 268 tests; only the 2 known main failures (`test_banner_title_can_be_empty_for_image_only_banner`, `test_quantity_on_delivered_order_recalculates_total_and_audits`), no new failures
+- Not pushed, not deployed.

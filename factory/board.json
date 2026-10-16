@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-16T04:01:11Z",
+  "updated": "2026-10-16T05:21:50Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -173,7 +173,7 @@
       "id": "007-orders-overview-drilldown",
       "title": "Обзор заказов: кликабельные карточки, повторные лекарства, зарплата курьера",
       "branch": "factory/007-orders-overview-drilldown",
-      "stage": "needs-human",
+      "stage": "merged",
       "round": 1,
       "reviews": {
         "security": "PASS",
@@ -194,8 +194,8 @@
       ],
       "decision": "ESCALATE",
       "reworks": 0,
-      "note": "Нужен деплой admin Lambda вместе с Vercel; сверить 6 карточек после деплоя",
-      "updated": "2026-10-16T04:01:11Z"
+      "note": "approved by human",
+      "updated": "2026-10-16T05:21:50Z"
     }
   ]
 }
