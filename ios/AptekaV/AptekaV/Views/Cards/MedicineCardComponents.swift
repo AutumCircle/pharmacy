@@ -92,16 +92,21 @@ struct QuantityStepper: View {
     let quantity: Int
     var style: Style = .neutral
     var height: CGFloat = 44
+    /// At quantity 1 the minus becomes a trash icon that removes the item. Off where a
+    /// separate delete button exists (product page); then minus is disabled at 1.
+    var trashAtOne = true
     let onChange: (Int) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
             stepButton(
-                systemName: quantity == 1 ? "trash" : "minus",
-                label: quantity == 1 ? "Удалить из корзины" : "Уменьшить количество"
+                systemName: trashAtOne && quantity == 1 ? "trash" : "minus",
+                label: trashAtOne && quantity == 1 ? "Удалить из корзины" : "Уменьшить количество"
             ) {
                 onChange(quantity - 1)
             }
+            .disabled(!trashAtOne && quantity <= 1)
+            .opacity(!trashAtOne && quantity <= 1 ? 0.4 : 1)
 
             Text("\(quantity)")
                 .font(.system(size: 15, weight: .semibold).monospacedDigit())

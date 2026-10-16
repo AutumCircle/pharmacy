@@ -164,11 +164,8 @@ private struct PurchaseCardProductPage: View {
                 ProductTitle(medicine: medicine)
 
                 VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .firstTextBaseline) {
-                        ProductPrice(medicine: medicine, size: 30)
-                        Spacer()
-                        AvailabilityBadge(inStock: medicine.inStock)
-                    }
+                    ProductPrice(medicine: medicine, size: 30)
+                    AvailabilityBadge(inStock: medicine.inStock)
                     if medicine.catalogUpdatedAt != nil {
                         Text("Цена и наличие обновляются из аптеки")
                             .font(.system(size: 13))
@@ -229,9 +226,7 @@ private struct GlassProductPage: View {
                 if !medicine.inStock {
                     GlassOutOfStockLabel(height: 50)
                 } else if cart.quantity(of: medicine.id) > 0 {
-                    QuantityStepper(quantity: cart.quantity(of: medicine.id), style: .glassBrand, height: 50) {
-                        cart.setQuantity($0, for: medicine)
-                    }
+                    ProductCartControls(medicine: medicine, style: .glassBrand, height: 50)
                 } else {
                     GlassAddToCartButton(height: 50) { cart.add(medicine) }
                 }
@@ -264,19 +259,14 @@ private struct MinimalProductPage: View {
 
                 ProductTitle(medicine: medicine, centered: true)
 
-                Text(PriceFormatter.string(medicine.sellingUnitPrice))
-                    .font(.system(size: 40, weight: .heavy).monospacedDigit())
-                    .foregroundColor(medicine.inStock ? Theme.brandPrimary : Theme.textSecondary)
+                ProductPrice(medicine: medicine, size: 40, centered: true)
 
                 AvailabilityBadge(inStock: medicine.inStock)
 
                 HStack(spacing: 18) {
                     if medicine.inStock {
                         if cart.quantity(of: medicine.id) > 0 {
-                            QuantityStepper(quantity: cart.quantity(of: medicine.id), style: .brand, height: 60) {
-                                cart.setQuantity($0, for: medicine)
-                            }
-                            .frame(width: 180)
+                            ProductCartControls(medicine: medicine, style: .brand, height: 60)
                         } else {
                             Button { cart.add(medicine) } label: {
                                 Image(systemName: "cart.badge.plus")
@@ -322,45 +312,55 @@ private struct ProductPhoto: View {
     }
 }
 
-/// Medicine name with the favourite heart right next to it (all page styles).
 private struct ProductTitle: View {
-    @EnvironmentObject private var favorites: FavoritesStore
     let medicine: Medicine
     var size: CGFloat = 22
     var centered = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        Text(medicine.medicineName)
+            .font(.system(size: size, weight: .bold))
+            .foregroundColor(Theme.textPrimary)
+            .multilineTextAlignment(centered ? .center : .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
+    }
+}
+
+/// Price on the left, favourite heart at the opposite (right) end of the same row.
+private struct ProductPrice: View {
+    let medicine: Medicine
+    let size: CGFloat
+    var centered = false
+
+    var body: some View {
+        HStack(spacing: 12) {
             if centered { Spacer(minLength: 0) }
-            Text(medicine.medicineName)
-                .font(.system(size: size, weight: .bold))
-                .foregroundColor(Theme.textPrimary)
-                .multilineTextAlignment(centered ? .center : .leading)
-                .fixedSize(horizontal: false, vertical: true)
-            if !centered { Spacer(minLength: 0) }
-            Button {
-                favorites.toggle(medicine)
-            } label: {
-                Image(systemName: favorites.contains(medicine.id) ? "heart.fill" : "heart")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(Theme.brandPrimary)
-                    .frame(width: 44, height: 44)
-                    .background(Circle().fill(Theme.brandSoft))
-            }
-            .accessibilityLabel(favorites.contains(medicine.id) ? "Удалить из избранного" : "Добавить в избранное")
+            Text(PriceFormatter.string(medicine.sellingUnitPrice))
+                .font(.system(size: size, weight: .bold).monospacedDigit())
+                .foregroundColor(medicine.inStock ? Theme.brandPrimary : Theme.textSecondary)
+            Spacer(minLength: centered ? 12 : 0)
+            FavoriteHeartButton(medicine: medicine)
             if centered { Spacer(minLength: 0) }
         }
     }
 }
 
-private struct ProductPrice: View {
+private struct FavoriteHeartButton: View {
+    @EnvironmentObject private var favorites: FavoritesStore
     let medicine: Medicine
-    let size: CGFloat
 
     var body: some View {
-        Text(PriceFormatter.string(medicine.sellingUnitPrice))
-            .font(.system(size: size, weight: .bold).monospacedDigit())
-            .foregroundColor(medicine.inStock ? Theme.brandPrimary : Theme.textSecondary)
+        Button {
+            favorites.toggle(medicine)
+        } label: {
+            Image(systemName: favorites.contains(medicine.id) ? "heart.fill" : "heart")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(Theme.brandPrimary)
+                .frame(width: 48, height: 48)
+                .background(Circle().fill(Theme.brandSoft))
+        }
+        .accessibilityLabel(favorites.contains(medicine.id) ? "Удалить из избранного" : "Добавить в избранное")
     }
 }
 
@@ -444,11 +444,53 @@ private struct PurchaseControls: View {
         if !medicine.inStock {
             OutOfStockLabel(height: 50)
         } else if cart.quantity(of: medicine.id) > 0 {
-            QuantityStepper(quantity: cart.quantity(of: medicine.id), style: .brand, height: 50) {
-                cart.setQuantity($0, for: medicine)
-            }
+            ProductCartControls(medicine: medicine, style: .brand, height: 50)
         } else {
             AddToCartButton(height: 50) { cart.add(medicine) }
         }
+    }
+}
+
+/// In-cart controls on the product page: 🗑 remove, − quantity +, 🛒 open the cart.
+private struct ProductCartControls: View {
+    @EnvironmentObject private var cart: CartStore
+    @Environment(\.selectTab) private var selectTab
+    let medicine: Medicine
+    let style: QuantityStepper.Style
+    let height: CGFloat
+
+    private var isGlass: Bool { style == .glassBrand || style == .glass }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            iconButton("trash", label: "Удалить из корзины", tint: Theme.danger) {
+                cart.setQuantity(0, for: medicine)
+            }
+            QuantityStepper(quantity: cart.quantity(of: medicine.id), style: style, height: height, trashAtOne: false) {
+                cart.setQuantity($0, for: medicine)
+            }
+            iconButton("cart.fill", label: "Перейти в корзину", tint: Theme.brandPrimary) {
+                selectTab(.cart)
+            }
+        }
+    }
+
+    private func iconButton(_ icon: String, label: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundColor(tint)
+                .frame(width: height, height: height)
+                .background {
+                    if isGlass {
+                        GlassCapsule(tint: nil)
+                    } else {
+                        Circle().fill(Theme.surfaceMuted)
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressDimButtonStyle())
+        .accessibilityLabel(label)
     }
 }
