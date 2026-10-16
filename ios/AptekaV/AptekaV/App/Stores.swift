@@ -62,6 +62,11 @@ final class CartStore: ObservableObject {
         items.removeAll { $0.id == medicineId }
     }
 
+    /// Empties the cart after a successful order.
+    func clear() {
+        items = []
+    }
+
     /// Replaces stored snapshots with fresh catalogue data (price, availability).
     func refresh(with medicines: [Medicine]) {
         let fresh = Dictionary(uniqueKeysWithValues: medicines.map { ($0.id, $0) })
@@ -142,5 +147,10 @@ struct JSONFileStore<Value: Codable> {
     func save(_ value: Value) {
         guard let url = url, let data = try? JSONEncoder().encode(value) else { return }
         try? data.write(to: url, options: .atomic)
+    }
+
+    func clear() {
+        guard let url = url else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 }

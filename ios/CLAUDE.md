@@ -81,6 +81,15 @@
 - Минимальная зона нажатия 44×44 pt, поддержка Dynamic Type, VoiceOver-лейблы для иконок,
   статус не только цветом.
 
+## Оформление заказа
+
+- `Views/Checkout/*`: `POST /api/checkout` только с `medicine_id`/`quantity`, телефон — 9 цифр
+  подтверждённого по SMS номера. Idempotency-Key сохраняется для того же тела запроса, поэтому
+  повтор после таймаута не создаёт второй заказ.
+- **Debug-сборка по умолчанию не отправляет заказы** (`SimulatedOrderService`, номер `TEST-…`).
+  Реальная отправка — переключатель «Отправлять реальные заказы» в панели «Дизайн».
+  Release всегда отправляет по-настоящему.
+
 ## Вход по SMS
 
 - Вход: `+992` и 9 цифр → SMS-код из 5 цифр (`Views/Auth/LoginView.swift`, `App/AuthStore.swift`).
@@ -99,7 +108,8 @@
 - Перед релизом: удалить панель, галереи и неиспользуемые стили.
 - Launch arguments для скриншотов: `-homeStyle N -tabBarStyle N -searchBarStyle N -cardStyle N
   -productStyle N -initialTab N -searchQuery TEXT -openDesignPanel YES -openMedicineId N
-  -auth.phone +992XXXXXXXXX -showLogin YES -loginPhone 9ЦИФР`.
+  -auth.phone +992XXXXXXXXX -showLogin YES -loginPhone 9ЦИФР
+  -seedCart "id,id" -openCheckout YES -autoSubmitCheckout YES` (последний — только в тестовом режиме).
 
 ## Рабочий процесс
 

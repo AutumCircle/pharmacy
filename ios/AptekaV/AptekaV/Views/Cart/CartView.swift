@@ -7,7 +7,6 @@ struct CartView: View {
     @Environment(\.openRoute) private var openRoute
     @Environment(\.selectTab) private var selectTab
     @EnvironmentObject private var auth: AuthStore
-    @State private var showCheckoutNotice = false
     @State private var showLogin = false
 
     private var canCheckout: Bool {
@@ -36,15 +35,18 @@ struct CartView: View {
         .background(AppBackground())
         .navigationTitle(cart.items.isEmpty ? "Корзина" : "Корзина · \(cart.totalQuantity)")
         .designPanelButton()
-        .task { await refreshPrices() }
-        .loginSheet(isPresented: $showLogin) {
-            // Wait for the sheet to close; an alert presented during dismissal is dropped.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { showCheckoutNotice = true }
+        .task {
+            await refreshPrices()
+            #if DEBUG
+            // Launch argument `-openCheckout YES` opens checkout (simulator screenshots).
+            if UserDefaults.standard.bool(forKey: "openCheckout"), !cart.items.isEmpty, auth.isSignedIn {
+                openRoute(.checkout)
+            }
+            #endif
         }
-        .alert("Оформление заказа", isPresented: $showCheckoutNotice) {
-            Button("Понятно", role: .cancel) {}
-        } message: {
-            Text("Экран оформления заказа будет следующим этапом разработки.")
+        .loginSheet(isPresented: $showLogin) {
+            // Push after the sheet has closed; navigation during dismissal can be dropped.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { openRoute(.checkout) }
         }
     }
 
@@ -70,7 +72,7 @@ struct CartView: View {
             Button {
                 // Ordering needs a verified phone number.
                 if auth.isSignedIn {
-                    showCheckoutNotice = true
+                    openRoute(.checkout)
                 } else {
                     showLogin = true
                 }

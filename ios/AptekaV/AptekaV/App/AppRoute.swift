@@ -4,6 +4,7 @@ import SwiftUI
 enum AppRoute: Hashable {
     case medicine(Medicine)
     case category(MedicineCategory)
+    case checkout
 }
 
 extension View {
@@ -16,6 +17,9 @@ extension View {
                     .toolbarRole(.editor)
             case .category(let category):
                 CategoryProductsView(category: category)
+                    .toolbarRole(.editor)
+            case .checkout:
+                CheckoutView()
                     .toolbarRole(.editor)
             }
         }
@@ -52,6 +56,7 @@ struct RoutedNavigationStack<Root: View>: View {
                 .appRouteDestinations()
         }
         .environment(\.openRoute) { path.append($0) }
+        .environment(\.popToRoot) { path = NavigationPath() }
         .tint(Theme.brandPrimary)
     }
 }
@@ -73,5 +78,17 @@ struct HidesTabBarKey: PreferenceKey {
     static var defaultValue = false
     static func reduce(value: inout Bool, nextValue: () -> Bool) {
         value = value || nextValue()
+    }
+}
+
+/// Returns the current tab to its first screen (e.g. after an order is placed).
+private struct PopToRootKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+
+extension EnvironmentValues {
+    var popToRoot: () -> Void {
+        get { self[PopToRootKey.self] }
+        set { self[PopToRootKey.self] = newValue }
     }
 }

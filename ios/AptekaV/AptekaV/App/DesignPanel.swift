@@ -116,6 +116,7 @@ struct DesignPanelView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmReset = false
     @State private var siteOverride = UserDefaults.standard.string(forKey: AppConfig.siteOverrideKey) ?? ""
+    @State private var sendRealOrders = UserDefaults.standard.bool(forKey: OrderServiceFactory.realOrdersKey)
     @State private var vercelBypass = UserDefaults.standard.string(forKey: AppConfig.vercelBypassKey) ?? ""
 
     var body: some View {
@@ -178,6 +179,20 @@ struct DesignPanelView: View {
                     }
                 } header: {
                     Text("Вход по SMS")
+                }
+
+                Section {
+                    Toggle("Отправлять реальные заказы", isOn: $sendRealOrders)
+                        .tint(Theme.brandPrimary)
+                        .onChange(of: sendRealOrders) { value in
+                            UserDefaults.standard.set(value, forKey: OrderServiceFactory.realOrdersKey)
+                        }
+                } header: {
+                    Text("Заказы")
+                } footer: {
+                    Text(sendRealOrders
+                         ? "Внимание: заказ уйдёт в аптеку и сотрудники получат уведомление."
+                         : "Тестовый режим: заказ создаётся только в приложении (номер TEST-…), в аптеку ничего не отправляется.")
                 }
 
                 Section {

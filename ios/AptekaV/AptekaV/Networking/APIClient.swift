@@ -85,6 +85,15 @@ struct CategoryMedicinesResponse: Decodable {
     let page: NumberedPage
 }
 
+/// Public pharmacy contacts from `/api/site-settings`.
+struct SiteSettings: Decodable {
+    let deliveryContactPhone: String?
+
+    enum CodingKeys: String, CodingKey {
+        case deliveryContactPhone = "delivery_contact_phone"
+    }
+}
+
 struct BannersPayload: Decodable {
     let banners: [HomeBanner]
 }
@@ -194,6 +203,60 @@ final class APIClient {
     func productCarousels() async throws -> [ProductCarousel] {
         let response: DataEnvelope<CarouselsPayload> = try await get("api/product-carousels", queryItems: [])
         return response.data.carousels
+    }
+
+    /// `GET /api/site-settings` — public pharmacy contacts (delivery phone).
+    func siteSettings() async throws -> SiteSettings {
+        try await get("api/site-settings", queryItems: [])
+    }
+
+    /// `POST /api/checkout`. Never retried automatically: a retry must reuse the same
+    /// `idempotencyKey`, which the caller owns (API_CONTRACT §6).
+    func createOrder(_ order: CreateOrderRequest, idempotencyKey: UUID) async throws -> PublicOrder {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/checkout"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(idempotencyKey.uuidString.lowercased(), forHTTPHeaderField: "Idempotency-Key")
+        #if DEBUG
+        if let bypass = AppConfig.vercelBypassToken {
+            request.setValue(bypass, forHTTPHeaderField: "x-vercel-protection-bypass")
+        }
+        #endif
+        request.httpBody = try JSONEncoder().encode(order)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .notConnectedToInternet || error.code == .networkConnectionLost {
+            throw OrderError.offline
+        } catch {
+            // Timeout etc.: the server may have created the order; retry with the same key.
+            throw OrderError.server
+        }
+
+        guard let http = response as? HTTPURLResponse else { throw OrderError.server }
+        if (200..<300).contains(http.statusCode) {
+            guard let envelope = try? decoder.decode(DataEnvelope<PublicOrder>.self, from: data) else {
+                throw OrderError.server
+            }
+            return envelope.data
+        }
+
+        let body = try? decoder.decode(APIErrorEnvelope.self, from: data)
+        switch (http.statusCode, body?.error.code) {
+        case (429, _): throw OrderError.rateLimited
+        case (_, "ORDER_ITEMS_UNAVAILABLE"), (_, "CATALOG_PRICE_INVALID"): throw OrderError.itemsUnavailable(medicineIds: [])
+        case (_, "MEDICINE_NOT_FOUND"): throw OrderError.medicineNotFound(medicineIds: [])
+        case (_, "MINIMUM_ORDER_NOT_REACHED"): throw OrderError.minimumNotReached
+        case (_, "IDEMPOTENCY_CONFLICT"): throw OrderError.idempotencyConflict
+        case (400, _): throw OrderError.validation(message: nil)
+        default: throw OrderError.server
+        }
     }
 
     private func get<T: Decodable>(_ path: String, queryItems: [URLQueryItem]) async throws -> T {

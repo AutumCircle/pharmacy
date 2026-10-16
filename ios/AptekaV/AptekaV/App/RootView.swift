@@ -38,6 +38,19 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: tabsHidingBar)
+        .task {
+            #if DEBUG
+            // Launch argument `-seedCart "7023,4856"` fills an empty cart (simulator screenshots).
+            let ids = (UserDefaults.standard.string(forKey: "seedCart") ?? "")
+                .split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            guard cart.items.isEmpty, !ids.isEmpty else { return }
+            for id in ids {
+                if let medicine = try? await APIClient.shared.medicine(id: id) {
+                    cart.add(medicine)
+                }
+            }
+            #endif
+        }
         .environment(\.selectTab) { tab in
             withAnimation(.easeInOut(duration: 0.2)) { selection = tab }
         }

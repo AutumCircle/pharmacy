@@ -10,27 +10,80 @@ import XCTest
 
 final class AptekaVTests: XCTestCase {
 
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
+    // MARK: Order request (API_CONTRACT §6)
+
+    func testOrderRequestContainsOnlyAllowedKeysAndNoPrices() throws {
+        let request = CreateOrderRequest(
+            customerName: "Фируз",
+            phone: "917123456",
+            address: "Душанбе, ул. Айни 24",
+            comment: nil,
+            items: [CreateOrderRequest.Item(medicineId: 1042, quantity: 2)]
+        )
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        )
+        XCTAssertEqual(Set(json.keys), ["customer_name", "phone", "address", "items"])
+        let items = try XCTUnwrap(json["items"] as? [[String: Any]])
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(Set(items[0].keys), ["medicine_id", "quantity"])
+        XCTAssertEqual(items[0]["medicine_id"] as? Int, 1042)
+        XCTAssertEqual(items[0]["quantity"] as? Int, 2)
     }
 
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
+    func testOrderRequestIncludesCommentWhenPresent() throws {
+        let request = CreateOrderRequest(
+            customerName: "Фируз", phone: "917123456", address: "Душанбе, ул. Айни 24",
+            comment: "Позвоните перед доставкой", items: [CreateOrderRequest.Item(medicineId: 1, quantity: 1)]
+        )
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        )
+        XCTAssertEqual(json["comment"] as? String, "Позвоните перед доставкой")
     }
 
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
+    func testDecodesServerOrder() throws {
+        let data = Data("""
+        {"data":{"order_id":"ord_1","order_reference":"3456-105","status":"pending",
+        "payment_method":"cash_on_delivery","payment_status":"unpaid","currency":"TJS",
+        "items":[{"medicine_id":1042,"medicine_name":"Аспирин","quantity":2,"selling_unit_price":25,"line_total":50}],
+        "items_subtotal":50,"order_total":50,"created_at":"2026-08-06T10:15:30Z"},"request_id":"req_1"}
+        """.utf8)
+        let order = try JSONDecoder().decode(DataEnvelope<PublicOrder>.self, from: data).data
+        XCTAssertEqual(order.orderReference, "3456-105")
+        XCTAssertEqual(order.orderTotal, 50)
+        XCTAssertEqual(order.statusTitle, "В обработке")
+        XCTAssertEqual(order.items.first?.lineTotal, 50)
     }
 
-    func testPerformanceExample() throws {
-        // This is an example of a performance test case.
-        self.measure {
-            // Put the code you want to measure the time of here.
-        }
+    // MARK: Phone
+
+    func testTajikPhoneFormatting() {
+        XCTAssertEqual(TajikPhone.sanitize("+992 93-123-45-67 9"), "992931234")
+        XCTAssertEqual(TajikPhone.sanitize("93 123 45 67"), "931234567")
+        XCTAssertTrue(TajikPhone.isValid("931234567"))
+        XCTAssertFalse(TajikPhone.isValid("93123456"))
+        XCTAssertEqual(TajikPhone.format("931234567"), "93 123 45 67")
+        XCTAssertEqual(TajikPhone.display("+992931234567"), "+992 93 123 45 67")
     }
 
+    // MARK: Checkout validation
+
+    @MainActor
+    func testCheckoutValidation() {
+        let model = CheckoutViewModel()
+        model.name = "А"
+        model.address = "ул"
+        model.comment = String(repeating: "x", count: 501)
+        XCTAssertFalse(model.validate())
+        XCTAssertNotNil(model.fieldErrors[.name])
+        XCTAssertNotNil(model.fieldErrors[.address])
+        XCTAssertNotNil(model.fieldErrors[.comment])
+
+        model.name = "Фируз"
+        model.address = "Душанбе, ул. Айни 24"
+        model.comment = ""
+        XCTAssertTrue(model.validate())
+        XCTAssertTrue(model.fieldErrors.isEmpty)
+    }
 }

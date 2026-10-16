@@ -51,6 +51,11 @@ enum PriceFormatter {
         let number = formatter.string(from: value as NSDecimalNumber) ?? "\(value)"
         return "\(number) с."
     }
+
+    /// Order quantities from the server (`2`, or `1,5` if a fractional quantity was set by staff).
+    static func quantity(_ value: Double) -> String {
+        formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
 }
 
 #if DEBUG
