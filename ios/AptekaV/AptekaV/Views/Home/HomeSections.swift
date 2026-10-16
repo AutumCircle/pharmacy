@@ -316,6 +316,7 @@ struct CategoryTilesGrid: View {
 /// Round category icons with a coloured ring, like stories.
 struct CategoryCirclesRow: View {
     let categories: [MedicineCategory]
+    var glass = false
     let onSelect: (MedicineCategory) -> Void
 
     var body: some View {
@@ -327,7 +328,13 @@ struct CategoryCirclesRow: View {
                             Text(category.icon ?? "💊")
                                 .font(.system(size: 28))
                                 .frame(width: 64, height: 64)
-                                .background(Circle().fill(Theme.surfaceCard))
+                                .background {
+                                    if glass {
+                                        GlassCapsule(tint: nil)
+                                    } else {
+                                        Circle().fill(Theme.surfaceCard)
+                                    }
+                                }
                                 .overlay(Circle().stroke(category.accentColor, lineWidth: 2.5).padding(-4))
                                 .padding(4)
                             Text(category.name)

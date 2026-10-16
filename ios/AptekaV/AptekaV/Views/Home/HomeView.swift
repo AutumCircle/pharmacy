@@ -181,6 +181,12 @@ struct HomeFeedLayout: View {
                 CategoryCirclesRow(categories: feed.categories, onSelect: onCategory)
                 carousels(glass: false)
                 BenefitsRow()
+            case .compactGlass:
+                banners(.glass)
+                    .padding(.top, 8)
+                CategoryCirclesRow(categories: feed.categories, glass: true, onSelect: onCategory)
+                carousels(glass: true)
+                BenefitsRow(glass: true)
             case .website:
                 banners(.rounded)
                     .padding(.top, 8)

@@ -7,6 +7,7 @@ enum HomeLayoutStyle: Int, CaseIterable, Identifiable {
     case compact
     case glass
     case website
+    case compactGlass
 
     var id: Int { rawValue }
 
@@ -17,6 +18,7 @@ enum HomeLayoutStyle: Int, CaseIterable, Identifiable {
         case .compact: return "Компакт"
         case .glass: return "Стекло"
         case .website: return "Как на сайте"
+        case .compactGlass: return "Компакт · Стекло"
         }
     }
 
@@ -32,10 +34,12 @@ enum HomeLayoutStyle: Int, CaseIterable, Identifiable {
             return "Liquid Glass: стеклянные баннер, категории и секции на цветном фоне"
         case .website:
             return "Порядок и блоки как на aptekavatan.tj: мобильный баннер, карусели сайта, преимущества, категории"
+        case .compactGlass:
+            return "Вариант 3 в Liquid Glass: баннер в стеклянной рамке, стеклянные круги категорий и секции"
         }
     }
 
-    var isGlass: Bool { self == .glass }
+    var isGlass: Bool { self == .glass || self == .compactGlass }
 }
 
 /// Product page («окно товара») layout options under review.
