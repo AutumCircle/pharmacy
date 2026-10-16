@@ -9,6 +9,8 @@ struct RootView: View {
     @State private var selection: AppTab
     /// Tabs whose visible screen asked to hide the tab bar.
     @State private var tabsHidingBar: Set<AppTab> = []
+    /// Routes to open in a tab after switching to it (`openInTab`).
+    @State private var deepLinks: [AppTab: AppRoute] = [:]
 
     init() {
         #if DEBUG
@@ -61,21 +63,29 @@ struct RootView: View {
         .environment(\.selectTab) { tab in
             withAnimation(.easeInOut(duration: 0.2)) { selection = tab }
         }
+        .environment(\.openInTab) { tab, route in
+            deepLinks[tab] = route
+            withAnimation(.easeInOut(duration: 0.2)) { selection = tab }
+        }
     }
 
     @ViewBuilder
     private func tabRoot(_ tab: AppTab) -> some View {
         switch tab {
         case .home:
-            RoutedNavigationStack { HomeView() }
+            RoutedNavigationStack(deepLink: deepLink(.home)) { HomeView() }
         case .catalog:
-            RoutedNavigationStack { CatalogView() }
+            RoutedNavigationStack(deepLink: deepLink(.catalog)) { CatalogView() }
         case .cart:
-            RoutedNavigationStack { CartView() }
+            RoutedNavigationStack(deepLink: deepLink(.cart)) { CartView() }
         case .favorites:
-            RoutedNavigationStack { FavoritesView() }
+            RoutedNavigationStack(deepLink: deepLink(.favorites)) { FavoritesView() }
         case .profile:
-            RoutedNavigationStack { ProfileView() }
+            RoutedNavigationStack(deepLink: deepLink(.profile)) { ProfileView() }
         }
+    }
+
+    private func deepLink(_ tab: AppTab) -> Binding<AppRoute?> {
+        Binding(get: { deepLinks[tab] }, set: { deepLinks[tab] = $0 })
     }
 }

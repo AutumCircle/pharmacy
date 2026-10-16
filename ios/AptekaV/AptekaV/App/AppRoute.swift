@@ -54,9 +54,12 @@ extension EnvironmentValues {
 /// NavigationStack with a path, shared destinations and `openRoute` wired up.
 struct RoutedNavigationStack<Root: View>: View {
     @State private var path = NavigationPath()
+    /// Route requested from another tab (`openInTab`); opened on top of this tab's root.
+    @Binding private var deepLink: AppRoute?
     let root: Root
 
-    init(@ViewBuilder root: () -> Root) {
+    init(deepLink: Binding<AppRoute?> = .constant(nil), @ViewBuilder root: () -> Root) {
+        _deepLink = deepLink
         self.root = root()
     }
 
@@ -70,6 +73,25 @@ struct RoutedNavigationStack<Root: View>: View {
         .environment(\.openRoute) { path.append($0) }
         .environment(\.popToRoot) { path = NavigationPath() }
         .tint(Theme.brandPrimary)
+        .onChange(of: deepLink) { route in
+            guard let route = route else { return }
+            var fresh = NavigationPath()
+            fresh.append(route)
+            path = fresh
+            deepLink = nil
+        }
+    }
+}
+
+/// Switches to a tab and opens a route there, e.g. «Отследить заказ» → Профиль › Мои заказы.
+private struct OpenInTabKey: EnvironmentKey {
+    static let defaultValue: (AppTab, AppRoute) -> Void = { _, _ in }
+}
+
+extension EnvironmentValues {
+    var openInTab: (AppTab, AppRoute) -> Void {
+        get { self[OpenInTabKey.self] }
+        set { self[OpenInTabKey.self] = newValue }
     }
 }
 

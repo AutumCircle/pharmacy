@@ -270,119 +270,100 @@ struct CheckoutView: View {
 
 // MARK: - Success
 
-/// «Заказ оформлен»: server reference and totals, no delivery amount.
+/// «Заказ оформлен»: short and calm — number, sum, one line about the call, two buttons.
 struct OrderSuccessView: View {
+    @EnvironmentObject private var design: DesignSettings
     @Environment(\.popToRoot) private var popToRoot
     @Environment(\.selectTab) private var selectTab
-    @Environment(\.openRoute) private var openRoute
+    @Environment(\.openInTab) private var openInTab
     let order: PublicOrder
     let customerName: String
     let phone: String?
 
-    @State private var deliveryPhone: String?
-
     var body: some View {
-        ScrollView {
-            VStack(spacing: 18) {
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+
+            VStack(spacing: 14) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 64))
+                    .font(.system(size: 72))
                     .foregroundColor(Theme.success)
-                    .padding(.top, 24)
                     .accessibilityHidden(true)
                 Text("Заказ оформлен")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 28, weight: .bold))
                     .foregroundColor(Theme.textPrimary)
-
-                VStack(spacing: 6) {
-                    Text("Номер заказа")
-                        .font(.system(size: 13))
-                        .foregroundColor(Theme.textSecondary)
-                    Text(order.orderReference)
-                        .font(.system(size: 28, weight: .heavy).monospacedDigit())
-                        .foregroundColor(Theme.textPrimary)
-                        .textSelection(.enabled)
-                    Label(order.statusTitle, systemImage: "clock")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Theme.warningText)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color(hex: 0xED6C02).opacity(0.12)))
-                }
-
-                Text(thanksText)
-                    .font(.system(size: 15))
+                Text("Мы позвоним вам для подтверждения")
+                    .font(.system(size: 16))
                     .foregroundColor(Theme.textSecondary)
                     .multilineTextAlignment(.center)
-
-                CheckoutSection(title: "Состав заказа") {
-                    ForEach(order.items) { item in
-                        HStack(alignment: .top) {
-                            Text("\(item.medicineName) × \(PriceFormatter.quantity(item.quantity))")
-                                .font(.system(size: 14))
-                                .foregroundColor(Theme.textPrimary)
-                            Spacer(minLength: 8)
-                            Text(PriceFormatter.string(item.lineTotal))
-                                .font(.system(size: 14, weight: .semibold).monospacedDigit())
-                        }
-                    }
-                    Divider()
-                    HStack {
-                        Text("Итого за лекарства")
-                        Spacer()
-                        Text(PriceFormatter.string(order.orderTotal)).monospacedDigit()
-                    }
-                    .font(.system(size: 18, weight: .bold))
-                    Label("Стоимость доставки рассчитывается и оплачивается напрямую курьеру при доставке", systemImage: "shippingbox")
-                        .font(.system(size: 13))
-                        .foregroundColor(Theme.textSecondary)
-                }
-
-                if let deliveryPhone = deliveryPhone, let url = URL(string: "tel:\(deliveryPhone.filter { $0 == "+" || $0.isNumber })") {
-                    Link(destination: url) {
-                        Label("Вопросы по доставке: \(TajikPhone.display(deliveryPhone))", systemImage: "phone.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(Theme.brandPrimary)
-                            .frame(minHeight: 44)
-                    }
-                }
-
-                VStack(spacing: 10) {
-                    Button {
-                        popToRoot()
-                        // Open «Мои заказы» once the stack has popped back to the cart.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openRoute(.orders) }
-                    } label: {
-                        Text("Отследить заказ")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity, minHeight: 52)
-                            .background(Capsule().fill(Theme.brandPrimary))
-                    }
-                    Button {
-                        popToRoot()
-                        selectTab(.home)
-                    } label: {
-                        Text("Вернуться на главную")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(Theme.brandPrimary)
-                            .frame(maxWidth: .infinity, minHeight: 52)
-                            .background(Capsule().stroke(Theme.border, lineWidth: 1))
-                    }
-                }
-                .padding(.top, 4)
             }
-            .padding(16)
-            .padding(.bottom, 24)
+
+            VStack(spacing: 12) {
+                summaryRow("Номер заказа", order.orderReference)
+                Divider()
+                summaryRow("Сумма", PriceFormatter.string(order.orderTotal))
+                Divider()
+                HStack {
+                    Text("Статус").foregroundColor(Theme.textSecondary)
+                    Spacer()
+                    OrderStatusBadge(status: order.status)
+                }
+                .font(.system(size: 16))
+            }
+            .padding(18)
+            .background(OrderCardBackground())
+            .padding(.top, 28)
+
+            Spacer(minLength: 24)
+
+            VStack(spacing: 10) {
+                Button {
+                    popToRoot()
+                    openInTab(.profile, .orders)
+                } label: {
+                    Text("Отследить заказ")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .background(Capsule().fill(Theme.brandPrimary))
+                }
+                .accessibilityIdentifier("success.track")
+                Button {
+                    popToRoot()
+                    selectTab(.home)
+                } label: {
+                    Text("На главную")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(Theme.brandPrimary)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                }
+            }
         }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
         .task {
-            deliveryPhone = try? await APIClient.shared.siteSettings().deliveryContactPhone
+            #if DEBUG
+            // Launch argument `-autoTrackAfterOrder YES` presses «Отследить заказ» (simulator check).
+            if UserDefaults.standard.bool(forKey: "autoTrackAfterOrder") {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                popToRoot()
+                openInTab(.profile, .orders)
+            }
+            #endif
         }
     }
 
-    private var thanksText: String {
-        let greeting = customerName.isEmpty ? "Спасибо!" : "Спасибо, \(customerName)!"
-        guard let phone = phone else { return greeting + " Мы позвоним вам для подтверждения заказа." }
-        return "\(greeting) Сотрудник аптеки позвонит на \(TajikPhone.display(phone)), чтобы подтвердить заказ и уточнить доставку."
+    private func summaryRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title).foregroundColor(Theme.textSecondary)
+            Spacer()
+            Text(value)
+                .fontWeight(.semibold)
+                .foregroundColor(Theme.textPrimary)
+                .monospacedDigit()
+                .textSelection(.enabled)
+        }
+        .font(.system(size: 16))
     }
 }
 
