@@ -303,6 +303,102 @@ class StaffTests(unittest.TestCase):
         self.assertNotIn('status', row)
         self.assertNotIn('customer_name', row)
 
+    def _pharmacy_rows(self, policies=None, status='pending', pharmacy_id=1, query=None):
+        from datetime import datetime, timezone
+        cursor = Mock()
+        cursor.fetchall.return_value = [{
+            'id': 12, 'public_id': 'ord_test', 'order_reference': '3456-012',
+            'status': status, 'created_at': datetime(2026, 10, 10, 8, 30, tzinfo=timezone.utc),
+            'notes': None, 'customer_name': 'PRIVATE', 'phone': '+992917123456',
+            'address': 'PRIVATE ADDRESS', 'landmark': 'PRIVATE LANDMARK', 'order_source': None,
+            'utm_source': None, 'order_total': Decimal('120.00'), 'base_total': Decimal('100.00'),
+            'created_by_staff_account_id': None,
+            'medicines': [{'medicine_name': 'NOW D3', 'quantity': 2, 'line_total': 120,
+                           'base_unit_price': '50.00', 'base_line_total': '100.00'}],
+        }]
+        cursor.fetchone.return_value = {'courier_enabled': True, 'policies': policies or {}, 'revision': 1}
+
+        @contextmanager
+        def order_transaction():
+            yield cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            result = list_pharmacy_preparation_orders(query or {}, pharmacy_id)
+        return result, cursor
+
+    def test_pharmacy_default_row_has_base_prices_and_waiting_fields_only(self):
+        result, cursor = self._pharmacy_rows()
+        row = result['data'][0]
+        for key in ('order_reference', 'created_at', 'status', 'waiting_since', 'awaiting_response', 'base_total'):
+            self.assertIn(key, row)
+        self.assertEqual(row['base_total'], Decimal('100.00'))
+        self.assertEqual(row['waiting_since'], row['created_at'])
+        self.assertEqual(row['created_at'], '2026-10-10T08:30:00+00:00')
+        item = row['medicines'][0]
+        self.assertEqual(item['medicine_name'], 'NOW D3')
+        self.assertEqual(item['quantity'], 2)
+        self.assertEqual(item['base_unit_price'], '50.00')
+        self.assertEqual(item['base_line_total'], '100.00')
+        self.assertNotIn('line_total', item)
+        for key in ('customer_name', 'phone', 'address', 'landmark', 'order_total', 'line_total',
+                    'profit', 'created_by_staff_account_id'):
+            self.assertNotIn(key, row)
+        sql = cursor.execute.call_args_list[-2].args[0]
+        self.assertIn("'base_unit_price', COALESCE(oi.base_unit_price, oi.price)::text", sql)
+
+    def test_pharmacy_awaiting_response_follows_pending_status(self):
+        self.assertTrue(self._pharmacy_rows(status='pending')[0]['data'][0]['awaiting_response'])
+        self.assertFalse(self._pharmacy_rows(status='confirmed')[0]['data'][0]['awaiting_response'])
+
+    def test_pharmacy_price_fields_hidden_when_policy_disables_them(self):
+        from backend.v1.shared.order_notification_settings import default_policies
+        policies = default_policies()
+        policies['pharmacy_web']['item_base_total'] = False
+        policies['pharmacy_web']['base_total'] = False
+        row = self._pharmacy_rows(policies=policies)[0]['data'][0]
+        self.assertNotIn('base_total', row)
+        self.assertNotIn('base_unit_price', row['medicines'][0])
+        self.assertNotIn('base_line_total', row['medicines'][0])
+        self.assertIn('quantity', row['medicines'][0])
+        self.assertIn('waiting_since', row)
+        self.assertIn('awaiting_response', row)
+
+    def test_pharmacy_client_fields_returned_when_owner_turns_them_on(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        policies = {'pharmacy_web': {field: True for field in FIELDS}}
+        row = self._pharmacy_rows(policies=policies)[0]['data'][0]
+        self.assertEqual(row['customer_name'], 'PRIVATE')
+        self.assertEqual(row['phone'], '+992917123456')
+        self.assertEqual(row['address'], 'PRIVATE ADDRESS')
+        self.assertEqual(row['landmark'], 'PRIVATE LANDMARK')
+        self.assertEqual(row['order_total'], Decimal('120.00'))
+        self.assertEqual(row['profit'], Decimal('20.00'))
+        self.assertIn('created_by_staff_account_id', row)
+        self.assertEqual(row['source'], 'Сайт')
+        self.assertEqual(row['medicines'][0]['line_total'], 120)
+
+    def test_pharmacy_two_queue_is_scoped_by_session_account(self):
+        _, cursor = self._pharmacy_rows(pharmacy_id=2)
+        sql, args = cursor.execute.call_args_list[-2].args
+        self.assertIn('COALESCE(o.fulfillment_pharmacy_id, 1) = %s', sql)
+        self.assertEqual(args, (2, 21))
+        pharmacy_two = {**self.account, 'account_id': 2, 'catalog_access': False}
+        self.cursor.fetchone.return_value = pharmacy_two
+        with patch('backend.v1.admin_api.lambda_function.list_pharmacy_preparation_orders',
+                   return_value={'data': [], 'page': {'has_more': False, 'next_cursor': None}}) as preparation:
+            response = lambda_handler(self.event('/v1/staff/orders', token=staff.create_session(pharmacy_two)), None)
+        self.assertEqual(response['statusCode'], 200)
+        preparation.assert_called_once_with({}, 2)
+        for key in ('pharmacy_id', 'account_id'):
+            with self.assertRaises(ContractError) as raised:
+                list_pharmacy_preparation_orders({key: '1'}, 2)
+            self.assertEqual(raised.exception.code, 'VALIDATION_ERROR')
+            event = self.event('/v1/staff/orders', token=staff.create_session(pharmacy_two))
+            event['queryStringParameters'] = {key: '1'}
+            response = lambda_handler(event, None)
+            self.assertEqual(response['statusCode'], 400)
+            self.assertIn('VALIDATION_ERROR', response['body'])
+
     def test_pharmacy_reads_preparation_list_but_cannot_change_status(self):
         courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
         self.cursor.fetchone.return_value = self.account
