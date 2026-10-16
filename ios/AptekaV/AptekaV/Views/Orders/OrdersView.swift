@@ -116,9 +116,10 @@ final class OrdersViewModel: ObservableObject {
         } catch is CancellationError {
             return
         } catch let error as APIError {
-            if case .rateLimited = error {
+            if case .rateLimited(nil) = error {
                 state = .failed("Слишком много запросов. Попробуйте позже")
             } else {
+                // Includes the server's own rate-limit / block message.
                 state = .failed(error.message)
             }
         } catch {

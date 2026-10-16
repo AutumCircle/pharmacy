@@ -105,6 +105,7 @@ struct CarouselsPayload: Decodable {
 private struct APIErrorEnvelope: Decodable {
     struct Body: Decodable {
         let code: String
+        let message: String?
     }
 
     let error: Body
@@ -112,7 +113,8 @@ private struct APIErrorEnvelope: Decodable {
 
 enum APIError: Error {
     case offline
-    case rateLimited
+    /// 429; `message` is the server's Russian text (e.g. the tracking guard's block notice).
+    case rateLimited(message: String?)
     case notFound
     case server(code: String?)
     case invalidResponse
@@ -122,6 +124,8 @@ enum APIError: Error {
         switch self {
         case .offline:
             return "Нет подключения к интернету. Проверьте сеть и попробуйте снова."
+        case .rateLimited(let message?):
+            return message
         case .rateLimited:
             return "Слишком много запросов. Подождите немного и попробуйте снова."
         case .notFound:
@@ -199,10 +203,11 @@ final class APIClient {
         return response.data.banners
     }
 
-    /// `GET /api/product-carousels` — throws `.notFound` until the website exposes this route.
+    /// `GET /api/product-carousels` — the website's homepage carousels, no key or login.
+    /// Live format: `{"carousels": [...]}` at the JSON root (src/lib/public-carousels.ts on main).
     func productCarousels() async throws -> [ProductCarousel] {
-        let response: DataEnvelope<CarouselsPayload> = try await get("api/product-carousels", queryItems: [])
-        return response.data.carousels
+        let response: CarouselsPayload = try await get("api/product-carousels", queryItems: [])
+        return response.carousels
     }
 
     /// `POST /api/tracking` — orders for an exact phone number, newest first (max 20).
@@ -267,7 +272,7 @@ final class APIClient {
 
         let body = try? decoder.decode(APIErrorEnvelope.self, from: data)
         switch (http.statusCode, body?.error.code) {
-        case (429, _): throw OrderError.rateLimited
+        case (429, _): throw OrderError.rateLimited(message: body?.error.message)
         case (_, "ORDER_ITEMS_UNAVAILABLE"), (_, "CATALOG_PRICE_INVALID"): throw OrderError.itemsUnavailable(medicineIds: [])
         case (_, "MEDICINE_NOT_FOUND"): throw OrderError.medicineNotFound(medicineIds: [])
         case (_, "MINIMUM_ORDER_NOT_REACHED"): throw OrderError.minimumNotReached
@@ -322,7 +327,9 @@ final class APIClient {
 
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            if http.statusCode == 429 { throw APIError.rateLimited }
+            if http.statusCode == 429 {
+                throw APIError.rateLimited(message: (try? decoder.decode(APIErrorEnvelope.self, from: data))?.error.message)
+            }
             if http.statusCode == 404 { throw APIError.notFound }
             let code = (try? decoder.decode(APIErrorEnvelope.self, from: data))?.error.code
             throw APIError.server(code: code)

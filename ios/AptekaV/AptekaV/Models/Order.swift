@@ -160,7 +160,7 @@ enum OrderError: Error, Equatable {
     case minimumNotReached
     case idempotencyConflict
     case validation(message: String?)
-    case rateLimited
+    case rateLimited(message: String?)
     case offline
     case server
 
@@ -176,8 +176,8 @@ enum OrderError: Error, Equatable {
             return "Данные заказа изменились. Повторите оформление ещё раз."
         case .validation(let message):
             return message ?? "Проверьте данные заказа."
-        case .rateLimited:
-            return "Слишком много запросов. Попробуйте позже."
+        case .rateLimited(let message):
+            return message ?? "Слишком много попыток оформить заказ. Подождите несколько минут и попробуйте снова."
         case .offline:
             return "Нет соединения. Проверьте интернет и повторите."
         case .server:
@@ -195,7 +195,10 @@ enum OrderError: Error, Equatable {
 
     /// Safe to resend with the same Idempotency-Key (the server may not have seen the request).
     var isRetryableWithSameKey: Bool {
-        self == .offline || self == .server || self == .rateLimited
+        switch self {
+        case .offline, .server, .rateLimited: return true
+        default: return false
+        }
     }
 }
 
