@@ -37,7 +37,6 @@ struct CartView: View {
         }
         .background(AppBackground())
         .navigationTitle(cart.items.isEmpty ? "Корзина" : "Корзина · \(cart.totalQuantity)")
-        .designPanelButton()
         .task {
             await refreshPrices()
             #if DEBUG

@@ -1,6 +1,7 @@
 import SwiftUI
 
 // Development-only design panel: pick the home layout, navigation bar, search bar and card style.
+// Opened from «Профиль» → «Оформление приложения», or by shaking the device (⌃⌘Z in the Simulator).
 // Everything here compiles only in DEBUG; in Release the modifiers do nothing and the app uses
 // `DesignSettings.production`. Remove this file before release once the design is final.
 
@@ -18,25 +19,6 @@ final class DesignPanelState: ObservableObject {
 }
 
 extension View {
-    /// Toolbar button that opens the design panel (DEBUG only).
-    /// Pass `onBrandBar: true` when the navigation bar is red so the icon is drawn in white.
-    func designPanelButton(onBrandBar: Bool = false) -> some View {
-        #if DEBUG
-        return modifier(DesignPanelButtonModifier(onBrandBar: onBrandBar))
-        #else
-        return self
-        #endif
-    }
-
-    /// Floating panel button for screens without a navigation bar, e.g. sign-in (DEBUG only).
-    func designPanelOverlayButton() -> some View {
-        #if DEBUG
-        return modifier(DesignPanelOverlayButtonModifier())
-        #else
-        return self
-        #endif
-    }
-
     /// Attaches the panel sheet and the shake gesture to the app root (DEBUG only).
     func designPanelHost() -> some View {
         #if DEBUG
@@ -48,45 +30,6 @@ extension View {
 }
 
 #if DEBUG
-private struct DesignPanelButtonModifier: ViewModifier {
-    @EnvironmentObject private var panel: DesignPanelState
-    let onBrandBar: Bool
-
-    func body(content: Content) -> some View {
-        content.toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    panel.isPresented = true
-                } label: {
-                    Image(systemName: "paintpalette")
-                        .foregroundColor(onBrandBar ? .white : Theme.brandPrimary)
-                        .frame(minWidth: 44, minHeight: 44)
-                }
-                .accessibilityLabel("Дизайн (только для разработки)")
-            }
-        }
-    }
-}
-
-private struct DesignPanelOverlayButtonModifier: ViewModifier {
-    @EnvironmentObject private var panel: DesignPanelState
-
-    func body(content: Content) -> some View {
-        content.overlay(alignment: .topTrailing) {
-            Button {
-                panel.isPresented = true
-            } label: {
-                Image(systemName: "paintpalette")
-                    .foregroundColor(Theme.brandPrimary)
-                    .frame(width: 44, height: 44)
-                    .background(Circle().fill(Theme.surfaceCard).shadow(color: .black.opacity(0.08), radius: 6, y: 2))
-            }
-            .padding(.trailing, 16)
-            .accessibilityLabel("Дизайн (только для разработки)")
-        }
-    }
-}
-
 private struct DesignPanelHostModifier: ViewModifier {
     @EnvironmentObject private var panel: DesignPanelState
     @EnvironmentObject private var design: DesignSettings

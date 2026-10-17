@@ -13,7 +13,6 @@ struct CatalogView: View {
         }
         .background(AppBackground())
         .navigationTitle("Каталог")
-        .designPanelButton()
         .refreshable { await load() }
         .task { if categories.isEmpty { await load() } }
         .onChange(of: network.isOnline) { online in

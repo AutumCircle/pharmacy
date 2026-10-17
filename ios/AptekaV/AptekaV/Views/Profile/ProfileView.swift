@@ -3,6 +3,7 @@ import SwiftUI
 /// «Профиль»: sign in / register by phone, the verified number, «Мои заказы» and sign-out.
 struct ProfileView: View {
     @EnvironmentObject private var auth: AuthStore
+    @EnvironmentObject private var designPanel: DesignPanelState
     @Environment(\.selectTab) private var selectTab
     @Environment(\.openRoute) private var openRoute
     @State private var confirmSignOut = false
@@ -30,6 +31,12 @@ struct ProfileView: View {
                     row(icon: "info.circle.fill", title: "О аптеке и контакты", subtitle: "Адрес, телефоны, часы работы") {
                         openRoute(.about)
                     }
+                    #if DEBUG
+                    Divider().padding(.leading, 58)
+                    row(icon: "paintpalette.fill", title: "Оформление приложения", subtitle: "Только в сборке для разработки") {
+                        designPanel.isPresented = true
+                    }
+                    #endif
                 }
                 .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.surfaceCard))
 
@@ -49,7 +56,6 @@ struct ProfileView: View {
         }
         .background(AppBackground())
         .navigationTitle("Профиль")
-        .designPanelButton()
         .loginSheet(isPresented: $showLogin)
         .task {
             #if DEBUG

@@ -25,7 +25,6 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .appSearchBar(style: design.searchBar, text: $search.query, prompt: "Найти лекарство")
         .autocorrectionDisabled()
-        .designPanelButton(onBrandBar: design.searchBar.hasBrandNavigationBar)
         .task(id: search.query) {
             await search.queryChanged()
         }
@@ -202,7 +201,8 @@ struct HomeFeedLayout: View {
                     .padding(.top, 8)
                 CategoryChipsRow(categories: feed.categories, glass: true, onAll: onAllCategories, onSelect: onCategory)
                 BenefitsRow(glass: true)
-                carousels(glass: true)
+                // Product rows sit directly on the backdrop (no glass panel behind them).
+                carousels(glass: false)
             }
         }
     }

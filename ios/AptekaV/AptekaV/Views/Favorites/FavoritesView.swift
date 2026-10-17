@@ -31,7 +31,6 @@ struct FavoritesView: View {
                 }
             }
         }
-        .designPanelButton()
         .confirmationDialog("Очистить избранное?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Очистить", role: .destructive) { favorites.clear() }
         }
