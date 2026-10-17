@@ -20,7 +20,8 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppBackground())
-        .navigationTitle("Аптека «Ватан»")
+        // No title above the search bar; the bar itself is the header.
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .appSearchBar(style: design.searchBar, text: $search.query, prompt: "Найти лекарство")
         .autocorrectionDisabled()
@@ -212,7 +213,7 @@ struct HomeFeedLayout: View {
 
     private func carousels(glass: Bool) -> some View {
         ForEach(feed.carousels) { carousel in
-            VStack(alignment: .leading, spacing: 0) {
+            let section = VStack(alignment: .leading, spacing: 0) {
                 SectionHeader(
                     title: carousel.title,
                     action: carousel.category.map { category in { onCategory(category) } }
@@ -220,11 +221,15 @@ struct HomeFeedLayout: View {
                 .padding(.top, glass ? 6 : 0)
                 MedicineCarouselRow(medicines: carousel.products, onOpen: onMedicine)
             }
-            .background {
-                if glass {
-                    GlassCardBackground(cornerRadius: 28)
-                        .padding(.horizontal, 8)
-                }
+            if glass {
+                // The row scrolls inside the glass panel: clipped to its shape, inset from the
+                // screen edges, so cards never stick out past the panel.
+                section
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .background(GlassCardBackground(cornerRadius: 28))
+                    .padding(.horizontal, 12)
+            } else {
+                section
             }
         }
     }

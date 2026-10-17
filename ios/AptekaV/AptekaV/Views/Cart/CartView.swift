@@ -8,7 +8,6 @@ struct CartView: View {
     @Environment(\.selectTab) private var selectTab
     @EnvironmentObject private var auth: AuthStore
     @State private var showLogin = false
-    @State private var suggestions: [ProductCarousel] = []
 
     private var canCheckout: Bool {
         !cart.items.isEmpty && cart.amountToMinimum == 0 && cart.items.allSatisfy(\.medicine.inStock)
@@ -22,15 +21,7 @@ struct CartView: View {
                         selectTab(.catalog)
                     }
                     .padding(.top, 20)
-                    // Website carousels (Дермокосметика first) so an empty cart is a place to start.
-                    ForEach(suggestions) { carousel in
-                        SectionHeader(title: carousel.title, action: nil)
-                        MedicineCarouselRow(medicines: carousel.products, onOpen: { openRoute(.medicine($0)) })
-                    }
-                }
-                .task {
-                    guard suggestions.isEmpty else { return }
-                    suggestions = await Self.loadSuggestions()
+                    SuggestedCarouselsSection()
                 }
             } else {
                 VStack(alignment: .leading, spacing: 16) {
@@ -115,14 +106,6 @@ struct CartView: View {
         }
         .font(.system(size: bold ? 18 : 15, weight: bold ? .bold : .regular))
         .foregroundColor(Theme.textPrimary)
-    }
-
-    /// Two website carousels for the empty cart, «Дермокосметика» first when present.
-    private static func loadSuggestions() async -> [ProductCarousel] {
-        guard let carousels = try? await APIClient.shared.productCarousels() else { return [] }
-        let preferred = carousels.filter { $0.slug == "dermocosmetics" }
-        let others = carousels.filter { $0.slug != "dermocosmetics" && !$0.products.isEmpty }
-        return Array((preferred + others).prefix(2))
     }
 
     /// Updates stored prices and availability from `/api/medicines/{id}` (max 50 items).

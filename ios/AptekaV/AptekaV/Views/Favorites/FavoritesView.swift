@@ -10,10 +10,13 @@ struct FavoritesView: View {
     var body: some View {
         ScrollView {
             if favorites.medicines.isEmpty {
-                StateMessageView(icon: "heart", title: "В избранном пока ничего нет", actionTitle: "Перейти в каталог") {
-                    selectTab(.catalog)
+                VStack(alignment: .leading, spacing: 8) {
+                    StateMessageView(icon: "heart", title: "В избранном пока ничего нет", actionTitle: "Перейти в каталог") {
+                        selectTab(.catalog)
+                    }
+                    .padding(.top, 20)
+                    SuggestedCarouselsSection()
                 }
-                .padding(.top, 60)
             } else {
                 MedicineCollectionView(medicines: favorites.medicines, onOpen: { openRoute(.medicine($0)) })
                     .padding(16)

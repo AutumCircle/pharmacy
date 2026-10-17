@@ -111,3 +111,26 @@ struct StateMessageView: View {
         .padding(.vertical, 40)
     }
 }
+
+/// Website carousels shown on empty screens (cart, favourites), «Дермокосметика» first,
+/// so the customer can add products right there.
+struct SuggestedCarouselsSection: View {
+    @Environment(\.openRoute) private var openRoute
+    var limit = 2
+    @State private var carousels: [ProductCarousel] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(carousels) { carousel in
+                SectionHeader(title: carousel.title, action: nil)
+                MedicineCarouselRow(medicines: carousel.products, onOpen: { openRoute(.medicine($0)) })
+            }
+        }
+        .task {
+            guard carousels.isEmpty, let loaded = try? await APIClient.shared.productCarousels() else { return }
+            let preferred = loaded.filter { $0.slug == "dermocosmetics" }
+            let others = loaded.filter { $0.slug != "dermocosmetics" && !$0.products.isEmpty }
+            carousels = Array((preferred + others).prefix(limit))
+        }
+    }
+}
