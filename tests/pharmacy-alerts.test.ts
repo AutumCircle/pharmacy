@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  IOS_HINT, PHARMACY_SOUND_KEY, REMIND_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE, alertText, attentionCount, dueAlerts,
+  IOS_HINT, PHARMACY_ONE_REMIND_MS, PHARMACY_SOUND_KEY, REMIND_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE,
+  alertText, attentionCount, dueAlerts,
   permissionView, soundClickAction, soundLabel,
   titleWithCount,
 } from '../src/lib/pharmacy-alerts.ts';
@@ -13,8 +14,16 @@ const open = (order_id: string, extra: Record<string, unknown> = {}) =>
 
 test('REMIND_MS is three minutes and the sound key is separate from the courier key', () => {
   assert.equal(REMIND_MS, 180_000);
+  assert.equal(PHARMACY_ONE_REMIND_MS, 60_000);
   assert.equal(PHARMACY_SOUND_KEY, 'vatan-pharmacy-sound');
   assert.notEqual(PHARMACY_SOUND_KEY, 'vatan-order-sound');
+});
+
+test('pharmacy 1 is reminded each minute, pharmacy 2 keeps its three-minute interval', () => {
+  const first = dueAlerts([open('a')], new Map(), T0, PHARMACY_ONE_REMIND_MS);
+  assert.deepEqual(dueAlerts([open('a')], first.lastAlerted, T0 + 59_999, PHARMACY_ONE_REMIND_MS).due, []);
+  assert.deepEqual(dueAlerts([open('a')], first.lastAlerted, T0 + 60_000, PHARMACY_ONE_REMIND_MS).due, ['a']);
+  assert.deepEqual(dueAlerts([open('a')], first.lastAlerted, T0 + 60_000, REMIND_MS).due, []);
 });
 
 test('dueAlerts alerts an order the first time it is seen with needs_attention', () => {

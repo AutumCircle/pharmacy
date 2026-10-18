@@ -28,7 +28,9 @@ async function loadWebsiteOrders(): Promise<AlertOrder[]> {
   }));
 }
 
-export default function StaffShell({ children, role }: { children: React.ReactNode; role: 'pharmacy' | 'courier' | null }) {
+export default function StaffShell({ children, role, accountId }: {
+  children: React.ReactNode; role: 'pharmacy' | 'courier' | null; accountId: 1 | 2 | 3 | null;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   if (pathname === '/staff/login') return <>{children}</>;
@@ -60,7 +62,7 @@ export default function StaffShell({ children, role }: { children: React.ReactNo
       </header>
       <main className="staff-main">{children}</main>
       <NewOrderAlerts load={loadWebsiteOrders} enabled={role === 'courier'} />
-      <PharmacyOrderAlerts enabled={role === 'pharmacy'} />
+      <PharmacyOrderAlerts enabled={role === 'pharmacy'} intensive={accountId === 1} />
     </div>
   );
 }

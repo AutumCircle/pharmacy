@@ -40,7 +40,8 @@
 .mp-stepper { display: flex; align-items: center; border: 1px solid #d5dbd7; border-radius: 10px; overflow: hidden; }
 .mp-stepper button { width: 38px; height: 40px; border: 0; background: #f4f6f5; font: inherit; font-size: 20px; cursor: pointer; }
 .mp-stepper button:disabled { color: #b8bfba; cursor: default; }
-.mp-stepper output { min-width: 34px; text-align: center; font-weight: 750; }
+.mp-stepper input { width: 58px; min-width: 0; height: 40px; padding: 0 2px; border: 0; background: #fff; color: var(--c-ink); font: inherit; font-weight: 750; text-align: center; outline-offset: -2px; }
+.mp-stepper input[aria-invalid="true"] { background: var(--c-brand-soft); color: var(--c-brand-dark); }
 .mp-line-total { margin-left: auto; font-weight: 750; white-space: nowrap; }
 .mp-total { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 2px; }
 .mp-total strong { font-size: 18px; }

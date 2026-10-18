@@ -47,16 +47,16 @@ def _is_integer(value: Any) -> bool:
 
 
 def validate_order_quantity(value: Any, field: str = "quantity") -> Decimal:
-    """Accept half-unit order quantities without using binary math for totals."""
+    """Accept hundredth-unit quantities from 0.1, preserving earlier quarter units."""
     if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
-        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.5 and 99 in 0.5 steps")
+        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.1 and 99 with at most two decimals")
     try:
         quantity = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.5 and 99 in 0.5 steps") from exc
-    if (not quantity.is_finite() or quantity < Decimal("0.5") or quantity > Decimal("99")
-            or quantity * 2 != (quantity * 2).to_integral_value()):
-        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.5 and 99 in 0.5 steps")
+        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.1 and 99 with at most two decimals") from exc
+    if (not quantity.is_finite() or quantity < Decimal("0.1") or quantity > Decimal("99")
+            or quantity * 100 != (quantity * 100).to_integral_value()):
+        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.1 and 99 with at most two decimals")
     return quantity.quantize(Decimal("0.01"))
 
 
@@ -259,7 +259,7 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
             normalized_quantity = validate_order_quantity(quantity, f"{prefix}.quantity")
         except ContractError as exc:
             raise ContractError("VALIDATION_ERROR", "Request validation failed",
-                fields={f"{prefix}.quantity": "must be between 0.5 and 99 in 0.5 steps"}) from exc
+                fields={f"{prefix}.quantity": "must be between 0.1 and 99 with at most two decimals"}) from exc
         if medicine_id in seen_medicine_ids:
             raise ContractError(
                 "DUPLICATE_ORDER_ITEM",
@@ -350,7 +350,7 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
             normalized_quantity = validate_order_quantity(quantity, f"items[{index}].quantity")
         except ContractError as exc:
             raise ContractError("VALIDATION_ERROR", "Request validation failed",
-                                fields={f"items[{index}].quantity": "must be between 0.5 and 99 in 0.5 steps"}) from exc
+                                fields={f"items[{index}].quantity": "must be between 0.1 and 99 with at most two decimals"}) from exc
         if medicine_id in seen:
             raise ContractError("DUPLICATE_ORDER_ITEM", "Order contains a duplicate medicine", http_status=400)
         seen.add(medicine_id)

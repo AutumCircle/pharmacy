@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { chime } from '@/components/NewOrderAlerts';
+import { schedulePharmacyAlarm } from '@/lib/pharmacy-alarm';
 import {
-  PHARMACY_SOUND_KEY, POLL_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE, alertText, dueAlerts, soundClickAction, soundLabel,
+  PHARMACY_ONE_REMIND_MS, PHARMACY_SOUND_KEY, POLL_MS, REMIND_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE,
+  alertText, dueAlerts, soundClickAction, soundLabel,
   titleWithCount, type AlertQueueOrder,
 } from '@/lib/pharmacy-alerts';
 import { setAttentionCount } from '@/lib/pharmacy-alert-store';
@@ -36,15 +38,16 @@ async function loadQueue(): Promise<AlertQueueOrder[] | null> {
 }
 
 /**
- * Job 012: on-screen signal, optional sound and ~3-minute reminders for orders this pharmacy has not
+ * On-screen signal and optional sound for orders this pharmacy has not
  * reacted to yet. Reaction is decided by the Lambda (`needs_attention`); an older Lambda without the
  * field gives no reminders. Works only while the page is open (Web Push is follow-up 012b).
  */
-export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
+export default function PharmacyOrderAlerts({ enabled, intensive = false }: { enabled: boolean; intensive?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const lastAlerted = useRef(new Map<string, number>());
   const audio = useRef<AudioContext | null>(null);
+  const stopAlarm = useRef<(() => void) | null>(null);
   const count = useRef(0);
   const [sound, setSound] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
@@ -106,11 +109,12 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
         const orders = await loadQueue();
         if (cancelled || !orders) return;
         const now = Date.now();
-        const result = dueAlerts(orders, lastAlerted.current, now);
+        const result = dueAlerts(orders, lastAlerted.current, now, intensive ? PHARMACY_ONE_REMIND_MS : REMIND_MS);
         lastAlerted.current = result.lastAlerted;
         const attention = new Map(orders.filter((order) => order.needs_attention === true)
           .map((order) => [order.order_id, order]));
         count.current = attention.size;
+        if (attention.size === 0 && stopAlarm.current) { stopAlarm.current(); stopAlarm.current = null; }
         setAttentionCount(attention.size);
         document.title = titleWithCount(document.title, attention.size);
         const due = new Set(result.due);
@@ -124,7 +128,12 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
         setAnnouncement(result.due.map((id) => alertText(attention.get(id)!, now).title).join('. '));
         const context = audio.current;
         if (readSoundPreference() && context && context.state === 'running') {
-          try { chime(context); } catch { /* the on-screen signal is still shown */ }
+          try {
+            if (intensive) {
+              stopAlarm.current?.();
+              stopAlarm.current = schedulePharmacyAlarm(context);
+            } else chime(context);
+          } catch { /* the on-screen signal is still shown */ }
         }
         if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
           for (const id of result.due) {
@@ -144,14 +153,17 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      stopAlarm.current?.();
+      stopAlarm.current = null;
       document.removeEventListener('visibilitychange', onVisible);
       setAttentionCount(null);
       count.current = 0;
       document.title = titleWithCount(document.title, 0);
     };
-  }, [enabled]);
+  }, [enabled, intensive]);
 
   function setPreference(value: boolean) {
+    if (!value) { stopAlarm.current?.(); stopAlarm.current = null; }
     setSound(value);
     writeSoundPreference(value);
     setUnlockFailed(false);

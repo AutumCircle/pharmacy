@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 
 from backend.v1.shared.contract import (
     ContractError,
@@ -6,6 +7,7 @@ from backend.v1.shared.contract import (
     normalize_phone,
     validate_create_order_request,
     validate_idempotency_key,
+    validate_order_quantity,
     validate_staff_order_request,
     validate_status_transition,
 )
@@ -93,6 +95,15 @@ class CreateOrderValidationTests(unittest.TestCase):
         payload["items"][0]["quantity"] = True
         with self.assertRaises(ContractError):
             validate_create_order_request(payload)
+
+    def test_accepts_tenths_without_accepting_arbitrary_decimals(self):
+        for value in ("0.1", "0.2", "0.3", "1.2", "0.25", "99"):
+            with self.subTest(value=value):
+                self.assertEqual(validate_order_quantity(value), Decimal(value).quantize(Decimal("0.01")))
+        for value in ("0", "0.05", "1.234", "99.1", "NaN", True):
+            with self.subTest(value=value):
+                with self.assertRaises(ContractError):
+                    validate_order_quantity(value)
 
 
 class IdempotencyTests(unittest.TestCase):

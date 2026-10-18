@@ -5,6 +5,7 @@ import { requireAdminSession } from '@/lib/admin-auth';
 import { addAdminManualOrderItems, addAdminOrderItems, adjustAdminOrderItem, deleteAdminOrder, searchAdminOrderMedicines, updateAdminOrderCustomer, updateAdminOrderDelivery, updateAdminOrderItemPrice, updateAdminOrderStatus } from '@/lib/api-v1/admin-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import type { OrderStatus } from '@/lib/api-v1/types';
+import { isValidOrderQuantity } from '@/lib/order-quantity';
 
 export async function searchOrderMedicines(query: string) {
   try {
@@ -43,9 +44,9 @@ export async function addOrderMedicines(orderId: string,
     await requireAdminSession();
     if (!Array.isArray(items) || items.length < 1 || items.length > 20 ||
       items.some((item) => !Number.isInteger(item.medicine_id) || item.medicine_id <= 0 ||
-        !Number.isFinite(item.quantity) || item.quantity < 0.5 || item.quantity > 99 || !Number.isInteger(item.quantity * 2)
+        !isValidOrderQuantity(item.quantity)
         || (item.unit_price !== undefined && (!/^\d{1,6}(?:\.\d{1,2})?$/.test(item.unit_price) || Number(item.unit_price) <= 0)))) {
-      throw new Error('Проверьте количество (0,5–99) и цену');
+      throw new Error('Проверьте количество (0,1–99) и цену');
     }
     const response = await addAdminOrderItems(orderId, items, idempotencyKey);
     revalidatePath('/admin');
@@ -63,7 +64,7 @@ export async function addManualOrderMedicine(orderId: string, item: { medicine_n
     const price = Number(item.price);
     if (item.medicine_name.trim().length < 2 || item.medicine_name.trim().length > 200 ||
       !/^\d{1,6}(?:\.\d{1,2})?$/.test(item.price) || price <= 0 ||
-      !Number.isFinite(item.quantity) || item.quantity < 0.5 || item.quantity > 99 || !Number.isInteger(item.quantity * 2)) {
+      !isValidOrderQuantity(item.quantity)) {
       throw new Error('Проверьте название, цену и количество');
     }
     const response = await addAdminManualOrderItems(orderId, [item], idempotencyKey);
@@ -79,9 +80,8 @@ export async function addManualOrderMedicine(orderId: string, item: { medicine_n
 export async function setOrderItemQuantity(orderId: string, orderItemId: number, expectedQuantity: number, quantity: number) {
   try {
     await requireAdminSession();
-    if (!Number.isInteger(orderItemId) || orderItemId <= 0 || !Number.isFinite(expectedQuantity)
-      || expectedQuantity < 0.5 || expectedQuantity > 99 || !Number.isInteger(expectedQuantity * 2)
-      || !Number.isFinite(quantity) || quantity < 0 || quantity > 99 || (quantity !== 0 && !Number.isInteger(quantity * 2))) {
+    if (!Number.isInteger(orderItemId) || orderItemId <= 0 || !isValidOrderQuantity(expectedQuantity)
+      || (quantity !== 0 && !isValidOrderQuantity(quantity))) {
       throw new Error('Проверьте количество');
     }
     await adjustAdminOrderItem(orderId, orderItemId, expectedQuantity, quantity);

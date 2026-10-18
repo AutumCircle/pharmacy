@@ -3049,7 +3049,7 @@ def update_courier_order_item(
             try:
                 quantity = validate_order_quantity(payload["quantity"])
             except ContractError as exc:
-                raise ContractError("VALIDATION_ERROR", "Количество: от 0,5 до 99 с шагом 0,5") from exc
+                raise ContractError("VALIDATION_ERROR", "Количество: от 0,1 до 99, до двух знаков после запятой") from exc
         if "unit_price" in payload:
             unit_price = validate_unit_price(payload["unit_price"])
     lookup, lookup_values = _order_lookup(order_id)

@@ -235,6 +235,16 @@ def build() -> Path:
         "sha256": hashlib.sha256(order_editing_migration_payload).hexdigest(),
         "size_bytes": len(order_editing_migration_payload),
     })
+    tenths_destination = OUTPUT / "migration-0026-order-quantity-tenths-once.zip"
+    _write_deterministic_zip(tenths_destination, [
+        ("lambda_function.py", ROOT / "backend" / "operations" / "order_quantity_tenths_once" / "lambda_function.py"),
+        ("migration.sql", ROOT / "db" / "migrations" / "0026_order_quantity_tenths.sql"),
+    ])
+    tenths_payload = tenths_destination.read_bytes()
+    manifest_packages.append({
+        "file": tenths_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(tenths_payload).hexdigest(), "size_bytes": len(tenths_payload),
+    })
     manifest = {
         "format": "vatan-lambda-packages/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

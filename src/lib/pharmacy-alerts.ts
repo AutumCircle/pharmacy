@@ -1,7 +1,8 @@
 import { parseOrderTime } from './order-time.ts';
 
-/** Job 012: a pharmacy is reminded about an unreacted order about every 3 minutes. */
+/** Existing interval for pharmacy 2. Pharmacy 1 uses a more persistent alarm. */
 export const REMIND_MS = 180_000;
+export const PHARMACY_ONE_REMIND_MS = 60_000;
 
 /** Poll interval of the pharmacy queue while the staff page is open. */
 export const POLL_MS = 30_000;
@@ -28,6 +29,7 @@ export type AlertQueueOrder = {
  */
 export function dueAlerts(
   orders: readonly AlertQueueOrder[], lastAlerted: ReadonlyMap<string, number>, now: number,
+  intervalMs: number = REMIND_MS,
 ): { due: string[]; lastAlerted: Map<string, number> } {
   const next = new Map<string, number>();
   const due: string[] = [];
@@ -35,7 +37,7 @@ export function dueAlerts(
     if (order.needs_attention !== true || typeof order.order_id !== 'string' || !order.order_id) continue;
     if (next.has(order.order_id)) continue;
     const previous = lastAlerted.get(order.order_id);
-    if (previous === undefined || now - previous >= REMIND_MS) {
+    if (previous === undefined || now - previous >= intervalMs) {
       due.push(order.order_id);
       next.set(order.order_id, now);
     } else {
