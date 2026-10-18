@@ -87,10 +87,11 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
           landmark={order.landmark} comment={order.notes} />
         <OrderDeliveryEditor key={`${order.delivery_courier_amount}-${order.delivery_owner_amount}`} orderId={order.order_id}
           courierAmount={Number(order.delivery_courier_amount || 0)} ownerAmount={Number(order.delivery_owner_amount || 0)} />
-        {(order.status === 'pending' || order.status === 'cancelled') && <section className="od-card od-danger od-o6">
+        {(order.status === 'pending' || order.status === 'cancelled' || order.status === 'delivered') && <section className="od-card od-danger od-o6">
           <div className="od-card-head"><h2>Удаление</h2></div>
-          <p className="od-muted od-small">Заказ исчезнет из рабочих списков. Доступно только для новых и отменённых заказов.</p>
-          <OrderDeleteButton orderId={order.order_id} orderReference={order.order_reference || order.order_id} redirectTo="/admin/orders" />
+          <p className="od-muted od-small">Заказ исчезнет из списков и отчётов. История и состав сохранятся.</p>
+          <OrderDeleteButton orderId={order.order_id} orderReference={order.order_reference || order.order_id}
+            delivered={order.status === 'delivered'} redirectTo="/admin/orders" />
         </section>}
       </aside>
     </div>

@@ -9,18 +9,23 @@ export default function OrderDeleteButton({
   orderReference,
   onDeleted,
   redirectTo,
+  delivered = false,
 }: {
   orderId: string;
   orderReference: string;
   onDeleted?: () => void;
   redirectTo?: string;
+  delivered?: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const remove = async () => {
-    if (!window.confirm(`Удалить заказ ${orderReference}?\n\nОн исчезнет из рабочих списков, но история и состав заказа сохранятся.`)) return;
+    const impact = delivered
+      ? 'Он исчезнет из списков доставленных заказов и финансовых отчётов. История и состав заказа сохранятся.'
+      : 'Он исчезнет из рабочих списков, но история и состав заказа сохранятся.';
+    if (!window.confirm(`Удалить заказ ${orderReference}?\n\n${impact}`)) return;
     setPending(true);
     setError(null);
     const result = await deleteOrder(orderId);
