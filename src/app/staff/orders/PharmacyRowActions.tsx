@@ -17,12 +17,15 @@ export default function PharmacyRowActions({ orderId, orderItemId, name, unitPri
 }) {
   const { busy, error, setError, errorRef, post } = usePharmacyItemPost(orderId);
   const [editing, setEditing] = useState<string | null>(null);
+  // «Нет в наличии» cannot be undone from «Ватан 1» (the item moves to «Ватан 2» and Telegram is sent):
+  // ask once inline to avoid a mis-tap next to «В наличии».
+  const [confirming, setConfirming] = useState(false);
   const isBusy = busy === orderItemId;
 
   async function send(action: RowAction, price?: string) {
     const checked = rowActionRequest(orderItemId, action, price, unitPrice);
     if (!checked.ok) { setError(checked.error); return; }
-    if (await post('pharmacy-answers', checked.value, orderItemId)) setEditing(null);
+    if (await post('pharmacy-answers', checked.value, orderItemId)) { setEditing(null); setConfirming(false); }
   }
 
   return <div className="pa-row-controls">
@@ -39,6 +42,12 @@ export default function PharmacyRowActions({ orderId, orderItemId, name, unitPri
         <button type="button" className="pa-btn pa-btn-ghost" disabled={isBusy}
           onClick={() => { setEditing(null); setError(''); }}>Отмена</button>
       </div>
+    </div> : confirming ? <div className="pa-actions" role="group" aria-label={`Подтверждение: ${name}`}>
+      <p className="pa-row-confirm">{pharmacyId === 1 ? 'Передать в Ватан 2?' : 'Отметить «Нет в наличии»?'}</p>
+      <button type="button" className="pa-btn pa-btn-problem" disabled={isBusy} autoFocus
+        onClick={() => void send('unavailable')}>{isBusy ? 'Сохраняем…' : 'Да'}</button>
+      <button type="button" className="pa-btn pa-btn-ghost" disabled={isBusy}
+        onClick={() => setConfirming(false)}>Отмена</button>
     </div> : <div className="pa-actions" role="group" aria-label={`Ответ: ${name}`}>
       <button type="button" className={`pa-btn pa-btn-ok${myAnswer === 'available' ? ' selected' : ''}`}
         aria-pressed={myAnswer === 'available'} disabled={isBusy || myAnswer === 'available'}
@@ -46,7 +55,7 @@ export default function PharmacyRowActions({ orderId, orderItemId, name, unitPri
       <button type="button" className={`pa-btn pa-btn-problem${myAnswer === 'unavailable' ? ' selected' : ''}`}
         aria-pressed={myAnswer === 'unavailable'} disabled={isBusy || myAnswer === 'unavailable'}
         title={pharmacyId === 1 ? 'Позиция уйдёт в «Ватан 2»' : undefined}
-        onClick={() => void send('unavailable')}>{ROW_ACTION_LABELS.unavailable}</button>
+        onClick={() => { setError(''); setConfirming(true); }}>{ROW_ACTION_LABELS.unavailable}</button>
       <button type="button" className="pa-btn pa-btn-ghost" disabled={isBusy}
         onClick={() => { setError(''); setEditing(unitPrice != null ? String(unitPrice) : ''); }}>
         {ROW_ACTION_LABELS.price}</button>

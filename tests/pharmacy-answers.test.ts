@@ -5,7 +5,7 @@ import {
   PHARMACY_ANSWER_LABELS, answersProgressText, confirmedAmountText, courierItemAnswerLabel, courierItemAnswerTone,
   crossPharmacyMark, normalizePharmacyPrice,
   isAmountConfirmed, pharmacyAnswerChip, validatePharmacyAnswersRequest,
-  ROW_ACTION_LABELS, forwardChangeNotification, routedAwayMark, rowActionRequest,
+  ROW_ACTION_LABELS, routedAwayMark, rowActionRequest, sendChangeNotificationSafely, splitChangeNotification,
 } from '../src/lib/pharmacy-answers.ts';
 
 const at = '2026-10-16T09:00:00+00:00';
@@ -191,20 +191,19 @@ test('job 013: routed rows are orange «Ватан 2» unless «Ватан 2» l
 });
 
 test('job 013: the route strips _notification and survives a notifier failure', async () => {
-  const sent: Array<Record<string, unknown>> = [];
   const notification = { notification_kind: 'pharmacy_item_change', admin_order_id: 7, changes: [] };
-  const data = { order_id: 'ord_x', items: [], routed_away_count: 1, awaiting_response: false, _notification: notification };
-  const clean = await forwardChangeNotification(data, async (value) => { sent.push(value); }, () => assert.fail('no error'));
+  const answer = { order_id: 'ord_x', items: [], routed_away_count: 1, awaiting_response: false, _notification: notification };
+  const split = splitChangeNotification(answer);
+  assert.equal('_notification' in split.data, false);
+  assert.deepEqual(split.data, { order_id: 'ord_x', items: [], routed_away_count: 1, awaiting_response: false });
+  assert.deepEqual(split.notification, notification);
+  assert.deepEqual(splitChangeNotification({ order_id: 'ord_x' }), { data: { order_id: 'ord_x' }, notification: null });
+  assert.equal(splitChangeNotification({ order_id: 'ord_x', _notification: [1] }).notification, null);
+  const sent: Array<Record<string, unknown>> = [];
+  await sendChangeNotificationSafely(notification, async (value) => { sent.push(value); }, () => assert.fail('no error'));
   assert.deepEqual(sent, [notification]);
-  assert.equal('_notification' in clean, false);
-  assert.deepEqual(clean, { order_id: 'ord_x', items: [], routed_away_count: 1, awaiting_response: false });
   const errors: unknown[] = [];
-  const failed = await forwardChangeNotification(data, async () => { throw new Error('notifier down'); },
+  await sendChangeNotificationSafely(notification, async () => { throw new Error('notifier down'); },
     (error) => errors.push(error));
   assert.equal(errors.length, 1);
-  assert.equal('_notification' in failed, false);
-  let calls = 0;
-  const plain = await forwardChangeNotification({ order_id: 'ord_x' }, async () => { calls += 1; }, () => undefined);
-  assert.equal(calls, 0);
-  assert.deepEqual(plain, { order_id: 'ord_x' });
 });

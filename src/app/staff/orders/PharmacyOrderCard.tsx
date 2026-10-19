@@ -87,7 +87,8 @@ export default function PharmacyOrderCard({ order, now, actions, pharmacyId }: {
           <tbody>{view.rows.map((item) => <Fragment key={item.key}>
             <tr className={item.kind === 'routed' ? `pa-row-routed pa-item-tone-${item.chip?.tone ?? 'orange'}` : undefined}>
               <td className="name">{item.name}
-                {item.myProblem && <small className="pa-item-problem">{item.myProblem}</small>}</td>
+                {item.myProblem && <small className="pa-item-problem">{item.myProblem}</small>}
+                {item.hint && <small className="pa-routed-hint">{item.hint}</small>}</td>
               <td className="num qty">{item.quantity != null ? quantityLabel(item.quantity) : '—'}</td>
               {priceColumns && <td className="num">{item.kind === 'routed' ? '—' : money(item.unitPrice)}</td>}
               {priceColumns && <td className="num">{item.kind === 'routed' ? '—' : money(item.lineTotal)}</td>}

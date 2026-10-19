@@ -89,6 +89,8 @@ export type PharmacyTableRow = {
   chip: Chip | null;
   /** «В наличии» / «Нет в наличии» / «Изменить цену» are shown on this row. */
   canAct: boolean;
+  /** Small hint under the name of a routed row («Ждёт ответа Ватан 2» while «Ватан 2» has not answered). */
+  hint: string | null;
 };
 
 export type PharmacyOrderView = {
@@ -189,6 +191,7 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
       chip: hasAnswers ? crossMark ?? pharmacyAnswerChip(myAnswer) : null,
       // «Ватан 2» keeps its per-item controls for items routed here (PharmacyRoutedItems).
       canAct: canAnswer && !routedHere,
+      hint: null,
     };
   });
   const routedRows: PharmacyTableRow[] = medicines && Array.isArray(order.routed_away)
@@ -200,6 +203,7 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
         quantity: entry.quantity ?? null, unitPrice: null, lineTotal: null, clientLineTotal: null,
         myAnswer: 'unavailable', myProblem: null, routedHere: false, collected: false,
         chip: routedAwayMark(itemAnswer(entry.answer)), canAct: false,
+        hint: itemAnswer(entry.answer) === null ? 'Ждёт ответа Ватан 2' : null,
       };
     }) : [];
   const rows = medicines ? [...ownRows, ...routedRows]

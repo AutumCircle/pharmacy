@@ -225,6 +225,9 @@ test('job 013: routed rows merge into the «Ватан 1» table in order_item_i
     [84, 'own', 'D', 'Ждёт ответа', 'wait', true],
   ]);
   const routed = view.rows?.find((row) => row.orderItemId === 82);
+  assert.equal(routed?.hint, 'Ждёт ответа Ватан 2');
+  assert.equal(view.rows?.find((row) => row.orderItemId === 83)?.hint, null);
+  assert.equal(view.rows?.find((row) => row.orderItemId === 81)?.hint, null);
   assert.equal(routed?.unitPrice, null);
   assert.equal(routed?.quantity, 3);
   assert.equal(view.answerColumn, true);

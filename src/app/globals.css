@@ -7,6 +7,10 @@
   --primary: #E31E24;
   --primary-dark: #B71C1C;
   --primary-light: #FFEBEE;
+  --primary-ring: rgba(227, 30, 36, 0.2);
+  --surface: #FFFFFF;
+  --stepper-line: #F0F0F0;
+  --text-subtle: #999999;
   --bg-color: #F8F9FA;
   --text-dark: #333333;
   --text-gray: #6c757d;
@@ -1334,6 +1338,30 @@ a {
   .collection-order-step { padding: 17px 58px 17px 72px; min-height: 74px; }
   .collection-order-step__icon { position: absolute; top: 14px; left: 14px; width: 42px; height: 42px; margin: 0; }
   .collection-order-guide__actions a { flex: 1 1 160px; text-align: center; }
+}
+
+/* Job 013: customer order stepper on /tracking, five stages. */
+.tracking-stepper { position: relative; margin: 30px 0; }
+.tracking-stepper ol { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0; padding: 0; list-style: none; }
+.tracking-stepper-track, .tracking-stepper-fill { position: absolute; top: 15px; left: 10%; height: 4px; z-index: 1; }
+.tracking-stepper-track { right: 10%; background: var(--stepper-line); }
+.tracking-stepper-fill { background: var(--primary); transition: width 0.3s ease; }
+.tracking-step { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 0 2px; text-align: center; }
+.tracking-step-dot { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; margin-bottom: 8px;
+  border: 3px solid var(--stepper-line); border-radius: 50%; background: var(--surface); color: var(--text-subtle);
+  font-weight: 700; font-size: 14px; }
+.tracking-step.done .tracking-step-dot { border-color: var(--primary); background: var(--primary); color: var(--surface); }
+.tracking-step.current .tracking-step-dot { box-shadow: 0 0 0 4px var(--primary-ring); }
+.tracking-step-label { max-width: 100%; font-size: clamp(10px, 2.8vw, 13px); line-height: 1.2; color: var(--text-subtle);
+  overflow-wrap: anywhere; hyphens: auto; }
+.tracking-step.done .tracking-step-label { color: var(--text-dark); font-weight: 600; }
+
+@media (max-width: 480px) {
+  .tracking-stepper { margin: 22px 0; }
+  .tracking-stepper-track, .tracking-stepper-fill { top: 12px; }
+  .tracking-step { padding: 0 1px; }
+  .tracking-step-dot { width: 28px; height: 28px; margin-bottom: 6px; border-width: 2px; font-size: 12px; }
 }
 
 @media (max-width: 480px) {

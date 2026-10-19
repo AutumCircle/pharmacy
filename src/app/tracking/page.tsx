@@ -80,39 +80,34 @@ export default function TrackingPage() {
     const currentIndex = trackingStepIndex(order);
     if (currentIndex < 0) {
       return (
-        <div style={{ margin: '30px 0', padding: '16px', borderRadius: '10px', background: '#ffebee', color: '#c62828', fontWeight: 600 }}>
+        <div style={{ margin: '30px 0', padding: '16px', borderRadius: '10px', background: 'var(--primary-light)', color: 'var(--primary-dark)', fontWeight: 600 }}>
           Заказ отменён
         </div>
       );
     }
     const steps = TRACKING_STEPS.map((stage) => ({ id: stage, label: ORDER_STAGE_LABELS[stage] }));
 
+    // Styles live in globals.css (.tracking-stepper): five columns that fit 360 px phones.
     return (
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '30px 0', position: 'relative' }}>
-        <div style={{ position: 'absolute', top: '15px', left: '10%', right: '10%', height: '4px', background: '#F0F0F0', zIndex: 0 }}></div>
-        <div style={{ position: 'absolute', top: '15px', left: '10%', right: '10%', height: '4px', background: 'var(--primary)', zIndex: 1, width: `${(currentIndex / (steps.length - 1)) * 80}%`, transition: 'width 0.3s ease' }}></div>
-
-        {steps.map((step, idx) => {
-          const isCompleted = idx <= currentIndex;
-          const isActive = idx === currentIndex;
-          return (
-            <div key={step.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, width: `${100 / steps.length}%` }}>
-              <div style={{ 
-                width: '34px', height: '34px', borderRadius: '50%', 
-                background: isCompleted ? 'var(--primary)' : '#fff', 
-                border: isCompleted ? 'none' : '3px solid #F0F0F0',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'white', fontWeight: 'bold', marginBottom: '8px',
-                boxShadow: isActive ? '0 0 0 4px rgba(227, 30, 36, 0.2)' : 'none'
-              }}>
-                {isCompleted ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"></polyline></svg> : (idx + 1)}
-              </div>
-              <div style={{ fontSize: '13px', fontWeight: isCompleted ? '600' : '400', color: isCompleted ? '#333' : '#999', textAlign: 'center' }}>
-                {step.label}
-              </div>
-            </div>
-          );
-        })}
+      <div className="tracking-stepper">
+        <div className="tracking-stepper-track" aria-hidden="true"></div>
+        <div className="tracking-stepper-fill" aria-hidden="true"
+          style={{ width: `${(currentIndex / (steps.length - 1)) * 80}%` }}></div>
+        <ol aria-label="Этапы заказа">
+          {steps.map((step, idx) => {
+            const isCompleted = idx <= currentIndex;
+            const isActive = idx === currentIndex;
+            return (
+              <li key={step.id} aria-current={isActive ? 'step' : undefined}
+                className={`tracking-step${isCompleted ? ' done' : ''}${isActive ? ' current' : ''}`}>
+                <span className="tracking-step-dot" aria-hidden="true">
+                  {isCompleted ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"></polyline></svg> : (idx + 1)}
+                </span>
+                <span className="tracking-step-label">{step.label}</span>
+              </li>
+            );
+          })}
+        </ol>
       </div>
     );
   };
@@ -219,7 +214,7 @@ export default function TrackingPage() {
             </div>
 
             {/* Right Main Area: Order Details */}
-            <div className="tracking-order-details" style={{ background: 'white', padding: '30px', borderRadius: '12px', border: '1px solid #E8E8E8', minHeight: '500px' }}>
+            <div className="tracking-order-details" style={{ background: 'white', padding: 'clamp(16px, 4vw, 30px)', borderRadius: '12px', border: '1px solid #E8E8E8', minHeight: '500px' }}>
               {!selectedOrder ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>
                   <p>{error ? '' : orders.length === 0 ? 'Нет доступных заказов' : 'Выберите заказ из списка слева'}</p>

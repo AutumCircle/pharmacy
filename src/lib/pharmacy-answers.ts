@@ -149,22 +149,26 @@ export function rowActionRequest(orderItemId: number, action: RowAction, price?:
 }
 
 /**
- * Job 013 (Next.js route only): removes the server-only `_notification` from the Lambda answer and
- * hands it to the notifier. A notifier failure is reported to `onError` and never fails the answer;
- * the returned data never contains `_notification`.
+ * Job 013 (Next.js route only): splits the server-only `_notification` off the Lambda answer. The
+ * returned `data` never contains it, so it never reaches the browser.
  */
-export async function forwardChangeNotification<T extends Record<string, unknown>>(
-  data: T, send: (notification: Record<string, unknown>) => Promise<unknown>, onError: (error: unknown) => void,
-): Promise<Omit<T, '_notification'>> {
+export function splitChangeNotification<T extends Record<string, unknown>>(data: T):
+  { data: Omit<T, '_notification'>; notification: Record<string, unknown> | null } {
   const { _notification: notification, ...rest } = data;
-  if (notification && typeof notification === 'object' && !Array.isArray(notification)) {
-    try {
-      await send(notification as Record<string, unknown>);
-    } catch (error) {
-      onError(error);
-    }
+  const valid = !!notification && typeof notification === 'object' && !Array.isArray(notification);
+  return { data: rest, notification: valid ? notification as Record<string, unknown> : null };
+}
+
+/** Sends the change notification; a notifier failure goes to `onError` and is never thrown. */
+export async function sendChangeNotificationSafely(
+  notification: Record<string, unknown>, send: (notification: Record<string, unknown>) => Promise<unknown>,
+  onError: (error: unknown) => void,
+): Promise<void> {
+  try {
+    await send(notification);
+  } catch (error) {
+    onError(error);
   }
-  return rest;
 }
 
 type CourierItemInput = { pharmacy_id?: number | null; answers?: PharmacyItemAnswer[] | null };
