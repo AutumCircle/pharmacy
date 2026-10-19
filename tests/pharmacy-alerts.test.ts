@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import {
   IOS_HINT, PHARMACY_ONE_REMIND_MS, PHARMACY_SOUND_KEY, REMIND_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE,
-  alertText, attentionCount, dueAlerts,
-  permissionView, soundClickAction, soundLabel,
+  alertText, attentionBannerText, attentionCount, dueAlerts,
+  permissionView, remindIntervalMs, soundClickAction, soundLabel,
   titleWithCount,
 } from '../src/lib/pharmacy-alerts.ts';
 
@@ -24,6 +24,31 @@ test('pharmacy 1 is reminded each minute, pharmacy 2 keeps its three-minute inte
   assert.deepEqual(dueAlerts([open('a')], first.lastAlerted, T0 + 59_999, PHARMACY_ONE_REMIND_MS).due, []);
   assert.deepEqual(dueAlerts([open('a')], first.lastAlerted, T0 + 60_000, PHARMACY_ONE_REMIND_MS).due, ['a']);
   assert.deepEqual(dueAlerts([open('a')], first.lastAlerted, T0 + 60_000, REMIND_MS).due, []);
+});
+
+test('remindIntervalMs: 60 s for pharmacy 1, 180 s for pharmacy 2 (job 013)', () => {
+  assert.equal(remindIntervalMs(1), 60_000);
+  assert.equal(remindIntervalMs(2), 180_000);
+  assert.equal(remindIntervalMs(null), 180_000);
+  const first = dueAlerts([open('a')], new Map(), T0, remindIntervalMs(2));
+  assert.deepEqual(dueAlerts([open('a')], first.lastAlerted, T0 + 179_999, remindIntervalMs(2)).due, []);
+  assert.deepEqual(dueAlerts([open('a')], first.lastAlerted, T0 + 180_000, remindIntervalMs(2)).due, ['a']);
+});
+
+test('an order keeps alerting while needs_attention stays true and stops once assembled', () => {
+  const first = dueAlerts([open('a')], new Map(), T0, remindIntervalMs(1));
+  // Answered / «Начать сборку»: the Lambda still says needs_attention, so it repeats each minute.
+  const answered = dueAlerts([open('a')], first.lastAlerted, T0 + 60_000, remindIntervalMs(1));
+  assert.deepEqual(answered.due, ['a']);
+  // «Сборка сделана»: needs_attention false, no more alerts and the attention count is 0 (alarm stops).
+  const assembled = [open('a', { needs_attention: false, attention_since: null })];
+  assert.deepEqual(dueAlerts(assembled, answered.lastAlerted, T0 + 10 * 60_000, remindIntervalMs(1)).due, []);
+  assert.equal(attentionCount(assembled), 0);
+});
+
+test('attentionBannerText says «Сборка сделана» and nothing for zero', () => {
+  assert.equal(attentionBannerText(2), 'Заказов ждут «Сборка сделана»: 2');
+  assert.equal(attentionBannerText(0), null);
 });
 
 test('dueAlerts alerts an order the first time it is seen with needs_attention', () => {
@@ -80,16 +105,16 @@ test('dueAlerts handles mixed queues and does not mutate the input map', () => {
 
 test('alertText uses the reference and the waiting minutes', () => {
   assert.deepEqual(alertText(open('ord_abc'), T0 + 7 * 60_000 + 59_000),
-    { title: 'Новый заказ № REF-ord_abc', body: 'Ожидает ответа 7 мин' });
+    { title: 'Заказ № REF-ord_abc', body: 'Ждёт сборки 7 мин' });
 });
 
 test('alertText falls back to the last 6 characters of order_id', () => {
   const text = alertText({ order_id: 'ord_0123456789', needs_attention: true, attention_since: '2026-10-16T09:00:00Z' }, T0);
-  assert.equal(text.title, 'Новый заказ № 456789');
-  assert.equal(text.body, 'Ожидает ответа 0 мин');
-  assert.equal(alertText({ order_id: 'ord_0123456789', order_reference: '   ' }, T0).title, 'Новый заказ № 456789');
-  assert.equal(alertText({ order_id: 'ord_0123456789', order_reference: null }, T0).body, 'Ожидает ответа 0 мин');
-  assert.equal(alertText({ order_id: 'x', attention_since: 'not a time' }, T0).body, 'Ожидает ответа 0 мин');
+  assert.equal(text.title, 'Заказ № 456789');
+  assert.equal(text.body, 'Ждёт сборки 0 мин');
+  assert.equal(alertText({ order_id: 'ord_0123456789', order_reference: '   ' }, T0).title, 'Заказ № 456789');
+  assert.equal(alertText({ order_id: 'ord_0123456789', order_reference: null }, T0).body, 'Ждёт сборки 0 мин');
+  assert.equal(alertText({ order_id: 'x', attention_since: 'not a time' }, T0).body, 'Ждёт сборки 0 мин');
 });
 
 test('alertText carries no client data even when the order object has it', () => {

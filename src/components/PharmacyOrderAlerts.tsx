@@ -6,8 +6,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { chime } from '@/components/NewOrderAlerts';
 import { schedulePharmacyAlarm } from '@/lib/pharmacy-alarm';
 import {
-  PHARMACY_ONE_REMIND_MS, PHARMACY_SOUND_KEY, POLL_MS, REMIND_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE,
-  alertText, dueAlerts, soundClickAction, soundLabel,
+  PHARMACY_SOUND_KEY, POLL_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE,
+  alertText, dueAlerts, remindIntervalMs, soundClickAction, soundLabel,
   titleWithCount, type AlertQueueOrder,
 } from '@/lib/pharmacy-alerts';
 import { setAttentionCount } from '@/lib/pharmacy-alert-store';
@@ -38,11 +38,13 @@ async function loadQueue(): Promise<AlertQueueOrder[] | null> {
 }
 
 /**
- * On-screen signal and optional sound for orders this pharmacy has not
- * reacted to yet. Reaction is decided by the Lambda (`needs_attention`); an older Lambda without the
- * field gives no reminders. Works only while the page is open (Web Push is follow-up 012b).
+ * On-screen signal and optional sound for orders this pharmacy has not marked «Сборка сделана» yet
+ * (job 013; the Lambda decides via `needs_attention`, an older Lambda without the field gives no
+ * reminders). Each due reminder plays the 10-second alarm for both pharmacies; a new one replaces the
+ * previous alarm. Repeats every minute for «Ватан 1» and every three minutes for «Ватан 2». Works only
+ * while the page is open (closed-app notifications are job 014).
  */
-export default function PharmacyOrderAlerts({ enabled, intensive = false }: { enabled: boolean; intensive?: boolean }) {
+export default function PharmacyOrderAlerts({ enabled, pharmacyId }: { enabled: boolean; pharmacyId?: number | null }) {
   const pathname = usePathname();
   const router = useRouter();
   const lastAlerted = useRef(new Map<string, number>());
@@ -109,7 +111,7 @@ export default function PharmacyOrderAlerts({ enabled, intensive = false }: { en
         const orders = await loadQueue();
         if (cancelled || !orders) return;
         const now = Date.now();
-        const result = dueAlerts(orders, lastAlerted.current, now, intensive ? PHARMACY_ONE_REMIND_MS : REMIND_MS);
+        const result = dueAlerts(orders, lastAlerted.current, now, remindIntervalMs(pharmacyId));
         lastAlerted.current = result.lastAlerted;
         const attention = new Map(orders.filter((order) => order.needs_attention === true)
           .map((order) => [order.order_id, order]));
@@ -129,10 +131,9 @@ export default function PharmacyOrderAlerts({ enabled, intensive = false }: { en
         const context = audio.current;
         if (readSoundPreference() && context && context.state === 'running') {
           try {
-            if (intensive) {
-              stopAlarm.current?.();
-              stopAlarm.current = schedulePharmacyAlarm(context);
-            } else chime(context);
+            // A new due reminder stops the previous alarm instead of stacking on it.
+            stopAlarm.current?.();
+            stopAlarm.current = schedulePharmacyAlarm(context);
           } catch { /* the on-screen signal is still shown */ }
         }
         if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
@@ -160,7 +161,7 @@ export default function PharmacyOrderAlerts({ enabled, intensive = false }: { en
       count.current = 0;
       document.title = titleWithCount(document.title, 0);
     };
-  }, [enabled, intensive]);
+  }, [enabled, pharmacyId]);
 
   function setPreference(value: boolean) {
     if (!value) { stopAlarm.current?.(); stopAlarm.current = null; }

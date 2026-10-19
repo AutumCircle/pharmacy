@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { STAFF_SESSION_COOKIE } from '@/lib/admin-session';
 import { answerPharmacyOrderItems } from '@/lib/api-v1/staff-server';
+import { sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
-import { validatePharmacyAnswersRequest } from '@/lib/pharmacy-answers';
+import { forwardChangeNotification, validatePharmacyAnswersRequest } from '@/lib/pharmacy-answers';
 
 // Pharmacist answers per item (job 010). Only pre-validates; Lambda takes the pharmacy id from the
 // staff session, checks item ownership under an order lock and routes «Нет в наличии» to «Ватан 2».
+// Job 013: when the answer changed a price or routed an item, Lambda adds `_notification` (owner and
+// courier Telegram, no client data). It never reaches the browser; a notifier failure is only logged.
 export async function POST(request: Request, { params }: { params: Promise<{ order_id: string }> }) {
   try {
     const token = (await cookies()).get(STAFF_SESSION_COOKIE)?.value;
@@ -19,7 +22,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
     const checked = validatePharmacyAnswersRequest(body);
     if (!checked.ok) return NextResponse.json({ error: { message: checked.error } }, { status: 400 });
     const response = await answerPharmacyOrderItems(token, order_id, checked.value);
-    return NextResponse.json(response, { headers: { 'Cache-Control': 'no-store' } });
+    const data = await forwardChangeNotification(response.data, sendOrderNotification,
+      (error) => console.error('Pharmacy answer was saved, but the change notification failed', error));
+    return NextResponse.json({ ...response, data }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return apiRouteError(error);
   }

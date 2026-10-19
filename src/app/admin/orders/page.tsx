@@ -18,8 +18,8 @@ type View = 'overview' | 'work' | 'finance';
 type OrderFilter = OrderStatus | 'active';
 
 const statusFilters: Array<{ value: OrderFilter | 'all'; label: string }> = [
-  { value: 'active', label: 'В работе' }, { value: 'pending', label: 'Новые' },
-  { value: 'confirmed', label: 'Собираются' }, { value: 'delivering', label: 'В пути' },
+  { value: 'active', label: 'В работе' }, { value: 'pending', label: 'Собираются / собраны' },
+  { value: 'confirmed', label: 'Подтверждённые' }, { value: 'delivering', label: 'В пути' },
   { value: 'delivered', label: 'Доставлены' }, { value: 'cancelled', label: 'Отменены' }, { value: 'all', label: 'Все' },
 ];
 const periods: Array<{ value: OrdersInsightsPeriod; label: string }> = [

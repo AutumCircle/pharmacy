@@ -1,4 +1,6 @@
 import type { CursorPage, OrderStatus, PaymentMethod, PaymentStatus } from './types';
+import type { OrderStage } from '../order-stage';
+import type { CourierAssemblyMark, PharmacyItemAnswer } from './staff-types';
 import type { HomepageBanner } from './types';
 
 export type AdminApiListResponse<T> = {
@@ -230,6 +232,8 @@ export type AdminOrderSummary = {
   order_total: number | string | null;
   currency: 'TJS';
   status: OrderStatus;
+  /** Job 013: stage derived in Lambda; absent on older Lambdas (fall back to `status`). */
+  stage?: OrderStage;
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   notes: string | null;
@@ -268,10 +272,28 @@ export type AdminStatusHistory = {
   created_at: string;
 };
 
+/** Job 013: read-only courier checklist, pharmacy answers and assembly marks of a website order. */
+export type AdminOrderFulfillment = {
+  stage: OrderStage;
+  /** Completed manual courier checklist steps (1, 2, 6). */
+  checklist_steps: number[];
+  assembly: CourierAssemblyMark[];
+  assembly_complete: boolean;
+  pharmacy_answers_complete: boolean;
+  confirmed_total: string | null;
+  unavailable_count: number;
+  answered_count?: number;
+  item_count?: number;
+  items: Array<{ order_item_id: number; medicine_name?: string | null; pharmacy_id: 1 | 2 | null;
+    answers: PharmacyItemAnswer[] }>;
+};
+
 export type AdminOrderDetail = AdminOrderSummary & {
   edit_revision: number;
   items: AdminOrderItem[];
   status_history: AdminStatusHistory[];
+  /** Job 013: null for staff-created orders; absent on older Lambdas (block hidden). */
+  fulfillment?: AdminOrderFulfillment | null;
 };
 
 export type CatalogSyncSummary = {

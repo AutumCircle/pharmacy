@@ -195,12 +195,68 @@ test('pharmacyOrderView: routed items, owner colours and part controls (rework 1
     ] });
   assert.equal(one.partControls, true);
   assert.equal(one.medicines?.[0].crossMark, null);
-  assert.deepEqual(one.routedAway, [
-    { name: 'B', quantity: 1, text: 'В аптеке 2', tone: 'orange' },
-    { name: 'C', quantity: null, text: 'Нет в наличии в обеих аптеках', tone: 'bad' },
-    { name: 'D', quantity: null, text: 'Ждём ответ Ватан 2', tone: 'wait' }]);
+  // Job 013: routed items are rows of the same table (see the job 013 tests below).
+  assert.deepEqual(one.rows?.filter((row) => row.kind === 'routed').map((row) => row.chip),
+    [{ text: 'Ватан 2', tone: 'orange' }, { text: 'Нет в наличии в обеих аптеках', tone: 'bad' },
+      { text: 'Ватан 2', tone: 'orange' }]);
   // Old Lambda: no routed fields.
   const old = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines: [{ medicine_name: 'A' }] });
-  assert.deepEqual(old.routedAway, []);
+  assert.deepEqual(old.rows?.map((row) => row.kind), ['own']);
   assert.equal(old.partControls, false);
+});
+
+test('job 013: routed rows merge into the «Ватан 1» table in order_item_id order', () => {
+  const view = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', stage: 'assembling',
+    medicines: [
+      { order_item_id: 81, medicine_name: 'A', quantity: 1, base_unit_price: '10.00', base_line_total: '10.00',
+        my_answer: 'available' },
+      { order_item_id: 84, medicine_name: 'D', quantity: 2, base_unit_price: '5.00', base_line_total: '10.00',
+        my_answer: null },
+    ],
+    routed_away_count: 2,
+    routed_away: [
+      { order_item_id: 83, medicine_name: 'C', quantity: 1, pharmacy_id: 2, answer: 'unavailable' },
+      { order_item_id: 82, medicine_name: 'B', quantity: 3, pharmacy_id: 2, answer: null },
+    ] });
+  assert.deepEqual(view.rows?.map((row) => [row.orderItemId, row.kind, row.name, row.chip?.text, row.chip?.tone, row.canAct]), [
+    [81, 'own', 'A', 'В наличии', 'ok', true],
+    [82, 'routed', 'B', 'Ватан 2', 'orange', false],
+    [83, 'routed', 'C', 'Нет в наличии в обеих аптеках', 'bad', false],
+    [84, 'own', 'D', 'Ждёт ответа', 'wait', true],
+  ]);
+  const routed = view.rows?.find((row) => row.orderItemId === 82);
+  assert.equal(routed?.unitPrice, null);
+  assert.equal(routed?.quantity, 3);
+  assert.equal(view.answerColumn, true);
+  assert.equal(view.routedAwayCount, 2);
+  assert.equal(view.stageLabel, 'Собирается');
+  // «Ватан 2» answering «available» or «price_differs» keeps the orange «Ватан 2» chip.
+  const priced = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines: [],
+    routed_away: [{ order_item_id: 82, medicine_name: 'B', pharmacy_id: 2, answer: 'price_differs' },
+      { order_item_id: 83, medicine_name: 'C', pharmacy_id: 2, answer: 'available' }] });
+  assert.deepEqual(priced.rows?.map((row) => row.chip?.text), ['Ватан 2', 'Ватан 2']);
+});
+
+test('job 013: row controls only on own rows of a pending order with answer fields', () => {
+  const base = { order_id: 'ord_x', medicines: [
+    { order_item_id: 81, medicine_name: 'A', my_answer: null },
+    { order_item_id: 82, medicine_name: 'B', my_answer: 'available', routed_here: true },
+  ] };
+  const pending = pharmacyOrderView({ ...base, status: 'pending' });
+  assert.deepEqual(pending.rows?.map((row) => row.canAct), [true, false], 'routed-here items keep the «Ватан 2» controls');
+  const confirmed = pharmacyOrderView({ ...base, status: 'confirmed', stage: 'confirmed' });
+  assert.deepEqual(confirmed.rows?.map((row) => row.canAct), [false, false]);
+  assert.equal(confirmed.stageLabel, 'Подтверждён');
+  assert.equal(pharmacyOrderView({ ...base, status: 'pending', stage: 'assembled' }).stageLabel, 'Собран');
+  assert.equal(pharmacyOrderView({ ...base, status: 'pending' }).stageLabel, 'Собирается');
+  // Old Lambda (no order_item_id): no controls and no answer chips.
+  const old = pharmacyOrderView({ order_id: 'ord_x', status: 'pending',
+    medicines: [{ medicine_name: 'A', quantity: 1 }, { medicine_name: 'B' }] });
+  assert.deepEqual(old.rows?.map((row) => [row.canAct, row.chip, row.orderItemId]), [[false, null, null], [false, null, null]]);
+  assert.equal(old.answerColumn, false);
+  // Items hidden by the policy: no rows at all, even with routed entries.
+  assert.equal(pharmacyOrderView({ order_id: 'ord_x', status: 'pending',
+    routed_away: [{ order_item_id: 82, medicine_name: 'B', pharmacy_id: 2, answer: null }] }).rows, null);
+  // Status hidden by the policy: no stage chip.
+  assert.equal(pharmacyOrderView({ order_id: 'ord_x', stage: 'assembled' }).stageLabel, null);
 });

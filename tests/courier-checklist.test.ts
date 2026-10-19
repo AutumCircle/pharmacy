@@ -40,7 +40,7 @@ test('status-linked steps 4, 5 and 7 follow the order status, not stored checks'
     [5, 'confirmed', 'delivering', 'Выехал', ['delivering', 'delivered']],
     [7, 'delivering', 'delivered', 'Доставлен', ['delivered']],
   ]);
-  assert.equal(CHECKLIST_STEPS[3].hint, 'Статус станет «Собирается».');
+  assert.equal(CHECKLIST_STEPS[3].hint, 'Статус станет «Подтверждён».');
   const doneSteps = (status: ChecklistOrder['status']) => [4, 5, 7].filter((step) => isStepDone(order(status, [4, 5, 7]), step));
   assert.deepEqual(doneSteps('pending'), []);
   assert.deepEqual(doneSteps('confirmed'), [4]);

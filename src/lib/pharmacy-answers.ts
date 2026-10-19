@@ -38,7 +38,7 @@ export function normalizeProblem(value: string): string {
 export const PHARMACY_PRICE_ERROR = 'Цена должна быть от 0,01 до 999999,99 с. с точностью до копейки';
 
 /**
- * Mirrors Lambda `validate_unit_price` for the pharmacy's own price at assembly (rework 1, «Ватан 2»):
+ * Mirrors Lambda `validate_unit_price` for the pharmacy's own price at assembly (rework 1; job 013: both pharmacies):
  * 0.01..999999.99 with at most two decimals, comma allowed. Returns a canonical "45.50" string or null.
  * This is an input only: Lambda recomputes the client price and every total itself.
  */
@@ -116,6 +116,57 @@ export function validatePharmacyAnswersRequest(body: unknown): AnswersValidation
   return { ok: true, value: { answers } };
 }
 
+/** Job 013 row controls of the pharmacy medicines table («Цена отличается» is no longer offered). */
+export const ROW_ACTION_LABELS = {
+  available: 'В наличии',
+  unavailable: 'Нет в наличии',
+  price: 'Изменить цену',
+  save: 'Сохранить',
+} as const;
+
+export type RowAction = 'available' | 'unavailable' | 'price';
+
+/**
+ * The `pharmacy-answers` request of one row control. «Изменить цену» → «Сохранить» sends «В наличии»
+ * with the pharmacy (base) price; an empty field or the current price sends plain «В наличии» (same
+ * rule as «Ватан 2»'s routed items, also when the policy hides the price). Lambda re-validates
+ * everything and recomputes client prices and totals.
+ */
+export function rowActionRequest(orderItemId: number, action: RowAction, price?: string,
+  currentPrice?: number | string | null): AnswersValidation {
+  const entry: { order_item_id: number; answer: PharmacyAnswer; base_unit_price?: string } =
+    { order_item_id: orderItemId, answer: action === 'unavailable' ? 'unavailable' : 'available' };
+  if (action === 'price') {
+    const raw = (price ?? '').trim();
+    if (raw) {
+      const normalized = normalizePharmacyPrice(raw);
+      if (normalized === null) return { ok: false, error: PHARMACY_PRICE_ERROR };
+      const current = currentPrice != null ? normalizePharmacyPrice(currentPrice) : null;
+      if (normalized !== current) entry.base_unit_price = normalized;
+    }
+  }
+  return validatePharmacyAnswersRequest({ answers: [entry] });
+}
+
+/**
+ * Job 013 (Next.js route only): removes the server-only `_notification` from the Lambda answer and
+ * hands it to the notifier. A notifier failure is reported to `onError` and never fails the answer;
+ * the returned data never contains `_notification`.
+ */
+export async function forwardChangeNotification<T extends Record<string, unknown>>(
+  data: T, send: (notification: Record<string, unknown>) => Promise<unknown>, onError: (error: unknown) => void,
+): Promise<Omit<T, '_notification'>> {
+  const { _notification: notification, ...rest } = data;
+  if (notification && typeof notification === 'object' && !Array.isArray(notification)) {
+    try {
+      await send(notification as Record<string, unknown>);
+    } catch (error) {
+      onError(error);
+    }
+  }
+  return rest;
+}
+
 type CourierItemInput = { pharmacy_id?: number | null; answers?: PharmacyItemAnswer[] | null };
 
 function pharmacyName(id: number): string {
@@ -137,6 +188,14 @@ export function crossPharmacyMark(routed: boolean, answerAtTwo: PharmacyAnswer |
   if (answerAtTwo === 'available') return { text: AT_PHARMACY_TWO, tone: 'orange' };
   if (answerAtTwo === 'unavailable') return { text: BOTH_PHARMACIES_MISSING, tone: 'bad' };
   return null;
+}
+
+/** Job 013: chip of a «Ватан 1» row that went to «Ватан 2»: orange «Ватан 2» while waiting or available
+ * there, red «Нет в наличии в обеих аптеках» when «Ватан 2» lacks it too. */
+export const ROUTED_TO_TWO = 'Ватан 2';
+
+export function routedAwayMark(answerAtTwo: PharmacyAnswer | null | undefined): { text: string; tone: 'orange' | 'bad' } {
+  return answerAtTwo === 'unavailable' ? { text: BOTH_PHARMACIES_MISSING, tone: 'bad' } : { text: ROUTED_TO_TWO, tone: 'orange' };
 }
 
 function routedToTwo(item: CourierItemInput): boolean {

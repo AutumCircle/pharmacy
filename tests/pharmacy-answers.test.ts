@@ -5,6 +5,7 @@ import {
   PHARMACY_ANSWER_LABELS, answersProgressText, confirmedAmountText, courierItemAnswerLabel, courierItemAnswerTone,
   crossPharmacyMark, normalizePharmacyPrice,
   isAmountConfirmed, pharmacyAnswerChip, validatePharmacyAnswersRequest,
+  ROW_ACTION_LABELS, forwardChangeNotification, routedAwayMark, rowActionRequest,
 } from '../src/lib/pharmacy-answers.ts';
 
 const at = '2026-10-16T09:00:00+00:00';
@@ -153,4 +154,57 @@ test('answersProgressText shows N of M only for new Lambda responses', () => {
   assert.equal(answersProgressText({ answered_count: 1, item_count: 3 }), 'Ответ аптек: 1 из 3');
   assert.equal(answersProgressText({}), null);
   assert.equal(answersProgressText({ answered_count: 0, item_count: 0 }), null);
+});
+
+test('job 013: row actions build the existing pharmacy-answers payload', () => {
+  assert.deepEqual(ROW_ACTION_LABELS, { available: 'В наличии', unavailable: 'Нет в наличии', price: 'Изменить цену',
+    save: 'Сохранить' });
+  assert.deepEqual(rowActionRequest(81, 'available'),
+    { ok: true, value: { answers: [{ order_item_id: 81, answer: 'available' }] } });
+  assert.deepEqual(rowActionRequest(81, 'unavailable'),
+    { ok: true, value: { answers: [{ order_item_id: 81, answer: 'unavailable' }] } });
+  assert.deepEqual(rowActionRequest(81, 'price', '45,5', '40.00'),
+    { ok: true, value: { answers: [{ order_item_id: 81, answer: 'available', base_unit_price: '45.50' }] } });
+  // Same price or an empty field: plain «В наличии» (also when the policy hides the price).
+  assert.deepEqual(rowActionRequest(81, 'price', '40', '40.00'),
+    { ok: true, value: { answers: [{ order_item_id: 81, answer: 'available' }] } });
+  assert.deepEqual(rowActionRequest(81, 'price', '  ', null),
+    { ok: true, value: { answers: [{ order_item_id: 81, answer: 'available' }] } });
+  assert.deepEqual(rowActionRequest(81, 'price', '45', null),
+    { ok: true, value: { answers: [{ order_item_id: 81, answer: 'available', base_unit_price: '45.00' }] } });
+  for (const bad of ['0', '1000000', '1.234', 'abc', '-5']) {
+    const result = rowActionRequest(81, 'price', bad, '40.00');
+    assert.equal(result.ok, false, bad);
+  }
+  assert.equal(rowActionRequest(0, 'available').ok, false);
+  assert.equal(rowActionRequest(1.5, 'available').ok, false);
+  // The UI no longer offers «Цена отличается», but the contract still accepts it.
+  assert.equal(validatePharmacyAnswersRequest({ answers: [{ order_item_id: 81, answer: 'price_differs',
+    problem: 'дороже на 5' }] }).ok, true);
+});
+
+test('job 013: routed rows are orange «Ватан 2» unless «Ватан 2» lacks the item too', () => {
+  assert.deepEqual(routedAwayMark(null), { text: 'Ватан 2', tone: 'orange' });
+  assert.deepEqual(routedAwayMark('available'), { text: 'Ватан 2', tone: 'orange' });
+  assert.deepEqual(routedAwayMark('price_differs'), { text: 'Ватан 2', tone: 'orange' });
+  assert.deepEqual(routedAwayMark('unavailable'), { text: 'Нет в наличии в обеих аптеках', tone: 'bad' });
+});
+
+test('job 013: the route strips _notification and survives a notifier failure', async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const notification = { notification_kind: 'pharmacy_item_change', admin_order_id: 7, changes: [] };
+  const data = { order_id: 'ord_x', items: [], routed_away_count: 1, awaiting_response: false, _notification: notification };
+  const clean = await forwardChangeNotification(data, async (value) => { sent.push(value); }, () => assert.fail('no error'));
+  assert.deepEqual(sent, [notification]);
+  assert.equal('_notification' in clean, false);
+  assert.deepEqual(clean, { order_id: 'ord_x', items: [], routed_away_count: 1, awaiting_response: false });
+  const errors: unknown[] = [];
+  const failed = await forwardChangeNotification(data, async () => { throw new Error('notifier down'); },
+    (error) => errors.push(error));
+  assert.equal(errors.length, 1);
+  assert.equal('_notification' in failed, false);
+  let calls = 0;
+  const plain = await forwardChangeNotification({ order_id: 'ord_x' }, async () => { calls += 1; }, () => undefined);
+  assert.equal(calls, 0);
+  assert.deepEqual(plain, { order_id: 'ord_x' });
 });

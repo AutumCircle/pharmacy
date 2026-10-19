@@ -5,6 +5,7 @@ import type { PublicOrder } from '@/lib/api-v1/types';
 import { PublicReadError, trackOrdersClient } from '@/lib/api-v1/client-reads';
 import { parseTrackingPhone, TRACKING_PHONE_ERROR } from '@/lib/tracking-phone';
 import { formatOrderDate, formatOrderDateTime, parseOrderTime } from '@/lib/order-time';
+import { ORDER_STAGE_LABELS, TRACKING_STEPS, trackingStepIndex } from '@/lib/order-stage';
 
 export default function TrackingPage() {
   const [phone, setPhone] = useState('');
@@ -73,25 +74,18 @@ export default function TrackingPage() {
     void fetchOrders(parsed.normalized, true);
   };
 
-  const renderStepper = (status: string) => {
-    if (status === 'cancelled') {
+  // Job 013: «Собирается · Собран · Подтверждён · В пути · Доставлен» from the Lambda's `stage`
+  // (an older Lambda without it falls back to `status`).
+  const renderStepper = (order: PublicOrder) => {
+    const currentIndex = trackingStepIndex(order);
+    if (currentIndex < 0) {
       return (
         <div style={{ margin: '30px 0', padding: '16px', borderRadius: '10px', background: '#ffebee', color: '#c62828', fontWeight: 600 }}>
           Заказ отменён
         </div>
       );
     }
-    const steps = [
-      { id: 'pending', label: 'В обработке' },
-      { id: 'confirmed', label: 'Сборка' },
-      { id: 'delivering', label: 'В пути' },
-      { id: 'delivered', label: 'Доставлен' },
-    ];
-    
-    let currentIndex = 0;
-    if (status === 'confirmed') currentIndex = 1;
-    if (status === 'delivering') currentIndex = 2;
-    if (status === 'delivered') currentIndex = 3;
+    const steps = TRACKING_STEPS.map((stage) => ({ id: stage, label: ORDER_STAGE_LABELS[stage] }));
 
     return (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '30px 0', position: 'relative' }}>
@@ -102,7 +96,7 @@ export default function TrackingPage() {
           const isCompleted = idx <= currentIndex;
           const isActive = idx === currentIndex;
           return (
-            <div key={step.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, width: '25%' }}>
+            <div key={step.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, width: `${100 / steps.length}%` }}>
               <div style={{ 
                 width: '34px', height: '34px', borderRadius: '50%', 
                 background: isCompleted ? 'var(--primary)' : '#fff', 
@@ -243,7 +237,7 @@ export default function TrackingPage() {
                     </div>
                   </div>
                   
-                  {renderStepper(selectedOrder.status)}
+                  {renderStepper(selectedOrder)}
 
                   <h3 style={{ fontSize: '18px', marginBottom: '15px', fontWeight: 600, color: '#313131' }}>Состав заказа</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '25px' }}>

@@ -1,10 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { PharmacyAnswer } from '@/lib/api-v1/staff-types';
-import { PHARMACY_PRICE_ERROR, normalizePharmacyPrice, validatePharmacyAnswersRequest } from '@/lib/pharmacy-answers';
+import { rowActionRequest } from '@/lib/pharmacy-answers';
 import { validateItemCollectRequest } from '@/lib/pharmacy-assembly';
+import { usePharmacyItemPost } from './usePharmacyItemPost';
 
 export type RoutedItem = {
   orderItemId: number;
@@ -27,52 +27,19 @@ type Editing = { id: number; price: string } | null;
 export default function PharmacyRoutedItems({ orderId, items, canAnswer }: {
   orderId: string; items: RoutedItem[]; canAnswer: boolean;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState<Editing>(null);
-  const [busy, setBusy] = useState<number | null>(null);
-  const [error, setError] = useState('');
-  const errorRef = useRef<HTMLParagraphElement>(null);
+  // Shared with the job 013 «Ватан 1» row controls (PharmacyRowActions).
+  const { busy, error, setError, errorRef, post } = usePharmacyItemPost(orderId);
 
-  useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
-
-  async function post(path: string, body: unknown, id: number) {
-    setBusy(id); setError('');
-    try {
-      const response = await fetch(`/api/staff/orders/${encodeURIComponent(orderId)}/${path}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(result?.error?.message || (response.status === 409 ? 'Состояние изменилось — карточка обновлена.'
-          : 'Не удалось сохранить. Повторите попытку.'));
-        if ([403, 404, 409].includes(response.status)) router.refresh();
-        return;
-      }
-      setEditing(null);
-      router.refresh();
-    } catch {
-      setError('Нет связи. Повторите попытку.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  function answer(item: RoutedItem, value: PharmacyAnswer, price?: string) {
-    const entry: { order_item_id: number; answer: PharmacyAnswer; base_unit_price?: string } =
-      { order_item_id: item.orderItemId, answer: value };
-    if (price !== undefined) entry.base_unit_price = price;
-    const checked = validatePharmacyAnswersRequest({ answers: [entry] });
+  async function answer(item: RoutedItem, value: 'available' | 'unavailable', price?: string) {
+    const checked = rowActionRequest(item.orderItemId, value === 'available' && price !== undefined ? 'price' : value,
+      price, item.unitPrice);
     if (!checked.ok) { setError(checked.error); return; }
-    void post('pharmacy-answers', checked.value, item.orderItemId);
+    if (await post('pharmacy-answers', checked.value, item.orderItemId)) setEditing(null);
   }
 
   function saveAvailable(item: RoutedItem) {
-    const raw = editing?.price.trim() ?? '';
-    if (!raw) { answer(item, 'available'); return; }
-    const price = normalizePharmacyPrice(raw);
-    if (price === null) { setError(PHARMACY_PRICE_ERROR); return; }
-    const current = item.unitPrice != null ? normalizePharmacyPrice(item.unitPrice) : null;
-    answer(item, 'available', price === current ? undefined : price);
+    void answer(item, 'available', editing?.price ?? '');
   }
 
   function collect(item: RoutedItem) {
@@ -116,7 +83,7 @@ export default function PharmacyRoutedItems({ orderId, items, canAnswer }: {
                 price: item.unitPrice != null ? String(item.unitPrice) : '' }); }}>
               {item.myAnswer === 'available' ? 'Изменить цену' : 'В наличии'}</button>}
             {canAnswer && item.myAnswer !== 'available' && item.myAnswer !== 'unavailable' && <button type="button"
-              className="pa-btn pa-btn-problem" disabled={isBusy} onClick={() => answer(item, 'unavailable')}>
+              className="pa-btn pa-btn-problem" disabled={isBusy} onClick={() => void answer(item, 'unavailable')}>
               Нет в наличии</button>}
           </div>}
       </li>;

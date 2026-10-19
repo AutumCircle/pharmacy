@@ -1,3 +1,5 @@
+import type { OrderStage } from '../order-stage';
+
 export type StaffAccount = {
   account_id: 1 | 2 | 3;
   username: string;
@@ -56,8 +58,8 @@ export type PharmacyItemAnswer = {
 };
 
 export type PharmacyAnswersRequest = {
-  /** base_unit_price (rework 1, «Ватан 2» only, with «available»): the pharmacy's own price; Lambda
-   * recomputes the client price and totals. */
+  /** base_unit_price (rework 1; job 013: both pharmacies, with «available»): the pharmacy's own price;
+   * Lambda recomputes the client price and totals. */
   answers: Array<{ order_item_id: number; answer: PharmacyAnswer; problem?: string | null; base_unit_price?: string }>;
 };
 
@@ -66,6 +68,8 @@ export type PharmacyAnswersResult = {
   items: Array<{ order_item_id: number; my_answer: PharmacyAnswer | null; my_problem: string | null }>;
   routed_away_count: number;
   awaiting_response: boolean;
+  /** Job 013, server-only: owner/courier Telegram payload; the Next.js route strips it before the browser. */
+  _notification?: Record<string, unknown>;
 };
 
 /** A pharmacy's assembly mark on its part of a confirmed order (job 011). No mark = «Ждёт сборки». */
@@ -122,6 +126,8 @@ export type CourierOrder = {
   notes: string | null;
   order_source: StaffOrderSource | null;
   status: CourierOrderStatus;
+  /** Job 013: stage derived in Lambda; absent on older Lambdas (fall back to `status`). */
+  stage?: OrderStage;
   created_at: string;
   pharmacy_id: 1 | 2 | null;
   delivery_courier_amount: number | string;
@@ -164,6 +170,8 @@ export type PharmacyPreparationOrder = {
   order_id: string;
   order_reference?: string | null;
   status?: 'pending' | 'confirmed';
+  /** Job 013: stage, present together with the policy-gated `status`. */
+  stage?: OrderStage;
   created_at?: string;
   /** ISO start of the waiting timer: created_at, or the routing time for items moved to «Ватан 2».
    * Absent on Lambdas older than job 008. */
@@ -190,10 +198,10 @@ export type PharmacyPreparationOrder = {
   assembly_state?: PharmacyAssemblyState | null;
   /** Job 011: the order is confirmed and this pharmacy has something to assemble. */
   assembly_available?: boolean;
-  /** Job 012, not policy-gated: this pharmacy has not reacted yet (no answer, no collected item, no
-   * assembly mark). Absent on older Lambdas = no reminders. */
+  /** Job 013, not policy-gated: this pharmacy has something to assemble and has not pressed «Сборка
+   * сделана» yet. Absent on older Lambdas = no reminders. */
   needs_attention?: boolean;
-  /** Job 012: when the reminder clock started (creation, or routing time for «Ватан 2»); null once reacted. */
+  /** When the reminder clock started (creation, or routing time for «Ватан 2»); null once assembled. */
   attention_since?: string | null;
   order_total?: number | string;
   base_total?: number | string;
