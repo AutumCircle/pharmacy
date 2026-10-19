@@ -11,6 +11,8 @@ export function KpiGrid({ insights, hrefFor, active }: {
 }) {
   const t = insights.totals;
   const clientsTotal = insights.clients.new_clients + insights.clients.returning_clients;
+  const websiteDelivered = insights.daily.reduce((sum, day) => sum + Number(day.website_sales), 0);
+  const staffDelivered = insights.daily.reduce((sum, day) => sum + Number(day.courier_sales) + Number(day.pharmacy_sales), 0);
   const cards: Array<{ metric: DrillMetric; value: string; hint: string; accent?: boolean }> = [
     { metric: 'ordered', value: money(t.ordered_sum),
       hint: `${count(t.ordered_count, 'заказ', 'заказа', 'заказов')} · созданы за период, кроме отменённых` },
@@ -29,8 +31,13 @@ export function KpiGrid({ insights, hrefFor, active }: {
       return <Link key={card.metric} href={hrefFor(card.metric)}
         className={['ao-kpi', card.accent ? 'ao-kpi-accent' : '', open ? 'ao-kpi-open' : ''].filter(Boolean).join(' ')}
         aria-current={open ? 'true' : undefined}
-        aria-label={`${DRILL_TITLES[card.metric]}: ${card.value}, ${card.hint}. Показать список`}>
+        aria-label={`${DRILL_TITLES[card.metric]}: ${card.value}, ${card.hint}${card.metric === 'delivered'
+          ? `. С сайта ${money(websiteDelivered)}, курьер и аптеки ${money(staffDelivered)}` : ''}. Показать список`}>
         <span>{DRILL_TITLES[card.metric]}</span><strong>{card.value}</strong><small>{card.hint}</small>
+        {card.metric === 'delivered' && <span className="ao-kpi-breakdown">
+          <span>С сайта <b>{money(websiteDelivered)}</b></span>
+          <span>Курьер и аптеки <b>{money(staffDelivered)}</b></span>
+        </span>}
       </Link>;
     })}
   </section>;
@@ -191,8 +198,7 @@ export function DayPanel({ report, prevHref, nextHref, isToday }: {
   const ownerDelivered = s.owner_delivered ?? 0;
   const rows = [
     { key: 'website' as const, label: 'Заказы с сайта', sales: website, orders: s.website },
-    { key: 'courier' as const, label: 'Создал курьер', sales: courier, orders: s.courier },
-    ...(s.pharmacy ? [{ key: 'pharmacy' as const, label: 'Аптеки', sales: pharmacy, orders: s.pharmacy }] : []),
+    { key: 'courier' as const, label: 'Курьер и аптеки', sales: courier + pharmacy, orders: s.courier + s.pharmacy },
   ];
   return <section className="ao-card ao-day" id="day">
     <div className="ao-card-head">
