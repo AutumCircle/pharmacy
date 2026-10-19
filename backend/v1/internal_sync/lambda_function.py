@@ -14,10 +14,11 @@ from uuid import UUID, uuid4
 import psycopg2
 from psycopg2.extras import execute_values
 
-from backend.v1.shared.authorization import require_sync_identity
+from backend.v1.shared.authorization import require_pharmacy_agent_identity, require_sync_identity
 from backend.v1.shared.catalog_sync import MAX_SNAPSHOT_ROWS, SnapshotValidationError, validate_snapshot
 from backend.v1.shared.contract import ContractError
 from backend.v1.shared.database import transaction
+from backend.v1.shared.pharmacy_mirror import apply_batch, mirror_status, record_heartbeat, validate_batch
 from backend.v1.shared.responses import error_response, request_id, success
 
 
@@ -574,14 +575,31 @@ def get_sync(sync_id: str) -> dict[str, Any]:
     return dict(row)
 
 
+def _pharmacy_mirror_route(
+    event: dict[str, Any], method: str, tail: list[str], current_request_id: str,
+) -> dict[str, Any]:
+    """Routes of the per-pharmacy Oracle mirror agent, authorized by its own token."""
+
+    pharmacy_id = require_pharmacy_agent_identity(event)
+    if method == "POST" and tail == ["batches"]:
+        return success(apply_batch(validate_batch(_body(event), pharmacy_id)), request=current_request_id)
+    if method == "POST" and tail == ["heartbeat"]:
+        return success(record_heartbeat(_body(event), pharmacy_id), request=current_request_id)
+    if method == "GET" and tail == ["status"]:
+        return success(mirror_status(pharmacy_id), request=current_request_id)
+    raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     current_request_id = request_id()
     try:
-        principal = require_sync_identity(event)
         method = str(event.get("httpMethod") or "").upper()
         path = str(event.get("path") or "")
         parts = [part for part in path.strip("/").split("/") if part]
         tail = parts[parts.index("internal") + 1:] if "internal" in parts else []
+        if tail[:1] == ["pharmacy-mirror"]:
+            return _pharmacy_mirror_route(event, method, tail[1:], current_request_id)
+        principal = require_sync_identity(event)
         if method == "POST" and path.endswith("/internal/catalog-syncs"):
             headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
             key = str(headers.get("idempotency-key") or "")

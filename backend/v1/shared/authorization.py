@@ -52,3 +52,20 @@ def require_sync_identity(event: dict[str, Any]) -> str:
     if static_principal:
         return static_principal
     raise ContractError("FORBIDDEN", "Sync authorization is required", http_status=403)
+
+
+MAX_PHARMACY_ID = 99
+
+
+def require_pharmacy_agent_identity(event: dict[str, Any]) -> int:
+    """Return the pharmacy id whose dedicated agent token was supplied.
+
+    Each pharmacy agent has its own bearer token in ``PHARMACY_AGENT_TOKEN_<id>`` so one
+    pharmacy machine can never write another pharmacy's mirror.
+    """
+
+    for pharmacy_id in range(1, MAX_PHARMACY_ID + 1):
+        environment_name = f"PHARMACY_AGENT_TOKEN_{pharmacy_id}"
+        if environment_name in os.environ and _static_bearer_identity(event, environment_name, "pharmacy-agent"):
+            return pharmacy_id
+    raise ContractError("FORBIDDEN", "Pharmacy agent authorization is required", http_status=403)

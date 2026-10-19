@@ -117,6 +117,16 @@ Browser
 
 Internal routes используют отдельную machine identity `agent_sync`, не admin cookie и не public API key.
 
+### 4.4 Internal pharmacy mirror
+
+| Method и route | Назначение |
+|---|---|
+| `POST /v1/internal/pharmacy-mirror/batches` | Принять пакет изменённых строк и удалённых ключей одной таблицы Oracle |
+| `POST /v1/internal/pharmacy-mirror/heartbeat` | Отметка агента аптеки «на связи» и краткий статус |
+| `GET /v1/internal/pharmacy-mirror/status` | Число строк и максимальный `CHANGE_ID` по таблицам этой аптеки |
+
+Авторизация — bearer-токен конкретной аптеки из `PHARMACY_AGENT_TOKEN_<id>` (не меньше 32 символов). Токен определяет `pharmacy_id`; токен `agent_sync` здесь не принимается, а токен аптеки не принимается маршрутами `catalog-syncs`. Подробности — раздел 9.1.
+
 ## 5. Public read contracts
 
 ### 5.1 Search
@@ -355,6 +365,29 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
 Sync Lambda проверяет checksum/schema, применяет правило ведущего `*`, валидирует весь snapshot в staging и только затем атомарно публикует его. Upsert сохраняет существующие `medicine_id`; полный snapshot не пересоздаёт primary keys. Ошибка не оставляет частично обновлённый каталог. Final states: `succeeded` или `failed`; history содержит counts и безопасные причины ошибок.
 
 Подтверждённая схема `OSTATKI.DBF`: `NAME`, `PRICE`, `COUNTRY`, `PROIZVOD`; стабильный SKU отсутствует. Fallback identity — SHA-256 от нормализованного `source_id + NAME + PROIZVOD + COUNTRY`. Повторы fallback identity объединяются по правилу `available first -> maximum base price -> first DBF row`; усреднение цены не допускается. Количество и номера объединённых строк записываются в безопасный sync audit. Дублированный непустой `source_sku`, если поле появится в будущем, отклоняет snapshot.
+
+## 9.1 Internal pharmacy mirror (теневой режим)
+
+Агент `pharmacy_agent.exe` (`backend/pharmacy_agent`) читает Oracle «Алгоритма» под пользователем только для чтения и зеркалит выбранные таблицы в `pharmacy_mirror_rows` (миграция `0020`). Витрина (`medicines`) этим маршрутом не меняется.
+
+Пакет `POST .../batches`:
+
+```json
+{
+  "batch_id": "uuid",
+  "pharmacy_id": 1,
+  "table": "T_SKLAD_STATE",
+  "generated_at": "2026-10-19T10:00:00+00:00",
+  "upserts": [{"key": "10", "change_id": 8639132, "data": {"SKLAD_STATE_ID": 10, "PRODUCT_COUNT_SKLAD": "0.000334"}}],
+  "deletes": ["11"]
+}
+```
+
+- `table` — только из allowlist `DEFAULT_MIRROR_TABLES` (товары, остатки, партии, справочники; без чеков, карт и сотрудников) или из `PHARMACY_MIRROR_TABLES`.
+- `data` — все непустые колонки строки, имена колонок Oracle в верхнем регистре, только скалярные значения; нецелые `NUMBER` передаются строкой, даты — ISO-8601. До 5000 строк и 20000 удалений на пакет.
+- Пакет применяется в одной транзакции. Повтор того же `batch_id` ничего не меняет и возвращает `already_applied: true`.
+- Агент отправляет пакеты строго последовательно и отмечает их отправленными только после ответа 2xx, поэтому `generated_at` носит справочный характер: часам компьютера аптеки сервер не доверяет.
+- Удаления определяет агент полной сверкой таблицы; если сверка видит меньше половины ранее отправленных строк, удаления не отправляются.
 
 ## 10. Error contract
 

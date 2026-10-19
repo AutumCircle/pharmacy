@@ -1,7 +1,36 @@
 # Две аптеки: синхронизация остатков напрямую из Oracle «Алгоритма»
 
-> Статус: **план, не реализовано**. Документ фиксирует решения, принятые по результатам
-> диагностики базы аптеки (октябрь 2026), и порядок безопасного перехода.
+> Статус: **этап 1 (сырое зеркало Oracle аптеки №1) реализован в коде, не развёрнут**.
+> Остальное — план. Документ фиксирует решения, принятые по результатам диагностики базы
+> аптеки (октябрь 2026), и порядок безопасного перехода.
+
+## 0. Этап 1: сырое зеркало аптеки №1 (теневой режим)
+
+Решение владельца: сначала получить на сервер **все колонки** нужных таблиц аптеки №1, а
+правила витрины (склады, цена, поштучная продажа) применить позже.
+
+| Часть | Где |
+| --- | --- |
+| Миграция | `db/migrations/0020_pharmacy_mirror.sql`: `pharmacy_sources`, `pharmacy_mirror_rows` (JSONB со всеми колонками), `pharmacy_mirror_batches` |
+| Приём данных | `backend/v1/shared/pharmacy_mirror.py`, маршруты `/v1/internal/pharmacy-mirror/*` в Internal Sync Lambda |
+| Агент | `backend/pharmacy_agent/` → `pharmacy_agent.exe`, инструкция `INSTALL_RU.md` |
+| Таблицы | `T_PRODUCT`, `T_SKLAD_STATE`, `T_INCOME`, `T_INCOME_HEAD`, `T_VENDOR`, `T_COUNTRY`, `T_PRODUCT_MNN`, `T_PRODUCT_GROUP`, `T_PRODUCT_SOSTAV`, `T_SKLAD`, `T_MEASURE`, `T_PRODUCT_TYPE` |
+
+Проверено на ПК аптеки №1: Oracle XE 11.2 **64-bit**; `CHANGE_ID` в `T_SKLAD_STATE` растёт после
+продажи (8639123 → 8639132); у `T_INCOME` колонки `CHANGE_ID` нет — она читается по растущему
+`INCOME_ID` и полной сверкой раз в 2 часа. ПК работает 07:30–01:00: полная сверка — при
+включении.
+
+Шаги развёртывания (выполняет владелец/администратор AWS, не агент Claude):
+
+1. Снимок RDS → применить `0020_pharmacy_mirror.sql`.
+2. Собрать `python scripts/build_lambda_packages.py` и обновить Internal Sync Lambda.
+3. API Gateway: маршрут `/v1/internal/pharmacy-mirror/{proxy+}` (GET, POST) → Internal Sync Lambda.
+4. Переменная Lambda `PHARMACY_AGENT_TOKEN_1` — случайная строка не короче 32 символов; её же
+   вписать в `config.json` агента как `api_token`.
+5. Установить агент по `backend/pharmacy_agent/INSTALL_RU.md`.
+
+Объём: около 900 тысяч строк; первая загрузка — один раз, дальше только изменения.
 
 ## 1. Что установлено
 
