@@ -11,7 +11,7 @@
 
 | Часть | Где |
 | --- | --- |
-| Миграция | `db/migrations/0020_pharmacy_mirror.sql`: `pharmacy_sources`, `pharmacy_mirror_rows` (JSONB со всеми колонками), `pharmacy_mirror_batches` |
+| Миграция | `db/migrations/0027_pharmacy_mirror.sql`: `pharmacy_sources`, `pharmacy_mirror_rows` (JSONB со всеми колонками), `pharmacy_mirror_batches` |
 | Приём данных | `backend/v1/shared/pharmacy_mirror.py`, маршруты `/v1/internal/pharmacy-mirror/*` в Internal Sync Lambda |
 | Агент | `backend/pharmacy_agent/` → `pharmacy_agent.exe`, инструкция `INSTALL_RU.md` |
 | Таблицы | `T_PRODUCT`, `T_SKLAD_STATE`, `T_INCOME`, `T_INCOME_HEAD`, `T_VENDOR`, `T_COUNTRY`, `T_PRODUCT_MNN`, `T_PRODUCT_GROUP`, `T_PRODUCT_SOSTAV`, `T_SKLAD`, `T_MEASURE`, `T_PRODUCT_TYPE` |
@@ -23,7 +23,7 @@
 
 Шаги развёртывания (выполняет владелец/администратор AWS, не агент Claude):
 
-1. Снимок RDS → применить `0020_pharmacy_mirror.sql`.
+1. Снимок RDS → применить `0027_pharmacy_mirror.sql`.
 2. Собрать `python scripts/build_lambda_packages.py` и обновить Internal Sync Lambda.
 3. API Gateway: маршрут `/v1/internal/pharmacy-mirror/{proxy+}` (GET, POST) → Internal Sync Lambda.
 4. Переменная Lambda `PHARMACY_AGENT_TOKEN_1` — случайная строка не короче 32 символов; её же

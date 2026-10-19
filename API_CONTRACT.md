@@ -368,7 +368,7 @@ Sync Lambda проверяет checksum/schema, применяет правил�
 
 ## 9.1 Internal pharmacy mirror (теневой режим)
 
-Агент `pharmacy_agent.exe` (`backend/pharmacy_agent`) читает Oracle «Алгоритма» под пользователем только для чтения и зеркалит выбранные таблицы в `pharmacy_mirror_rows` (миграция `0020`). Витрина (`medicines`) этим маршрутом не меняется.
+Агент `pharmacy_agent.exe` (`backend/pharmacy_agent`) читает Oracle «Алгоритма» под пользователем только для чтения и зеркалит выбранные таблицы в `pharmacy_mirror_rows` (миграция `0027`). Витрина (`medicines`) этим маршрутом не меняется.
 
 Пакет `POST .../batches`:
 

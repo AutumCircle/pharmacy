@@ -128,7 +128,7 @@ Oracle Database 11g XE (64-bit), schema `ORGANIZ`. `backend/pharmacy_agent/pharm
 (built by `scripts/build_pharmacy_agent.ps1` as `pharmacy_agent.exe`, Python 3.8 64-bit,
 `cx_Oracle` 8.3) reads product, stock, batch and dictionary tables with a read-only Oracle user
 `SITE_READER` and mirrors them to `POST /v1/internal/pharmacy-mirror/batches`
-(`pharmacy_mirror_rows`, migration `0020`). It sends CHANGE_ID deltas every minute and full
+(`pharmacy_mirror_rows`, migration `0027`). It sends CHANGE_ID deltas every minute and full
 reconciliations on start-up and on schedule. It does not write `medicines` yet, so it runs
 alongside `agent_sync.exe` without creating a second catalogue writer. Installation:
 `backend/pharmacy_agent/INSTALL_RU.md`; plan: `docs/MULTI_PHARMACY_ORACLE_SYNC.md`.
