@@ -3,6 +3,7 @@ import json
 import os
 import unittest
 from contextlib import contextmanager
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from backend.v1.admin_api.lambda_function import answer_pharmacy_order_items, lambda_handler, validate_pharmacy_answers
@@ -242,7 +243,10 @@ class PharmacyAnswerTests(unittest.TestCase):
         # State after the first request: 81 routed to «Ватан 2» with pharmacy 1's answer, 82 answered.
         repeat, cursor = self._run(payload, items=[item(81, 2, 'unavailable'),
                                                    item(82, 1, 'price_differs', 'дороже на 5')])
-        self.assertEqual(repeat, first)
+        # The first request routed item 81 and announced it; the repeat changes nothing and announces nothing.
+        self.assertIn('_notification', first)
+        self.assertNotIn('_notification', repeat)
+        self.assertEqual(repeat, {key: value for key, value in first.items() if key != '_notification'})
         self._assert_no_writes(cursor)
         self.assertFalse(any('admin_audit_log' in sql for sql in self._statements(cursor)))
         self.assertEqual(cursor.execute.call_count, 2)
@@ -251,6 +255,70 @@ class PharmacyAnswerTests(unittest.TestCase):
         _, cursor = self._run({'answers': [{'order_item_id': 82, 'answer': 'price_differs', 'problem': 'дороже на 7'}]},
                               items=[item(81, 1), item(82, 1, 'price_differs', 'дороже на 5')])
         self.assertEqual(sum('admin_audit_log' in sql for sql in self._statements(cursor)), 1)
+
+    # --- job 013: owner/courier change notification ------------------------------------------
+
+    PII_KEYS = ('customer_name', 'phone', 'address', 'landmark', 'notes', 'comment')
+
+    def _assert_no_pii(self, notification):
+        text = json.dumps(notification, ensure_ascii=False)
+        for key in self.PII_KEYS:
+            self.assertNotIn(f'"{key}"', text)
+
+    def test_routing_returns_change_notification_without_client_data(self):
+        order = {**WEBSITE_ORDER, 'public_id': ORDER_ID, 'order_reference': '1910-007',
+                 'customer_name': 'SECRET', 'phone': '+992917123456'}
+        items = [{**item(81), 'medicine_name': 'Парацетамол', 'quantity': Decimal('2'),
+                  'base_unit_price': Decimal('10.00'), 'selling_unit_price': Decimal('12')}, item(82)]
+        result, _ = self._run({'answers': [{'order_item_id': 81, 'answer': 'unavailable'},
+                                           {'order_item_id': 82, 'answer': 'available'}]},
+                              order=order, items=items)
+        notification = result['_notification']
+        self.assertEqual(notification, {
+            'notification_kind': 'pharmacy_item_change', 'admin_order_id': 7, 'order_id': ORDER_ID,
+            'order_reference': '1910-007', 'pharmacy_id': 1,
+            'event_key': 'order:7:pharmacy-change:req_test',
+            'changes': [{'kind': 'routed', 'medicine_name': 'Парацетамол', 'quantity': '2'}]})
+        self._assert_no_pii(notification)
+        self.assertNotIn('SECRET', json.dumps(notification, ensure_ascii=False))
+
+    def test_price_and_mixed_requests_list_every_change_in_item_order(self):
+        cursor = Mock()
+        cursor.fetchone.side_effect = [dict(WEBSITE_ORDER, order_reference='1910-007'),
+                                       {'selling_unit_price': Decimal('54'), 'line_total': Decimal('54.00')}]
+        cursor.fetchall.return_value = [
+            {**item(81), 'medicine_name': 'A', 'quantity': Decimal('1'), 'base_unit_price': Decimal('40.00'),
+             'selling_unit_price': Decimal('48')},
+            {**item(82), 'medicine_name': 'B', 'quantity': Decimal('0.5'), 'base_unit_price': Decimal('20.00'),
+             'selling_unit_price': Decimal('24')}]
+
+        @contextmanager
+        def fake_transaction():
+            yield cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', fake_transaction):
+            result = answer_pharmacy_order_items(ORDER_ID, {'answers': [
+                {'order_item_id': 82, 'answer': 'unavailable'},
+                {'order_item_id': 81, 'answer': 'available', 'base_unit_price': '45'}]}, 1, 'req_mixed')
+        notification = result['_notification']
+        self.assertEqual(notification['event_key'], 'order:7:pharmacy-change:req_mixed')
+        self.assertEqual(notification['changes'], [
+            {'kind': 'price', 'medicine_name': 'A', 'quantity': '1',
+             'old_base_unit_price': '40.00', 'new_base_unit_price': '45.00',
+             'old_selling_unit_price': '48', 'new_selling_unit_price': '54'},
+            {'kind': 'routed', 'medicine_name': 'B', 'quantity': '0.5'}])
+        self._assert_no_pii(notification)
+
+    def test_plain_answers_and_same_price_return_no_notification(self):
+        for payload in ({'answers': [{'order_item_id': 81, 'answer': 'available'}]},
+                        {'answers': [{'order_item_id': 81, 'answer': 'price_differs', 'problem': 'дороже на 5'}]}):
+            with self.subTest(payload=payload):
+                result, _ = self._run(payload)
+                self.assertNotIn('_notification', result)
+        same, cursor = self._run({'answers': [{'order_item_id': 81, 'answer': 'available', 'base_unit_price': '10'}]},
+                                 items=[{**item(81, 1, 'available'), 'base_unit_price': Decimal('10.00')}])
+        self.assertNotIn('_notification', same)
+        self._assert_no_writes(cursor)
 
     # --- handler wiring ---------------------------------------------------------------------
 

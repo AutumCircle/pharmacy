@@ -294,6 +294,97 @@ def format_courier_assembly_message(event: dict[str, Any]) -> str:
     return f"{first}\n🏥 Аптека {pharmacy} · переслать в аптеку\n{rest}"
 
 
+PHARMACY_CHANGE_KIND = "pharmacy_item_change"
+_PHARMACY_CHANGE_RECIPIENTS = ("owner_telegram", "courier_telegram")
+
+
+def _plain_money(value: Any) -> str:
+    try:
+        return str(Decimal(str(value)).quantize(Decimal("0.01")))
+    except (InvalidOperation, ValueError):
+        return "—"
+
+
+def _price_change_text(change: dict[str, Any], fields: dict[str, Any]) -> str:
+    """«цена изменена: old → new с.»; base prices only with item_base_total, client prices only with
+    item_client_total in the claimed recipient policy."""
+    parts: list[str] = []
+    if fields.get("item_base_total"):
+        parts.append(f"{_plain_money(change.get('old_base_unit_price'))} → "
+                     f"{_plain_money(change.get('new_base_unit_price'))} с.")
+    if fields.get("item_client_total"):
+        client = (f"{_plain_money(change.get('old_selling_unit_price'))} → "
+                  f"{_plain_money(change.get('new_selling_unit_price'))} с.")
+        parts.append(f"клиенту {client}")
+    if not parts:
+        return "цена изменена"
+    if len(parts) == 2:
+        return f"цена изменена: {parts[0]} ({parts[1]})"
+    return f"цена изменена: {parts[0]}"
+
+
+def format_pharmacy_change_message(event: dict[str, Any], fields: dict[str, Any]) -> str:
+    """Job 013: a pharmacy changed a price or passed an item to «Ватан 2». No client data at all."""
+    reference = html.escape(str(event.get("order_reference") or "—"))
+    pharmacy = event.get("pharmacy_id")
+    pharmacy_label = f"Ватан {pharmacy}" if pharmacy in (1, 2) else "Аптека"
+    lines = [f"🔔 <b>Заказ № {reference} · {pharmacy_label}</b>"]
+    changes = event.get("changes") if isinstance(event.get("changes"), list) else []
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        name = html.escape(str(change.get("medicine_name") or "Товар"))
+        line = f"• «{name}» × {_quantity(change.get('quantity'))} — "
+        if change.get("kind") == "routed":
+            line += "передано в Ватан 2"
+        elif change.get("kind") == "price":
+            line += _price_change_text(change, fields)
+        else:
+            continue
+        if sum(len(part) + 1 for part in lines) + len(line) > 3500:
+            lines.append("• …остальные изменения смотрите в панели заказов")
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _pharmacy_change_event_key(notification: dict[str, Any], order_id: int) -> str:
+    event_key = notification.get("event_key")
+    if (not isinstance(event_key, str)
+            or not re.fullmatch(rf"order:{order_id}:pharmacy-change:req_[0-9a-f]{{32}}", event_key)):
+        raise RuntimeError("Notification event key is invalid")
+    return event_key
+
+
+def _send_pharmacy_change(
+    notification: dict[str, Any], order_id: int, token: str, owner_chat_id: str,
+    delivery_token: str, delivery_chat_id: str,
+) -> int:
+    """Owner and (if enabled and configured) courier; never the pharmacy, no picking list."""
+    event_key = _pharmacy_change_event_key(notification, order_id)
+    recipients = [("owner_telegram", token, owner_chat_id)]
+    if delivery_chat_id:
+        recipients.append(("courier_telegram", delivery_token, delivery_chat_id))
+    sent = 0
+    for recipient, message_token, chat_id in recipients:
+        claim = _claim_delivery(event_key, recipient)
+        if not claim["claimed"]:
+            continue
+        fields = claim.get("fields")
+        if not isinstance(fields, dict):
+            raise RuntimeError("Notification policy is missing")
+        text = format_pharmacy_change_message(notification, fields)
+        if recipient == "courier_telegram":
+            buttons = [button for button in courier_buttons({"order_id": notification.get("order_id")})
+                       if button["text"] == "📦 Открыть заказ"]
+            _send_message(message_token, chat_id, text, notification, include_admin_link=False,
+                          buttons=buttons or None)
+        else:
+            _send_message(message_token, chat_id, text, notification, include_admin_link=True)
+        sent += 1
+    return sent
+
+
 def _notification_event(event: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     is_api_gateway = isinstance(event.get("requestContext"), dict)
     if not is_api_gateway:
@@ -326,6 +417,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     order_id = notification.get("admin_order_id")
     if type(order_id) is not int or order_id <= 0:
         raise RuntimeError("Notification order ID is missing")
+    if notification.get("notification_kind") == PHARMACY_CHANGE_KIND:
+        messages_sent = _send_pharmacy_change(notification, order_id, token, owner_chat_id,
+                                              delivery_token, delivery_chat_id)
+        return _handler_result(notification, messages_sent, is_api_gateway)
     # Pharmacy and courier are notified only about website orders; staff orders are entered by them.
     is_website_order = notification.get("notification_kind") != "staff_manual_order"
     recipients = [("owner_telegram", token, owner_chat_id, True)]
@@ -349,6 +444,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             _send_message(message_token, chat_id, format_courier_assembly_message(notification),
                           notification, include_admin_link=False)
             messages_sent += 1
+    return _handler_result(notification, messages_sent, is_api_gateway)
+
+
+def _handler_result(notification: dict[str, Any], messages_sent: int, is_api_gateway: bool) -> dict[str, Any]:
     result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": messages_sent}
     if is_api_gateway:
         return {

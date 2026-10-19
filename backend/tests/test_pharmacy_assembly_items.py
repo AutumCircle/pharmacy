@@ -143,13 +143,52 @@ class PharmacyPriceTests(unittest.TestCase):
                 validate_pharmacy_answers({'answers': [{'order_item_id': 82, 'answer': answer,
                                                         'base_unit_price': '45', **extra}]})
 
-    def test_pharmacy_one_cannot_set_price(self):
-        with self.assertRaises(ContractError) as raised:
-            self._run({'answers': [{'order_item_id': 81, 'answer': 'available', 'base_unit_price': '45'}]},
-                      [item(81, 1)], pharmacy_id=1)
-        self.assertEqual((raised.exception.code, raised.exception.http_status), ('FORBIDDEN', 403))
-        for sql in statements(self.cursor):
-            self.assertTrue(sql.lstrip().startswith('SELECT'), sql)
+    def test_pharmacy_one_reprices_own_item_through_the_same_path(self):
+        # Job 013: the «Цену при сборке меняет только «Ватан 2»» 403 is gone.
+        result = self._run({'answers': [{'order_item_id': 81, 'answer': 'available', 'base_unit_price': '45'}]},
+                           [item(81, 1)], pharmacy_id=1)
+        calls = self.cursor.execute.call_args_list
+        reprice = next(call for call in calls if 'UPDATE order_items' in call.args[0])
+        self.assertIn('selling_unit_price = vatan_selling_unit_price(%s)', reprice.args[0])
+        self.assertEqual(reprice.args[1], (Decimal('45.00'), Decimal('45.00'), Decimal('45.00'), 81, 11))
+        self.assertTrue(any('UPDATE orders' in call.args[0] and 'SUM(line_total)' in call.args[0] for call in calls))
+        audits = [call for call in calls if 'admin_audit_log' in call.args[0]]
+        price_audits = [call for call in audits if call.args[1][1] == 'pharmacy.order.item_price_changed']
+        self.assertEqual(len(price_audits), 1)
+        self.assertEqual(price_audits[0].args[1][0], 'staff:1')
+        raw = price_audits[0].args[1][5]
+        self.assertEqual(json.loads(raw)['pharmacy_id'], 1)
+        for word in ('customer', 'phone', 'address', 'landmark', 'notes'):
+            self.assertNotIn(word, raw)
+        self.assertEqual(result['_notification']['changes'][0]['kind'], 'price')
+
+    def test_pharmacy_one_price_rejections_write_nothing(self):
+        cases = [
+            ({'order_item_id': 82, 'answer': 'available', 'base_unit_price': '45'},
+             [item(81, 1), item(82, 2)], PENDING, ('FORBIDDEN', 403)),
+            ({'order_item_id': 81, 'answer': 'available', 'base_unit_price': '45'},
+             [item(81, 1)], {**PENDING, 'status': 'confirmed'}, ('ORDER_STATUS_CONFLICT', 409)),
+        ]
+        for entry, items, order, expected in cases:
+            with self.subTest(entry=entry, status=order['status']):
+                cursor = Mock()
+                cursor.fetchone.side_effect = [dict(order)]
+                cursor.fetchall.return_value = items
+                with tx(cursor), self.assertRaises(ContractError) as raised:
+                    answer_pharmacy_order_items(ORDER_ID, {'answers': [entry]}, 1, 'req_p')
+                self.assertEqual((raised.exception.code, raised.exception.http_status), expected)
+                for sql in statements(cursor):
+                    self.assertTrue(sql.lstrip().startswith('SELECT'), sql)
+        for bad in ({'order_item_id': 81, 'answer': 'available', 'base_unit_price': '0'},
+                    {'order_item_id': 81, 'answer': 'available', 'base_unit_price': '1000000'},
+                    {'order_item_id': 81, 'answer': 'available', 'base_unit_price': '1.234'},
+                    {'order_item_id': 81, 'answer': 'unavailable', 'base_unit_price': '45'}):
+            with self.subTest(bad=bad):
+                cursor = Mock()
+                with tx(cursor), self.assertRaises(ContractError) as raised:
+                    answer_pharmacy_order_items(ORDER_ID, {'answers': [bad]}, 1, 'req_p')
+                self.assertEqual((raised.exception.code, raised.exception.http_status), ('VALIDATION_ERROR', 400))
+                cursor.execute.assert_not_called()
 
     def test_new_price_reprices_server_side_and_audits(self):
         self._run({'answers': [{'order_item_id': 82, 'answer': 'available', 'base_unit_price': '45'}]},

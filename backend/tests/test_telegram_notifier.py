@@ -9,6 +9,7 @@ from backend.v1.telegram_notifier.lambda_function import (
     format_courier_assembly_message,
     format_delivery_message,
     format_owner_message,
+    format_pharmacy_change_message,
     format_pharmacy_message,
     lambda_handler,
 )
@@ -239,6 +240,96 @@ class TelegramDispatchTests(unittest.TestCase):
         self.assertIn('Парацетамол × 2', text)
         self.assertNotIn('Секрет', text)
         self.assertNotIn('917123456', text)
+
+
+
+CHANGE_KEY = 'order:41:pharmacy-change:req_' + 'cd' * 16
+CHANGE_EVENT = {
+    'notification_kind': 'pharmacy_item_change', 'admin_order_id': 41, 'order_id': 'ord_' + 'b' * 32,
+    'order_reference': '1910-041', 'pharmacy_id': 1, 'event_key': CHANGE_KEY,
+    'changes': [
+        {'kind': 'routed', 'medicine_name': 'Нурофен <форте>', 'quantity': '2'},
+        {'kind': 'price', 'medicine_name': 'Парацетамол', 'quantity': '0.5',
+         'old_base_unit_price': '40.00', 'new_base_unit_price': '45.00',
+         'old_selling_unit_price': '48', 'new_selling_unit_price': '54'},
+    ],
+}
+CHANGE_ENV = {'TELEGRAM_BOT_TOKEN': 'token', 'TELEGRAM_OWNER_CHAT_ID': 'owner',
+              'TELEGRAM_PHARMACY_CHAT_ID': 'pharmacy', 'TELEGRAM_DELIVERY_CHAT_ID': 'courier',
+              'TELEGRAM_DELIVERY_BOT_TOKEN': 'delivery-token', 'STAFF_SITE_BASE_URL': 'https://vatan.example',
+              'ADMIN_ORDER_BASE_URL': 'https://vatan.example/admin/orders'}
+
+
+class PharmacyChangeNotificationTests(unittest.TestCase):
+    def test_owner_text_has_reference_pharmacy_items_and_base_and_client_prices(self):
+        text = format_pharmacy_change_message(CHANGE_EVENT, default_policies()['owner_telegram'])
+        self.assertIn('Заказ № 1910-041 · Ватан 1', text)
+        self.assertIn('«Нурофен &lt;форте&gt;» × 2 — передано в Ватан 2', text)
+        self.assertIn('«Парацетамол» × 0.5 — цена изменена: 40.00 → 45.00 с. (клиенту 48.00 → 54.00 с.)', text)
+
+    def test_price_parts_follow_the_claimed_policy(self):
+        courier = format_pharmacy_change_message(CHANGE_EVENT, default_policies()['courier_telegram'])
+        self.assertIn('— цена изменена', courier)
+        self.assertNotIn('40.00', courier)
+        self.assertNotIn('45.00', courier)
+        client_only = {**default_policies()['courier_telegram'], 'item_client_total': True}
+        text = format_pharmacy_change_message(CHANGE_EVENT, client_only)
+        self.assertIn('цена изменена: клиенту 48.00 → 54.00 с.', text)
+        self.assertNotIn('40.00', text)
+        base_only = {**default_policies()['owner_telegram'], 'item_client_total': False}
+        text = format_pharmacy_change_message(CHANGE_EVENT, base_only)
+        self.assertIn('цена изменена: 40.00 → 45.00 с.', text)
+        self.assertNotIn('клиенту', text)
+
+    @patch('backend.v1.telegram_notifier.lambda_function._claim_delivery')
+    @patch('backend.v1.telegram_notifier.lambda_function._send_message')
+    def test_owner_and_courier_get_one_message_each_and_pharmacy_none(self, send_message, claim):
+        claim.side_effect = lambda key, channel: {'claimed': True, 'fields': default_policies()[channel]}
+        event = {'requestContext': {'requestId': 'test'}, 'body': json.dumps(CHANGE_EVENT)}
+        with patch.dict('os.environ', CHANGE_ENV, clear=True):
+            response = lambda_handler(event, None)
+        self.assertEqual(json.loads(response['body'])['data']['messages_sent'], 2)
+        self.assertEqual([call.args for call in claim.call_args_list],
+                         [(CHANGE_KEY, 'owner_telegram'), (CHANGE_KEY, 'courier_telegram')])
+        self.assertEqual([call.args[:2] for call in send_message.call_args_list],
+                         [('token', 'owner'), ('delivery-token', 'courier')])
+        owner, courier = send_message.call_args_list
+        self.assertTrue(owner.kwargs['include_admin_link'])
+        self.assertIsNone(owner.kwargs.get('buttons'))
+        self.assertFalse(courier.kwargs['include_admin_link'])
+        self.assertEqual(courier.kwargs['buttons'], [
+            {'text': '📦 Открыть заказ', 'url': 'https://vatan.example/staff/orders/ord_' + 'b' * 32}])
+        self.assertIn('40.00 → 45.00', owner.args[2])
+        self.assertNotIn('40.00', courier.args[2])
+        for call in send_message.call_args_list:
+            self.assertNotIn('собрать', call.args[2])
+            self.assertNotIn('переслать в аптеку', call.args[2])
+
+    @patch('backend.v1.telegram_notifier.lambda_function._claim_delivery')
+    @patch('backend.v1.telegram_notifier.lambda_function._send_message')
+    def test_unclaimed_recipient_and_second_claim_send_nothing(self, send_message, claim):
+        claim.side_effect = lambda key, channel: {'claimed': channel == 'owner_telegram',
+                                                  'fields': default_policies()[channel]}
+        with patch.dict('os.environ', CHANGE_ENV, clear=True):
+            result = lambda_handler(dict(CHANGE_EVENT), None)
+        self.assertEqual(result['messages_sent'], 1)
+        self.assertEqual(send_message.call_args.args[1], 'owner')
+        claim.side_effect = lambda key, channel: {'claimed': False, 'fields': {}}
+        send_message.reset_mock()
+        with patch.dict('os.environ', CHANGE_ENV, clear=True):
+            again = lambda_handler(dict(CHANGE_EVENT), None)
+        self.assertEqual(again['messages_sent'], 0)
+        send_message.assert_not_called()
+
+    @patch('backend.v1.telegram_notifier.lambda_function._claim_delivery')
+    @patch('backend.v1.telegram_notifier.lambda_function._send_message')
+    def test_event_key_must_match_the_order(self, send_message, claim):
+        for key in ('order:42:pharmacy-change:req_' + 'cd' * 16, 'order:41:created', None):
+            with self.subTest(key=key), patch.dict('os.environ', CHANGE_ENV, clear=True), \
+                    self.assertRaises(RuntimeError):
+                lambda_handler({**CHANGE_EVENT, 'event_key': key}, None)
+        claim.assert_not_called()
+        send_message.assert_not_called()
 
 
 if __name__ == "__main__":
