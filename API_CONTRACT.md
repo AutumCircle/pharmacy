@@ -576,7 +576,7 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
     medicine_name, quantity, old_base_unit_price, new_base_unit_price, old_selling_unit_price,
     new_selling_unit_price}]}` (цены только у `price`; без имени, телефона, адреса, ориентира и комментария
     клиента). Next.js `POST /api/staff/orders/{id}/pharmacy-answers` удаляет поле до ответа браузеру и вызывает
-    notifier в try/catch (ошибка только логируется, ответ остаётся `200`).
+    notifier после отправки ответа (`after()`, try/catch: ошибка только логируется, ответ остаётся `200` и не ждёт Telegram).
   - Claim `POST /v1/admin/order-notification-deliveries/claim` принимает `order:N:pharmacy-change:req_<32 hex>`
     только для `owner_telegram` и `courier_telegram` (`courier_enabled` / `courier_enabled_since` как раньше);
     `pharmacy_telegram` и любые другие ключи → `400`. Notifier отправляет одно сообщение владельцу (с кнопкой
