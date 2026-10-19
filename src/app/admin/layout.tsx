@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { readSidebarCollapsed, writeSidebarCollapsed } from '@/lib/admin-sidebar';
+import NewOrderAlerts, { type AlertOrder } from '@/components/NewOrderAlerts';
 import './admin.css';
 
 const menu = [
@@ -11,6 +12,7 @@ const menu = [
   { name: 'Лекарства', path: '/admin/medicines', icon: '✚' },
   { name: 'Дубликаты', path: '/admin/duplicates', icon: '≡' },
   { name: 'Заказы', path: '/admin/orders', icon: '◉' },
+  { name: 'Уведомления заказов', path: '/admin/order-notifications', icon: '✉' },
   { name: 'Категории', path: '/admin/categories', icon: '▣' },
   { name: 'Цены', path: '/admin/pricing', icon: '%' },
   { name: 'Контакт доставки', path: '/admin/contact', icon: '☎' },
@@ -21,6 +23,19 @@ const menu = [
   { name: 'Статистика подборок', path: '/admin/collection-stats', icon: '▤' },
   { name: 'Синхронизации', path: '/admin/history', icon: '↻' },
 ];
+
+async function loadPendingOrders(): Promise<AlertOrder[]> {
+  const response = await fetch('/api/admin/active-orders', { cache: 'no-store' });
+  if (!response.ok) throw new Error('active orders unavailable');
+  const data: { pending?: Array<{ order_id: string; order_reference: string | null; customer_name: string | null;
+    order_total: number | string | null; website: boolean }> } = await response.json();
+  return (data.pending ?? []).map((order) => ({
+    id: order.order_id,
+    title: `Новый заказ № ${order.order_reference || order.order_id.slice(-6)}`,
+    detail: `${order.website ? 'С сайта' : 'Создал курьер'} · ${order.customer_name || 'без имени'} · ${Number(order.order_total || 0).toLocaleString('ru-RU')} с.`,
+    href: `/admin/orders/${encodeURIComponent(order.order_id)}`,
+  }));
+}
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -125,6 +140,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </aside>
       <main className="admin-main">{children}</main>
+      <NewOrderAlerts load={loadPendingOrders} />
     </div>
   );
 }

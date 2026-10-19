@@ -31,7 +31,7 @@ class ContractError(ValueError):
 
 ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items", "attribution"}
 ORDER_ITEM_FIELDS = {"medicine_id", "quantity"}
-STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "pharmacy_id", "comment"}
+STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "manual_items", "pharmacy_id", "comment"}
 STAFF_ORDER_SOURCES = frozenset({"instagram", "whatsapp", "phone"})
 STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     "pending": frozenset({"confirmed", "cancelled"}),
@@ -44,6 +44,58 @@ STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
 
 def _is_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def validate_order_quantity(value: Any, field: str = "quantity") -> Decimal:
+    """Accept hundredth-unit quantities from 0.1, preserving earlier quarter units."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.1 and 99 with at most two decimals")
+    try:
+        quantity = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.1 and 99 with at most two decimals") from exc
+    if (not quantity.is_finite() or quantity < Decimal("0.1") or quantity > Decimal("99")
+            or quantity * 100 != (quantity * 100).to_integral_value()):
+        raise ContractError("VALIDATION_ERROR", f"{field} must be between 0.1 and 99 with at most two decimals")
+    return quantity.quantize(Decimal("0.01"))
+
+
+def _quantity_wire_value(quantity: Decimal) -> int | str:
+    """Keep the existing integer wire form stable; represent only fractional values as strings."""
+    return int(quantity) if quantity == quantity.to_integral_value() else str(quantity)
+
+
+def validate_unit_price(value: Any) -> Decimal:
+    """A staff-entered price per unit: 0.01..999999.99 TJS with at most two decimals."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        raise ContractError("VALIDATION_ERROR", "Укажите корректную цену")
+    try:
+        price = Decimal(str(value).strip().replace(",", "."))
+    except InvalidOperation as exc:
+        raise ContractError("VALIDATION_ERROR", "Укажите корректную цену") from exc
+    if not price.is_finite() or not Decimal("0.01") <= price <= Decimal("999999.99") or price.as_tuple().exponent < -2:
+        raise ContractError("VALIDATION_ERROR", "Цена должна быть от 0,01 до 999999,99 с. с точностью до копейки")
+    return price.quantize(Decimal("0.01"))
+
+
+def validate_manual_order_items(value: Any) -> list[dict[str, Any]]:
+    """Only authorized staff/admin may supply these order-only price snapshots."""
+    if not isinstance(value, list) or not 1 <= len(value) <= 20:
+        raise ContractError("VALIDATION_ERROR", "Укажите от 1 до 20 ручных позиций")
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"medicine_name", "price", "quantity"}:
+            raise ContractError("VALIDATION_ERROR", "Укажите название, цену и количество")
+        name = item["medicine_name"]
+        if not isinstance(name, str):
+            raise ContractError("VALIDATION_ERROR", "Укажите название лекарства")
+        name = " ".join(name.split())
+        if not 2 <= len(name) <= 200 or "\x00" in name:
+            raise ContractError("VALIDATION_ERROR", "Название должно содержать от 2 до 200 символов")
+        price = validate_unit_price(item["price"])
+        quantity = validate_order_quantity(item["quantity"])
+        result.append({"medicine_name": name, "price": str(price), "quantity": _quantity_wire_value(quantity)})
+    return result
 
 
 def _required_text(
@@ -176,7 +228,7 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
             fields={"items": "must contain between 1 and 50 items"},
         )
 
-    normalized_items: list[dict[str, int]] = []
+    normalized_items: list[dict[str, Any]] = []
     seen_medicine_ids: set[int] = set()
     for index, item in enumerate(items):
         prefix = f"items[{index}]"
@@ -203,12 +255,11 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
                 "Request validation failed",
                 fields={f"{prefix}.medicine_id": "must be a positive integer"},
             )
-        if not _is_integer(quantity) or not 1 <= quantity <= 99:
-            raise ContractError(
-                "VALIDATION_ERROR",
-                "Request validation failed",
-                fields={f"{prefix}.quantity": "must be an integer between 1 and 99"},
-            )
+        try:
+            normalized_quantity = validate_order_quantity(quantity, f"{prefix}.quantity")
+        except ContractError as exc:
+            raise ContractError("VALIDATION_ERROR", "Request validation failed",
+                fields={f"{prefix}.quantity": "must be between 0.1 and 99 with at most two decimals"}) from exc
         if medicine_id in seen_medicine_ids:
             raise ContractError(
                 "DUPLICATE_ORDER_ITEM",
@@ -218,7 +269,7 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
             )
 
         seen_medicine_ids.add(medicine_id)
-        normalized_items.append({"medicine_id": medicine_id, "quantity": quantity})
+        normalized_items.append({"medicine_id": medicine_id, "quantity": _quantity_wire_value(normalized_quantity)})
 
     from .marketing import normalize_attribution
 
@@ -283,10 +334,10 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
             "VALIDATION_ERROR", "Request validation failed",
             fields={"items": "must contain at most 50 items"},
         )
-    items: list[dict[str, int]] = []
+    items: list[dict[str, Any]] = []
     seen: set[int] = set()
     for index, item in enumerate(items_value):
-        if not isinstance(item, dict) or set(item) != ORDER_ITEM_FIELDS:
+        if not isinstance(item, dict) or not ORDER_ITEM_FIELDS <= set(item) <= ORDER_ITEM_FIELDS | {"unit_price"}:
             raise ContractError(
                 "VALIDATION_ERROR", "Request validation failed",
                 fields={f"items[{index}]": "medicine_id and quantity are required"},
@@ -295,13 +346,18 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
         if not _is_integer(medicine_id) or medicine_id <= 0:
             raise ContractError("VALIDATION_ERROR", "Request validation failed",
                                 fields={f"items[{index}].medicine_id": "must be a positive integer"})
-        if not _is_integer(quantity) or not 1 <= quantity <= 99:
+        try:
+            normalized_quantity = validate_order_quantity(quantity, f"items[{index}].quantity")
+        except ContractError as exc:
             raise ContractError("VALIDATION_ERROR", "Request validation failed",
-                                fields={f"items[{index}].quantity": "must be between 1 and 99"})
+                                fields={f"items[{index}].quantity": "must be between 0.1 and 99 with at most two decimals"}) from exc
         if medicine_id in seen:
             raise ContractError("DUPLICATE_ORDER_ITEM", "Order contains a duplicate medicine", http_status=400)
         seen.add(medicine_id)
-        items.append({"medicine_id": medicine_id, "quantity": quantity})
+        normalized_item: dict[str, Any] = {"medicine_id": medicine_id, "quantity": _quantity_wire_value(normalized_quantity)}
+        if "unit_price" in item:
+            normalized_item["unit_price"] = str(validate_unit_price(item["unit_price"]))
+        items.append(normalized_item)
     result = {
         "customer_name": customer_name,
         "phone": f"+992{phone_value}",
@@ -310,6 +366,8 @@ def validate_staff_order_request(payload: Any) -> dict[str, Any]:
         "source": source,
         "items": items,
     }
+    if "manual_items" in payload:
+        result["manual_items"] = validate_manual_order_items(payload["manual_items"])
     if isinstance(comment_value, str) and comment_value.strip():
         result["comment"] = comment_value.strip()
     if "pharmacy_id" in payload:

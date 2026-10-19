@@ -2,11 +2,12 @@ import json
 import os
 import unittest
 from contextlib import contextmanager
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from backend.v1.shared import staff_accounts as staff
 from backend.v1.shared.contract import ContractError, validate_staff_order_request
-from backend.v1.admin_api.lambda_function import create_staff_order, lambda_handler
+from backend.v1.admin_api.lambda_function import create_staff_order, lambda_handler, list_pharmacy_preparation_orders
 
 
 class StaffTests(unittest.TestCase):
@@ -81,35 +82,14 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(response['statusCode'], 200)
         self.assertEqual(set(json.loads(response['body'])['data']), {'token'})
 
-    def test_second_employee_can_create_manual_order_without_catalog(self):
+    def test_pharmacy_employees_cannot_create_orders(self):
         second = {**self.account, 'account_id': 2, 'username': 'vatan_2', 'catalog_access': False}
-        order_cursor = Mock()
-        order_cursor.fetchone.side_effect = [
-            {'id': 1},
-            {'id': 12, 'public_id': 'ord_test', 'status': 'pending', 'created_at': '2026-09-28T10:00:00Z'},
-        ]
-        order_cursor.fetchall.return_value = [{
-            'id': 44, 'name': 'Test medicine', 'price': '10.00',
-            'selling_unit_price': 11, 'in_stock': True,
-        }]
-
-        @contextmanager
-        def order_transaction():
-            yield order_cursor
-
-        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
-            response, status, notification = create_staff_order({
-                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
-                'landmark': 'напротив школы', 'source': 'phone',
-                'items': [{'medicine_id': 44, 'quantity': 2}],
-            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', second, 'req_test')
-        self.assertEqual(status, 201)
-        self.assertEqual(response['created_by_staff_account_id'], 2)
-        self.assertEqual(notification['created_by_staff_username'], 'vatan_2')
-        sql_calls = ' '.join(call.args[0] for call in order_cursor.execute.call_args_list)
-        self.assertIn('created_by_staff_account_id', sql_calls)
-        self.assertIn('jsonb_to_recordset', sql_calls)
-        self.assertIn('staff.order.created', str(order_cursor.execute.call_args_list))
+        payload = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                   'landmark': 'напротив школы', 'source': 'phone', 'items': []}
+        for account in (self.account, second):
+            with self.assertRaises(ContractError) as caught:
+                create_staff_order(payload, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', account, 'req_test')
+            self.assertEqual(caught.exception.http_status, 403)
 
     def test_courier_creates_attributed_order_without_medicines(self):
         courier = {**self.account, 'account_id': 3, 'username': 'courier',
@@ -140,6 +120,54 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(order_insert.args[1][4], 'Позвонить перед выездом')
         self.assertNotIn('jsonb_to_recordset', ' '.join(call.args[0] for call in order_cursor.execute.call_args_list))
 
+    def test_courier_creates_pharmacy_two_order_with_manual_medicine(self):
+        courier = {**self.account, 'account_id': 3, 'username': 'courier', 'role': 'courier'}
+        order_cursor = Mock()
+        order_cursor.fetchone.side_effect = [
+            {'id': 1}, {'id': 12, 'public_id': 'ord_test', 'status': 'pending',
+                        'created_at': '2026-10-11T10:00:00Z'},
+        ]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            response, _, notification = create_staff_order({
+                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'школа', 'source': 'phone', 'pharmacy_id': 2, 'items': [],
+                'manual_items': [{'medicine_name': 'Витамин X', 'price': '12.50', 'quantity': 2}],
+            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+        self.assertEqual(response['order_total'], '25.00')
+        self.assertEqual(notification['items'][0]['medicine_id'], None)
+        self.assertEqual(notification['items'][0]['medicine_name'], 'Витамин X')
+        self.assertNotIn('FROM medicines WHERE', ' '.join(call.args[0] for call in order_cursor.execute.call_args_list))
+
+    def test_courier_can_create_pharmacy_one_order_with_base_price_medicines(self):
+        courier = {**self.account, 'account_id': 3, 'username': 'courier', 'role': 'courier'}
+        order_cursor = Mock()
+        order_cursor.fetchone.side_effect = [
+            {'id': 1}, {'id': 12, 'public_id': 'ord_test', 'status': 'pending',
+                        'created_at': '2026-10-10T10:00:00Z'},
+        ]
+        order_cursor.fetchall.return_value = [{
+            'id': 44, 'name': 'NOW D3', 'price': '10.00', 'selling_unit_price': 12, 'in_stock': True,
+        }]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            response, _, notification = create_staff_order({
+                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone', 'pharmacy_id': 1,
+                'items': [{'medicine_id': 44, 'quantity': 2}],
+            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+        self.assertEqual(response['order_total'], '20.00')
+        self.assertEqual(notification['profit'], '0.00')
+        self.assertEqual(response['items'][0]['selling_unit_price'], '10.00')
+
     def test_manual_order_comment_is_optional_and_bounded(self):
         payload = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
                    'landmark': 'напротив школы', 'source': 'phone', 'items': []}
@@ -150,13 +178,51 @@ class StaffTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_staff_order_request({**payload, 'comment': 'x' * 501})
 
-    def test_courier_cannot_add_medicines_or_skip_pharmacy(self):
+    def test_courier_must_choose_pharmacy(self):
         courier = {**self.account, 'account_id': 3}
         base = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
                 'landmark': 'напротив школы', 'source': 'phone', 'items': []}
-        for payload in (base, {**base, 'pharmacy_id': 1, 'items': [{'medicine_id': 44, 'quantity': 1}]}):
+        with self.assertRaises(ContractError):
+            create_staff_order(base, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+
+    def test_pharmacy_two_order_uses_catalogue_with_courier_client_price(self):
+        courier = {**self.account, 'account_id': 3, 'username': 'courier', 'role': 'courier'}
+        order_cursor = Mock()
+        order_cursor.fetchone.side_effect = [
+            {'id': 1}, {'id': 12, 'public_id': 'ord_test', 'status': 'pending',
+                        'created_at': '2026-10-10T10:00:00Z'},
+        ]
+        order_cursor.fetchall.return_value = [
+            {'id': 44, 'name': 'NOW D3', 'price': '10.00', 'selling_unit_price': 12, 'in_stock': True},
+            {'id': 45, 'name': 'Omega', 'price': '20.00', 'selling_unit_price': 23, 'in_stock': True},
+        ]
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            response, _, notification = create_staff_order({
+                'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone', 'pharmacy_id': 2,
+                'items': [{'medicine_id': 44, 'quantity': 2, 'unit_price': '12.5'},
+                          {'medicine_id': 45, 'quantity': 1}],
+            }, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+        self.assertEqual(response['fulfillment_pharmacy_id'], 2)
+        self.assertEqual(response['items'][0]['selling_unit_price'], '12.50')
+        self.assertEqual(response['items'][0]['base_unit_price'], '10.00')
+        self.assertEqual(response['items'][1]['selling_unit_price'], '20.00')
+        self.assertEqual(response['order_total'], '45.00')
+        self.assertEqual(notification['profit'], '5.00')
+
+    def test_staff_order_item_price_is_validated(self):
+        base = {'customer_name': '', 'phone': '917123456', 'address': 'Айни 29',
+                'landmark': 'напротив школы', 'source': 'phone'}
+        self.assertEqual(validate_staff_order_request({**base, 'items': [
+            {'medicine_id': 44, 'quantity': 1, 'unit_price': 7}]})['items'][0]['unit_price'], '7.00')
+        for price in ('0', 'x', '1.001', None):
             with self.assertRaises(ContractError):
-                create_staff_order(payload, '2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32', courier, 'req_test')
+                validate_staff_order_request({**base, 'items': [{'medicine_id': 44, 'quantity': 1, 'unit_price': price}]})
 
     def test_employee_without_catalog_cannot_read_catalog(self):
         without_catalog = {**self.account, 'account_id': 1, 'catalog_access': False}
@@ -167,19 +233,350 @@ class StaffTests(unittest.TestCase):
                 self.assertEqual(response['statusCode'], 403)
                 medicines.assert_not_called()
 
-    def test_courier_cannot_read_catalog_or_medicine_picker(self):
+    def test_courier_can_search_order_medicines_but_not_catalog(self):
         courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
         self.cursor.fetchone.return_value = courier
         token = staff.create_session(courier)
-        for path in ('/v1/staff/medicines', '/v1/staff/catalog/stats', '/v1/staff/order-medicines'):
+        for path in ('/v1/staff/medicines', '/v1/staff/catalog/stats'):
             response = lambda_handler(self.event(path, token=token), None)
             self.assertEqual(response['statusCode'], 403)
+        with patch('backend.v1.admin_api.lambda_function.search_staff_order_medicines',
+                   return_value={'data': [], 'page': {}}):
+            response = lambda_handler(self.event('/v1/staff/order-medicines', token=token), None)
+        self.assertEqual(response['statusCode'], 200)
 
-    def test_only_courier_can_list_and_change_order_status(self):
+    def test_pharmacy_only_sees_own_website_preparation_orders(self):
+        from datetime import datetime, timezone
+        order_cursor = Mock()
+        order_cursor.fetchall.return_value = [{
+            'id': 12, 'public_id': 'ord_test', 'order_reference': '3456-012',
+            'status': 'pending', 'created_at': datetime(2026, 10, 10, tzinfo=timezone.utc),
+            'notes': None, 'customer_name': 'Клиент', 'phone': 'SECRET',
+            'address': 'SECRET-ADDRESS', 'landmark': None, 'order_source': None, 'utm_source': None,
+            'order_total': Decimal('120'), 'base_total': Decimal('100'),
+            'created_by_staff_account_id': None,
+            'medicines': [{'medicine_name': 'NOW D3', 'quantity': 2}],
+        }]
+        order_cursor.fetchone.return_value = {'courier_enabled': True, 'policies': {}, 'revision': 1}
+
+        @contextmanager
+        def order_transaction():
+            yield order_cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            result = list_pharmacy_preparation_orders({}, 1)
+        self.assertEqual(result['data'][0]['medicines'][0]['medicine_name'], 'NOW D3')
+        self.assertNotIn('phone', result['data'][0])
+        self.assertNotIn('customer_name', result['data'][0])
+        self.assertNotIn('profit', result['data'][0])
+        sql, args = order_cursor.execute.call_args_list[-2].args
+        self.assertIn('o.created_by_staff_account_id IS NULL', sql)
+        self.assertIn('COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1) = %s', sql)
+        self.assertEqual(args, (1, 1, 1, 1, 1, 1, 1, 21))
+        self.assertIn('o.phone', sql)
+
+    def test_pharmacy_web_policy_is_enforced_by_lambda(self):
+        from datetime import datetime, timezone
+        from backend.v1.shared.order_notification_settings import default_policies
+        policies = default_policies()
+        policies['pharmacy_web']['phone'] = True
+        policies['pharmacy_web']['items'] = False
+        policies['pharmacy_web']['status'] = False
+        cursor = Mock()
+        cursor.fetchall.return_value = [{
+            'id': 12, 'public_id': 'ord_test', 'order_reference': '3456-012',
+            'status': 'pending', 'created_at': datetime(2026, 10, 10, tzinfo=timezone.utc),
+            'notes': 'NOTE', 'customer_name': 'PRIVATE', 'phone': '+992917123456',
+            'address': 'PRIVATE ADDRESS', 'landmark': None, 'order_source': None, 'utm_source': None,
+            'order_total': Decimal('120'), 'base_total': Decimal('100'),
+            'created_by_staff_account_id': None,
+            'medicines': [{'medicine_name': 'NOW D3', 'quantity': 2}],
+        }]
+        cursor.fetchone.return_value = {'courier_enabled': True, 'policies': policies, 'revision': 1}
+        @contextmanager
+        def order_transaction():
+            yield cursor
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            row = list_pharmacy_preparation_orders({}, 1)['data'][0]
+        self.assertEqual(row['phone'], '+992917123456')
+        self.assertNotIn('medicines', row)
+        self.assertNotIn('status', row)
+        self.assertNotIn('customer_name', row)
+
+    def _pharmacy_rows(self, policies=None, status='pending', pharmacy_id=1, query=None, extra=None):
+        from datetime import datetime, timezone
+        cursor = Mock()
+        cursor.fetchall.return_value = [{
+            'id': 12, 'public_id': 'ord_test', 'order_reference': '3456-012',
+            'status': status, 'created_at': datetime(2026, 10, 10, 8, 30, tzinfo=timezone.utc),
+            'notes': None, 'customer_name': 'PRIVATE', 'phone': '+992917123456',
+            'address': 'PRIVATE ADDRESS', 'landmark': 'PRIVATE LANDMARK', 'order_source': None,
+            'utm_source': None, 'order_total': Decimal('120.00'), 'base_total': Decimal('100.00'),
+            'created_by_staff_account_id': None,
+            'medicines': [{'order_item_id': 81, 'medicine_name': 'NOW D3', 'quantity': 2, 'line_total': 120,
+                           'base_unit_price': '50.00', 'base_line_total': '100.00',
+                           'my_answer': None, 'my_problem': None}],
+            'unanswered_count': 1, 'unanswered_unrouted': True, 'unanswered_routed_since': None,
+            'routed_away_count': 0, **(extra or {}),
+        }]
+        cursor.fetchone.return_value = {'courier_enabled': True, 'policies': policies or {}, 'revision': 1}
+
+        @contextmanager
+        def order_transaction():
+            yield cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', order_transaction):
+            result = list_pharmacy_preparation_orders(query or {}, pharmacy_id)
+        return result, cursor
+
+    def test_pharmacy_default_row_has_base_prices_and_waiting_fields_only(self):
+        result, cursor = self._pharmacy_rows()
+        row = result['data'][0]
+        for key in ('order_reference', 'created_at', 'status', 'waiting_since', 'awaiting_response', 'base_total'):
+            self.assertIn(key, row)
+        self.assertEqual(row['base_total'], Decimal('100.00'))
+        self.assertEqual(row['waiting_since'], row['created_at'])
+        self.assertEqual(row['created_at'], '2026-10-10T08:30:00+00:00')
+        item = row['medicines'][0]
+        self.assertEqual(item['medicine_name'], 'NOW D3')
+        self.assertEqual(item['quantity'], 2)
+        self.assertEqual(item['base_unit_price'], '50.00')
+        self.assertEqual(item['base_line_total'], '100.00')
+        self.assertNotIn('line_total', item)
+        for key in ('customer_name', 'phone', 'address', 'landmark', 'order_total', 'line_total',
+                    'profit', 'created_by_staff_account_id'):
+            self.assertNotIn(key, row)
+        sql = cursor.execute.call_args_list[-2].args[0]
+        self.assertIn("'base_unit_price', COALESCE(oi.base_unit_price, oi.price)::text", sql)
+
+    def test_pharmacy_awaiting_response_follows_pending_status(self):
+        self.assertTrue(self._pharmacy_rows(status='pending')[0]['data'][0]['awaiting_response'])
+        self.assertFalse(self._pharmacy_rows(status='confirmed')[0]['data'][0]['awaiting_response'])
+
+    def test_pharmacy_queue_sql_uses_effective_item_assignment(self):
+        _, cursor = self._pharmacy_rows()
+        sql, args = cursor.execute.call_args_list[-2].args
+        effective = 'COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1)'
+        # Items: only those effectively assigned to this pharmacy; base_total summed over them only.
+        self.assertIn(f'WHERE oi.order_id = o.id AND {effective} = %s', sql)
+        # Orders: at least one item effectively assigned to this pharmacy.
+        self.assertIn('AND EXISTS (SELECT 1 FROM order_items oi', sql)
+        self.assertIn(f'WHERE oi.order_id = o.id AND {effective} = %s)', sql)
+        # Routed-away items: answered by this pharmacy and now assigned elsewhere.
+        self.assertIn(f'WHERE oi.order_id = o.id AND {effective} <> %s', sql)
+        self.assertIn('mine.pharmacy_id = %s', sql)
+        self.assertIn("'order_item_id', oi.id", sql)
+        self.assertIn("'my_answer', mine.answer, 'my_problem', mine.problem", sql)
+        self.assertNotIn('COALESCE(o.fulfillment_pharmacy_id, 1) = %s', sql)
+        self.assertEqual(args, (1, 1, 1, 1, 1, 1, 1, 21))
+
+    def test_pharmacy_item_fields_and_routed_away_count(self):
+        row = self._pharmacy_rows(extra={'routed_away_count': 1})[0]['data'][0]
+        self.assertEqual(row['routed_away_count'], 1)
+        item = row['medicines'][0]
+        self.assertEqual((item['order_item_id'], item['my_answer'], item['my_problem']), (81, None, None))
+        for key in ('unanswered_count', 'unanswered_unrouted', 'unanswered_routed_since'):
+            self.assertNotIn(key, row)
+
+    def test_pharmacy_awaiting_response_follows_unanswered_items(self):
+        one_open = self._pharmacy_rows(extra={'unanswered_count': 1})[0]['data'][0]
+        self.assertTrue(one_open['awaiting_response'])
+        all_answered = self._pharmacy_rows(extra={
+            'unanswered_count': 0, 'unanswered_unrouted': None, 'unanswered_routed_since': None})[0]['data'][0]
+        self.assertFalse(all_answered['awaiting_response'])
+        self.assertEqual(all_answered['waiting_since'], all_answered['created_at'])
+        self.assertFalse(self._pharmacy_rows(status='confirmed')[0]['data'][0]['awaiting_response'])
+
+    def test_pharmacy_waiting_since_uses_routing_time_for_routed_items(self):
+        from datetime import datetime, timezone
+        routed_at = datetime(2026, 10, 10, 9, 15, tzinfo=timezone.utc)
+        row = self._pharmacy_rows(pharmacy_id=2, extra={
+            'unanswered_count': 1, 'unanswered_unrouted': False, 'unanswered_routed_since': routed_at,
+        })[0]['data'][0]
+        self.assertTrue(row['awaiting_response'])
+        self.assertEqual(row['waiting_since'], '2026-10-10T09:15:00+00:00')
+        self.assertEqual(row['created_at'], '2026-10-10T08:30:00+00:00')
+        # An unanswered item that was never routed keeps the order creation time.
+        mixed = self._pharmacy_rows(pharmacy_id=2, extra={
+            'unanswered_count': 2, 'unanswered_unrouted': True, 'unanswered_routed_since': routed_at,
+        })[0]['data'][0]
+        self.assertEqual(mixed['waiting_since'], mixed['created_at'])
+
+    def test_pharmacy_needs_attention_for_unreacted_order(self):
+        row = self._pharmacy_rows(extra={'reacted_count': 0, 'assembly_state': None})[0]['data'][0]
+        self.assertIs(row['needs_attention'], True)
+        self.assertEqual(row['attention_since'], row['created_at'])
+        self.assertEqual(row['attention_since'], '2026-10-10T08:30:00+00:00')
+        self.assertNotIn('reacted_count', row)
+
+    def test_pharmacy_needs_attention_false_after_answer(self):
+        row = self._pharmacy_rows(extra={'reacted_count': 1, 'unanswered_count': 0})[0]['data'][0]
+        self.assertIs(row['needs_attention'], False)
+        self.assertIsNone(row['attention_since'])
+
+    def test_pharmacy_needs_attention_false_after_answer_routed_away(self):
+        # «Ватан 1» answered «Нет в наличии»: the item left its assigned set but it still reacted.
+        row = self._pharmacy_rows(extra={'reacted_count': 0, 'routed_away_count': 1})[0]['data'][0]
+        self.assertIs(row['needs_attention'], False)
+        self.assertIsNone(row['attention_since'])
+
+    def test_pharmacy_needs_attention_false_with_assembly_mark(self):
+        for state in ('assembling', 'assembled'):
+            for status in ('pending', 'confirmed'):
+                row = self._pharmacy_rows(status=status, extra={'reacted_count': 0, 'assembly_state': state})[0]
+                row = row['data'][0]
+                self.assertIs(row['needs_attention'], False)
+                self.assertIsNone(row['attention_since'])
+
+    def test_pharmacy_needs_attention_vatan2_routed_order_uses_routing_time(self):
+        from datetime import datetime, timezone
+        routed_at = datetime(2026, 10, 10, 9, 15, tzinfo=timezone.utc)
+        row = self._pharmacy_rows(pharmacy_id=2, extra={
+            'reacted_count': 0, 'unanswered_count': 1, 'unanswered_unrouted': False,
+            'unanswered_routed_since': routed_at})[0]['data'][0]
+        self.assertIs(row['needs_attention'], True)
+        self.assertEqual(row['attention_since'], '2026-10-10T09:15:00+00:00')
+
+    def test_pharmacy_needs_attention_sql_counts_answers_and_collected_items(self):
+        _, cursor = self._pharmacy_rows()
+        sql, args = cursor.execute.call_args_list[-2].args
+        self.assertIn('COUNT(*) FILTER (WHERE mine.answer IS NOT NULL OR col.order_item_id IS NOT NULL)', sql)
+        self.assertEqual(args, (1, 1, 1, 1, 1, 1, 1, 21))
+        # Read-only: the queue issues exactly the list SELECT and the policy SELECT.
+        self.assertEqual(cursor.execute.call_count, 2)
+        for call in cursor.execute.call_args_list:
+            self.assertTrue(call.args[0].lstrip().upper().startswith('SELECT'))
+
+    def test_pharmacy_needs_attention_survives_all_off_policy(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        policies = {'pharmacy_web': {field: False for field in FIELDS}}
+        unreacted = self._pharmacy_rows(policies=policies, extra={'reacted_count': 0})[0]['data'][0]
+        self.assertIs(unreacted['needs_attention'], True)
+        self.assertEqual(unreacted['attention_since'], '2026-10-10T08:30:00+00:00')
+        self.assertNotIn('created_at', unreacted)
+        reacted = self._pharmacy_rows(policies=policies, extra={'reacted_count': 2})[0]['data'][0]
+        self.assertIs(reacted['needs_attention'], False)
+        self.assertIn('attention_since', reacted)
+        self.assertIsNone(reacted['attention_since'])
+
+    def test_pharmacy_price_fields_hidden_when_policy_disables_them(self):
+        from backend.v1.shared.order_notification_settings import default_policies
+        policies = default_policies()
+        policies['pharmacy_web']['item_base_total'] = False
+        policies['pharmacy_web']['base_total'] = False
+        row = self._pharmacy_rows(policies=policies)[0]['data'][0]
+        self.assertNotIn('base_total', row)
+        self.assertNotIn('base_unit_price', row['medicines'][0])
+        self.assertNotIn('base_line_total', row['medicines'][0])
+        self.assertIn('quantity', row['medicines'][0])
+        self.assertIn('waiting_since', row)
+        self.assertIn('awaiting_response', row)
+
+    def test_pharmacy_client_fields_returned_when_owner_turns_them_on(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        policies = {'pharmacy_web': {field: True for field in FIELDS}}
+        row = self._pharmacy_rows(policies=policies)[0]['data'][0]
+        self.assertEqual(row['customer_name'], 'PRIVATE')
+        self.assertEqual(row['phone'], '+992917123456')
+        self.assertEqual(row['address'], 'PRIVATE ADDRESS')
+        self.assertEqual(row['landmark'], 'PRIVATE LANDMARK')
+        self.assertEqual(row['order_total'], Decimal('120.00'))
+        self.assertEqual(row['profit'], Decimal('20.00'))
+        self.assertIn('created_by_staff_account_id', row)
+        self.assertEqual(row['source'], 'Сайт')
+        self.assertEqual(row['medicines'][0]['line_total'], 120)
+
+    # --- job 011: assembly marks in the pharmacy queue ------------------------------------
+
+    def test_pharmacy_queue_assembly_fields(self):
+        cases = [
+            # (status, assemblable_count, assembly_state) -> (assembly_state, assembly_available)
+            (('pending', 1, None), (None, True)),  # rework 1: assembly starts while «Новый»
+            (('pending', 1, 'assembling'), ('assembling', True)),
+            (('confirmed', 1, None), (None, True)),
+            (('confirmed', 2, 'assembling'), ('assembling', True)),
+            (('confirmed', 1, 'assembled'), ('assembled', True)),
+            (('confirmed', 0, None), (None, False)),  # only «Нет в наличии» items: nothing to assemble
+        ]
+        for (status, assemblable, state), expected in cases:
+            with self.subTest(status=status, assemblable=assemblable, state=state):
+                row = self._pharmacy_rows(status=status, extra={
+                    'assemblable_count': assemblable, 'assembly_state': state})[0]['data'][0]
+                self.assertEqual((row['assembly_state'], row['assembly_available']), expected)
+                self.assertNotIn('assemblable_count', row)
+
+    def test_pharmacy_queue_assembly_fields_survive_all_off_policy(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        policies = {'pharmacy_web': {field: False for field in FIELDS}}
+        row = self._pharmacy_rows(policies=policies, status='confirmed', extra={
+            'assemblable_count': 1, 'assembly_state': 'assembling'})[0]['data'][0]
+        self.assertNotIn('status', row)
+        self.assertEqual(row['assembly_state'], 'assembling')
+        self.assertIs(row['assembly_available'], True)
+        for key in ('routed_away_count', 'awaiting_response', 'waiting_since'):
+            self.assertIn(key, row)
+
+    def test_pharmacy_queue_old_rows_default_assembly_fields(self):
+        row = self._pharmacy_rows(status='confirmed')[0]['data'][0]
+        self.assertIsNone(row['assembly_state'])
+        self.assertIs(row['assembly_available'], False)
+
+    def test_pharmacy_queue_routed_items_and_collected_flags(self):
+        _, cursor = self._pharmacy_rows()
+        sql = cursor.execute.call_args_list[-2].args[0]
+        self.assertIn("'routed_here', oi.pharmacy_assigned_at IS NOT NULL", sql)
+        self.assertIn("'collected', col.order_item_id IS NOT NULL", sql)
+        self.assertIn('LEFT JOIN order_item_assembly col', sql)
+        self.assertIn("'answer', cur.answer) ORDER BY oi.id) AS routed_away", sql)
+        routed = [{'order_item_id': 82, 'medicine_name': 'B', 'quantity': 1, 'pharmacy_id': 2, 'answer': 'available'}]
+        row = self._pharmacy_rows(extra={'routed_away': routed, 'routed_away_count': 1})[0]['data'][0]
+        self.assertEqual(row['routed_away'], routed)
+        from backend.v1.shared.order_notification_settings import default_policies
+        policies = default_policies()
+        policies['pharmacy_web']['quantity'] = False
+        row = self._pharmacy_rows(policies=policies, extra={'routed_away': json.dumps(routed)})[0]['data'][0]
+        self.assertNotIn('quantity', row['routed_away'][0])
+        policies['pharmacy_web']['items'] = False
+        row = self._pharmacy_rows(policies=policies, extra={'routed_away': routed})[0]['data'][0]
+        self.assertNotIn('routed_away', row)
+
+    def test_pharmacy_queue_sql_reads_own_assembly_mark(self):
+        _, cursor = self._pharmacy_rows(pharmacy_id=2)
+        sql, args = cursor.execute.call_args_list[-2].args
+        self.assertIn('LEFT JOIN order_pharmacy_assembly asm ON asm.order_id = o.id AND asm.pharmacy_id = %s', sql)
+        self.assertIn("COUNT(*) FILTER (WHERE mine.answer IS DISTINCT FROM 'unavailable') AS assemblable_count", sql)
+        self.assertEqual(args, (2, 2, 2, 2, 2, 2, 2, 21))
+
+    def test_pharmacy_two_queue_is_scoped_by_session_account(self):
+        _, cursor = self._pharmacy_rows(pharmacy_id=2)
+        sql, args = cursor.execute.call_args_list[-2].args
+        self.assertIn('COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1) = %s', sql)
+        self.assertEqual(args, (2, 2, 2, 2, 2, 2, 2, 21))
+        pharmacy_two = {**self.account, 'account_id': 2, 'catalog_access': False}
+        self.cursor.fetchone.return_value = pharmacy_two
+        with patch('backend.v1.admin_api.lambda_function.list_pharmacy_preparation_orders',
+                   return_value={'data': [], 'page': {'has_more': False, 'next_cursor': None}}) as preparation:
+            response = lambda_handler(self.event('/v1/staff/orders', token=staff.create_session(pharmacy_two)), None)
+        self.assertEqual(response['statusCode'], 200)
+        preparation.assert_called_once_with({}, 2)
+        for key in ('pharmacy_id', 'account_id'):
+            with self.assertRaises(ContractError) as raised:
+                list_pharmacy_preparation_orders({key: '1'}, 2)
+            self.assertEqual(raised.exception.code, 'VALIDATION_ERROR')
+            event = self.event('/v1/staff/orders', token=staff.create_session(pharmacy_two))
+            event['queryStringParameters'] = {key: '1'}
+            response = lambda_handler(event, None)
+            self.assertEqual(response['statusCode'], 400)
+            self.assertIn('VALIDATION_ERROR', response['body'])
+
+    def test_pharmacy_reads_preparation_list_but_cannot_change_status(self):
         courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
         self.cursor.fetchone.return_value = self.account
-        response = lambda_handler(self.event('/v1/staff/orders', token=staff.create_session(self.account)), None)
-        self.assertEqual(response['statusCode'], 403)
+        with patch('backend.v1.admin_api.lambda_function.list_pharmacy_preparation_orders',
+                   return_value={'data': [], 'page': {'has_more': False, 'next_cursor': None}}) as preparation:
+            response = lambda_handler(self.event('/v1/staff/orders', token=staff.create_session(self.account)), None)
+        self.assertEqual(response['statusCode'], 200)
+        preparation.assert_called_once_with({}, 1)
         self.cursor.fetchone.return_value = courier
         with patch('backend.v1.admin_api.lambda_function.list_courier_orders',
                    return_value={'data': [], 'page': {'has_more': False, 'next_cursor': None}}):
@@ -190,6 +587,38 @@ class StaffTests(unittest.TestCase):
         response = lambda_handler(self.event(path, 'PATCH', token=staff.create_session(self.account),
                                            body={'status': 'confirmed', 'expected_current_status': 'pending'}), None)
         self.assertEqual(response['statusCode'], 403)
+
+    def test_only_courier_can_add_items_to_existing_order(self):
+        path = '/v1/staff/orders/ord_' + 'a' * 32 + '/items'
+        self.cursor.fetchone.return_value = self.account
+        response = lambda_handler(self.event(path, 'POST', token=staff.create_session(self.account),
+            body={'items': [{'medicine_id': 44, 'quantity': 1}]}), None)
+        self.assertEqual(response['statusCode'], 403)
+        courier = {**self.account, 'account_id': 3, 'role': 'courier'}
+        self.cursor.fetchone.return_value = courier
+        with patch('backend.v1.admin_api.lambda_function.add_courier_order_items',
+                   return_value={'order_id': 'ord_' + 'a' * 32}) as add_items:
+            response = lambda_handler(self.event(path, 'POST', token=staff.create_session(courier),
+                body={'items': [{'medicine_id': 44, 'quantity': 1}]}), None)
+        self.assertEqual(response['statusCode'], 200)
+        add_items.assert_called_once()
+
+    def test_only_courier_can_tick_checklist(self):
+        path = '/v1/staff/orders/ord_' + 'a' * 32 + '/checklist'
+        body = {'step': 2, 'done': True}
+        self.cursor.fetchone.return_value = self.account
+        with patch('backend.v1.admin_api.lambda_function.update_courier_order_checklist') as update:
+            response = lambda_handler(self.event(path, 'PATCH', token=staff.create_session(self.account), body=body), None)
+        self.assertEqual(response['statusCode'], 403)
+        update.assert_not_called()
+        courier = {**self.account, 'account_id': 3, 'role': 'courier'}
+        self.cursor.fetchone.return_value = courier
+        with patch('backend.v1.admin_api.lambda_function.update_courier_order_checklist',
+                   return_value={'order_id': 'ord_' + 'a' * 32, 'checklist_steps': [2]}) as update:
+            response = lambda_handler(self.event(path, 'PATCH', token=staff.create_session(courier), body=body), None)
+        self.assertEqual(response['statusCode'], 200)
+        update.assert_called_once()
+        self.assertEqual(update.call_args.args[:2], ('ord_' + 'a' * 32, body))
 
     def test_employee_with_catalog_can_read_catalog(self):
         with_catalog = {**self.account, 'account_id': 2, 'catalog_access': True}

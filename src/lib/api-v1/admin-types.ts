@@ -40,6 +40,9 @@ export type AdminDashboardSummary = {
   online_profit_total?: number | string;
   delivery_owner_total: number | string;
   delivery_courier_total: number | string;
+  courier_daily: Array<{ date: string; amount: number | string; orders_count: number }>;
+  delivery_origin_daily: Array<{ date: string; website_orders: number; courier_orders: number; pharmacy_orders: number;
+    website_sales: number | string; courier_sales: number | string; pharmacy_sales: number | string }>;
   origin_counts: {
     total_orders: number;
     client_orders: number;
@@ -266,6 +269,7 @@ export type AdminStatusHistory = {
 };
 
 export type AdminOrderDetail = AdminOrderSummary & {
+  edit_revision: number;
   items: AdminOrderItem[];
   status_history: AdminStatusHistory[];
 };
@@ -352,11 +356,121 @@ export type CollectionUtmOrders = {
   orders_total: number | string;
 };
 
+export type DeliveredDayOrder = {
+  order_id: string;
+  order_reference: string | null;
+  customer_name: string | null;
+  phone: string;
+  address: string;
+  order_total: number | string | null;
+  currency: 'TJS';
+  created_at: string;
+  delivered_at: string;
+  order_source: 'instagram' | 'whatsapp' | 'phone' | null;
+  created_by_staff_account_id: 1 | 2 | 3 | null;
+  fulfillment_pharmacy_id: 1 | 2 | null;
+  created_by_staff_username: string | null;
+};
+
+export type OrdersInsightsPeriod = 1 | 7 | 30 | 90;
+
+export type OrdersInsightsNewOrder = {
+  order_id: string; order_reference: string | null; customer_name: string | null; phone: string; address: string;
+  order_total: number | string | null; created_by_staff_account_id: 1 | 2 | 3 | null;
+  fulfillment_pharmacy_id: 1 | 2 | null; order_source: 'instagram' | 'whatsapp' | 'phone' | null; created_at: string;
+};
+
+export type OrdersInsightsDay = {
+  date: string; website_orders: number; courier_orders: number; pharmacy_orders: number; owner_delivered: number;
+  website_sales: number | string; courier_sales: number | string; pharmacy_sales: number | string;
+  profit: number | string; courier_fee: number | string; owner_fee: number | string;
+};
+
+export type OrdersInsights = {
+  period_days: OrdersInsightsPeriod; from: string; to: string; currency: 'TJS';
+  live: { pending: number; confirmed: number; delivering: number; new_orders: OrdersInsightsNewOrder[] };
+  totals: { ordered_count: number; ordered_sum: number | string; website_ordered_count: number; cancelled_count: number;
+    delivered_count: number; delivered_sum: number | string; average_check: number | string; profit: number | string;
+    courier_fee: number | string; owner_fee: number | string; owner_delivered: number };
+  daily: OrdersInsightsDay[];
+  top_medicines: Array<{ medicine_name: string; quantity: number | string; sales: number | string; orders: number }>;
+  hours: Array<{ hour: number; orders: number }>;
+  clients: { new_clients: number; returning_clients: number };
+  delivered_orders: Array<{ order_id: string; order_reference: string | null; customer_name: string | null;
+    delivered_at: string; created_by_staff_account_id: 1 | 2 | 3 | null; delivery_courier_amount: number | string;
+    delivery_owner_amount: number | string; sales: number | string; base: number | string; profit: number | string;
+    owner_total: number | string }>;
+};
+
+export type OrdersDrillMetric = 'ordered' | 'delivered' | 'average_check' | 'profit' | 'cancelled' | 'clients';
+
+export type OrdersDrillOrder = {
+  order_id: string; order_reference: string | null; customer_name: string | null; status: OrderStatus;
+  created_at: string; delivered_at?: string; created_by_staff_account_id: 1 | 2 | 3 | null;
+  order_total: number | string | null; sales: number | string; base: number | string; profit: number | string;
+  delivery_courier_amount: number | string | null; delivery_owner_amount: number | string | null;
+};
+
+export type OrdersDrillClient = {
+  customer_name: string | null; phone: string | null; orders_in_period: number; first_order_at: string; is_new: boolean;
+};
+
+type OrdersDrillBase = {
+  period_days: OrdersInsightsPeriod; from: string; to: string; currency: 'TJS'; page: CursorPage; request_id: string;
+};
+
+export type OrdersDrillResponse = OrdersDrillBase & ({
+  metric: Exclude<OrdersDrillMetric, 'clients'>;
+  summary: { count: number; sum: number | string; profit: number | string };
+  data: OrdersDrillOrder[];
+} | {
+  metric: 'clients';
+  summary: { new_clients: number; returning_clients: number };
+  data: OrdersDrillClient[];
+});
+
+export type DeliveredDayResponse = {
+  date: string;
+  time_zone: 'Asia/Dushanbe';
+  summary: { total: number; website: number; courier: number; pharmacy: number;
+    whatsapp: number; instagram: number; phone: number; owner_delivered?: number;
+    total_sales?: number | string; website_sales?: number | string; courier_sales?: number | string;
+    pharmacy_sales?: number | string; courier_fee?: number | string; owner_fee?: number | string };
+  data: DeliveredDayOrder[];
+  page: CursorPage;
+  request_id: string;
+};
+
+export type NotificationField = 'order_reference' | 'created_at' | 'source' | 'customer_name' | 'phone' |
+  'address' | 'landmark' | 'comment' | 'items' | 'quantity' | 'item_client_total' | 'item_base_total' | 'client_total' |
+  'base_total' | 'profit' | 'creator' | 'status';
+export type NotificationChannel = 'owner_telegram' | 'courier_telegram' | 'pharmacy_telegram' | 'pharmacy_web';
+export type AdminNotificationSettings = {
+  courier_enabled: boolean;
+  policies: Record<NotificationChannel, Record<NotificationField, boolean>>;
+  revision: number;
+  updated_at: string | null;
+  updated_by: string | null;
+};
+export type AdminNotificationPreview = {
+  telegram: Record<Exclude<NotificationChannel, 'pharmacy_web'>, string>;
+  pharmacy_web: Array<{ label: string; value: string }>;
+  courier_enabled: boolean;
+};
+
+export type CollectionUtmLinkStats = CollectionUtmOrders & {
+  product_id: number | null;
+  product_name: string | null;
+  views: number;
+  unique_visitors: number;
+};
+
 export type CollectionStats = {
   from: string | null;
   to: string | null;
   time_zone: string;
   collections: CollectionStatsRow[];
+  utm_links: CollectionUtmLinkStats[];
   utm_orders: CollectionUtmOrders[];
   slug?: string;
   products?: CollectionProductStats[];

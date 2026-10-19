@@ -6,6 +6,12 @@ import Link from 'next/link';
 import type { CreateOrderRequest, CreateOrderResponse, PublicOrder } from '@/lib/api-v1/types';
 import { invalidateTrackedOrders } from '@/lib/api-v1/client-reads';
 import { formatTajikPhone, loadSiteContactSettings } from '@/lib/contact-settings';
+import {
+  CHECKOUT_PHONE_ERROR,
+  formatCheckoutPhoneFull,
+  isCompleteCheckoutPhone,
+  normalizeCheckoutPhoneInput,
+} from '@/lib/checkout-phone';
 
 function orderFingerprint(value: string): string {
   // This fingerprint only matches a pending retry with the same payload. It is
@@ -65,7 +71,7 @@ export default function CartPage() {
           setFormData(prev => ({
             ...prev,
             name: parsed.name || '',
-            phone: parsed.phone || '',
+            phone: normalizeCheckoutPhoneInput(parsed.phone || ''),
             address: parsed.address || ''
           }));
         } catch {}
@@ -82,7 +88,8 @@ export default function CartPage() {
 
   // Formatting phone: XXX-XX-XX-XX
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').substring(0, 9);
+    // A full +992 number pasted from contacts keeps only the 9 local digits.
+    const val = normalizeCheckoutPhoneInput(e.target.value);
     setFormData({ ...formData, phone: val });
   };
 
@@ -112,6 +119,11 @@ export default function CartPage() {
     setCheckoutError(null);
     if (!formData.address.trim()) {
       setCheckoutError('Добавьте и выберите адрес доставки.');
+      setIsSubmitting(false);
+      return;
+    }
+    if (!isCompleteCheckoutPhone(formData.phone)) {
+      setCheckoutError(CHECKOUT_PHONE_ERROR);
       setIsSubmitting(false);
       return;
     }
@@ -170,6 +182,7 @@ export default function CartPage() {
           MEDICINE_NOT_FOUND: 'Некоторые лекарства больше не найдены в каталоге.',
           MINIMUM_ORDER_NOT_REACHED: 'После проверки актуальных цен сумма заказа меньше 50 сомони.',
           IDEMPOTENCY_CONFLICT: 'Данные заказа изменились. Повторите оформление ещё раз.',
+          RATE_LIMITED: 'Слишком много попыток оформить заказ. Подождите несколько минут и попробуйте снова — корзина и данные сохранены.',
         };
         const code = payload?.error?.code || '';
         setCheckoutError(messages[code] || payload?.error?.message || 'Не удалось оформить заказ. Повторите попытку.');
@@ -345,17 +358,25 @@ export default function CartPage() {
                     onChange={(e) => setFormData({...formData, name: e.target.value})}
                     style={{ fontFamily: 'inherit', width: '100%', padding: '15px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none', fontSize: '15px' }} 
                   />
-                  <input 
-                    type="tel" 
-                    name="phone" 
-                    placeholder="Ваш номер телефона (без +992)" 
-                    required 
-                    inputMode="numeric"
-                    minLength={9}
-                    value={displayPhone()}
-                    onChange={handlePhoneChange}
-                    style={{ fontFamily: 'inherit', width: '100%', padding: '15px', borderRadius: '8px', border: '1px solid #E8E8E8', outline: 'none', fontSize: '15px' }} 
-                  />
+                  <div style={{ display: 'flex', alignItems: 'stretch', width: '100%', borderRadius: '8px', border: '1px solid #E8E8E8', overflow: 'hidden', background: 'white' }}>
+                    <span
+                      aria-hidden="true"
+                      style={{ display: 'flex', alignItems: 'center', padding: '0 12px 0 15px', background: '#F5F5F7', borderRight: '1px solid #E8E8E8', color: '#313131', fontSize: '15px', fontWeight: 500, userSelect: 'none', whiteSpace: 'nowrap' }}
+                    >
+                      +992
+                    </span>
+                    <input 
+                      type="tel" 
+                      name="phone" 
+                      aria-label="Номер телефона: код +992 и 9 цифр номера"
+                      placeholder="Введите 9 цифр номера" 
+                      inputMode="numeric"
+                      autoComplete="tel-national"
+                      value={displayPhone()}
+                      onChange={handlePhoneChange}
+                      style={{ fontFamily: 'inherit', flex: 1, minWidth: 0, padding: '15px', border: 'none', outline: 'none', fontSize: '15px' }} 
+                    />
+                  </div>
                   <textarea 
                     name="comment"
                     placeholder="Комментарий к заказу (необязательно)" 
@@ -404,6 +425,12 @@ export default function CartPage() {
                   <span>Кол-во товаров</span>
                   <span style={{ fontWeight: 500, color: '#111' }}>{totalItems} шт.</span>
                 </div>
+                {isCompleteCheckoutPhone(formData.phone) && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontSize: '14px', color: '#666' }}>
+                    <span>Телефон:</span>
+                    <span style={{ fontWeight: 500, color: '#111', whiteSpace: 'nowrap' }}>{formatCheckoutPhoneFull(formData.phone)}</span>
+                  </div>
+                )}
                 
                 <div style={{ borderTop: '1px solid #F0F0F0', paddingTop: '20px', marginBottom: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '15px', color: '#666' }}>Итого за товары</span>

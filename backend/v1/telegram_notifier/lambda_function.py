@@ -6,10 +6,14 @@ import html
 import hmac
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from decimal import Decimal, InvalidOperation
 from typing import Any
+
+from backend.v1.shared.order_notification_messages import format_configured_message
+from backend.v1.shared.order_notification_settings import default_policies
 
 
 def _authorizer_response(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -38,6 +42,14 @@ def _money(value: Any) -> str:
         return "—"
 
 
+def _quantity(value: Any) -> str:
+    try:
+        quantity = Decimal(str(value)).quantize(Decimal("0.01"))
+        return format(quantity.normalize(), "f")
+    except (InvalidOperation, ValueError):
+        return "—"
+
+
 def _identity(event: dict[str, Any]) -> tuple[str, str, str, str]:
     reference = html.escape(str(event.get("order_reference") or "—"))
     customer = html.escape(str(event.get("customer_name") or "—"))
@@ -53,11 +65,24 @@ def _item_lines(event: dict[str, Any], price_key: str) -> list[str]:
         if not isinstance(item, dict):
             continue
         name = html.escape(str(item.get("medicine_name") or "Товар"))
-        quantity = int(item.get("quantity") or 0)
+        quantity = _quantity(item.get("quantity"))
         price = item.get(price_key)
         line = f"• {name} × {quantity} — {_money(price)}"
         if sum(len(part) + 1 for part in lines) + len(line) > 3200:
             lines.append("• …остальные товары смотрите в админ-панели")
+            break
+        lines.append(line)
+    return lines
+
+
+def _medicine_lines(event: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for item in event.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        line = f"• {html.escape(str(item.get('medicine_name') or 'Товар'))} × {_quantity(item.get('quantity'))}"
+        if sum(len(part) + 1 for part in lines) + len(line) > 2900:
+            lines.append("• …остальные товары смотрите в панели заказов")
             break
         lines.append(line)
     return lines
@@ -73,7 +98,7 @@ def format_owner_message(event: dict[str, Any]) -> str:
         source = source_labels.get(str(event.get("order_source")), "—")
         landmark = html.escape(str(event.get("landmark") or "—"))
         lines = [
-            f"🏥 <b>Новый заказ из аптеки {account_id}</b>",
+            f"🚚 <b>Новый заказ от доставщика · аптека {account_id}</b>",
             f"🧾 Заказ: {reference}",
             f"👤 {actor_label}: {username}",
             f"📨 Источник: {source}",
@@ -93,7 +118,7 @@ def format_owner_message(event: dict[str, Any]) -> str:
                 if not isinstance(item, dict):
                     continue
                 name = html.escape(str(item.get("medicine_name") or "Товар"))
-                quantity = int(item.get("quantity") or 0)
+                quantity = _quantity(item.get("quantity"))
                 lines.append(
                     f"• {name} × {quantity} — {_money(item.get('base_line_total'))} / {_money(item.get('line_total'))}"
                 )
@@ -106,9 +131,13 @@ def format_owner_message(event: dict[str, Any]) -> str:
         else:
             lines.extend(["", "Товары будут уточнены по телефону."])
         return "\n".join(lines)
-    reference, _, _, _ = _identity(event)
+    reference, customer, phone, address = _identity(event)
     lines = [
         f"📊 <b>Новый заказ {reference} — для владельца</b>",
+        "🏥 Аптека 1 · заказ с сайта",
+        f"👤 Клиент: {customer}",
+        f"📞 Телефон: {phone}",
+        f"📍 Адрес: {address}",
         "",
         "<b>Товары:</b>",
     ]
@@ -118,13 +147,19 @@ def format_owner_message(event: dict[str, Any]) -> str:
         f"💵 <b>Сумма заказа: {_money(event.get('order_total'))}</b>",
         f"📈 <b>Валовая прибыль: {_money(event.get('profit'))}</b>",
     ])
+    if event.get("comment"):
+        lines.append(f"💬 Комментарий: {html.escape(str(event['comment'])[:500])}")
+    attribution = [str(event.get(key) or "").strip() for key in
+                   ("source_collection", "utm_source", "utm_medium", "utm_campaign", "utm_content")]
+    if any(attribution):
+        lines.append("🔗 Источник: " + html.escape(" / ".join(value or "—" for value in attribution)))
     return "\n".join(lines)
 
 
 def format_pharmacy_message(event: dict[str, Any]) -> str:
     reference, _, _, _ = _identity(event)
     lines = [
-        f"💊 <b>Заказ {reference} — собрать</b>",
+        f"💊 <b>Аптека 1 · заказ {reference} — собрать</b>",
         "",
         "<b>Товары:</b>",
     ]
@@ -133,6 +168,8 @@ def format_pharmacy_message(event: dict[str, Any]) -> str:
         "",
         f"🧾 <b>Итого: {_money(event.get('base_total'))}</b>",
     ])
+    if event.get("comment"):
+        lines.append(f"💬 Комментарий: {html.escape(str(event['comment'])[:500])}")
     return "\n".join(lines)
 
 
@@ -146,7 +183,11 @@ def format_delivery_message(event: dict[str, Any]) -> str:
         f"📍 Адрес: {address}",
         f"💵 Получить: <b>{_money(event.get('order_total'))}</b>",
     ]
-    if event.get("notification_kind") == "staff_manual_order":
+    if event.get("notification_kind") != "staff_manual_order":
+        lines.insert(1, "🏥 Забрать из аптеки 1")
+        lines.extend(["", "<b>Лекарства:</b>"])
+        lines.extend(_medicine_lines(event))
+    else:
         landmark = html.escape(str(event.get("landmark") or "—"))
         pharmacy_id = event.get("fulfillment_pharmacy_id") or event.get("created_by_staff_account_id")
         lines.insert(1, f"🏥 Аптека {html.escape(str(pharmacy_id or '—'))}")
@@ -154,9 +195,7 @@ def format_delivery_message(event: dict[str, Any]) -> str:
         items = event.get("items") if isinstance(event.get("items"), list) else []
         if items:
             lines.extend(["", "<b>Доставить:</b>"])
-            for item in items:
-                if isinstance(item, dict):
-                    lines.append(f"• {html.escape(str(item.get('medicine_name') or 'Товар'))} × {int(item.get('quantity') or 0)}")
+            lines.extend(_medicine_lines(event))
     comment = str(event.get("comment") or "").strip()
     if comment:
         lines.extend(["", f"💬 Комментарий: {html.escape(comment[:500])}"])
@@ -170,6 +209,27 @@ def format_message(event: dict[str, Any]) -> str:
     return format_owner_message(event)
 
 
+def _claim_delivery(event_key: str, recipient: str) -> dict[str, Any]:
+    url = os.environ.get("NOTIFICATION_CLAIM_API_URL", "").strip()
+    api_key = os.environ.get("NOTIFICATION_CLAIM_API_KEY", "").strip()
+    bearer = os.environ.get("NOTIFICATION_CLAIM_TOKEN", "").strip()
+    if not url.startswith("https://") or not api_key or not bearer:
+        raise RuntimeError("Notification claim configuration is incomplete")
+    request = urllib.request.Request(url,
+        data=json.dumps({"event_key": event_key, "recipient": recipient}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-api-key": api_key,
+                 "Authorization": f"Bearer {bearer}"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Notification claim failed") from exc
+    result = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(result, dict) or type(result.get("claimed")) is not bool:
+        raise RuntimeError("Notification claim returned invalid data")
+    return result
+
+
 def _send_message(
     token: str,
     chat_id: str,
@@ -177,6 +237,7 @@ def _send_message(
     event: dict[str, Any],
     *,
     include_admin_link: bool = True,
+    buttons: list[dict[str, str]] | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
@@ -186,7 +247,9 @@ def _send_message(
     }
     base_url = os.environ.get("ADMIN_ORDER_BASE_URL", "").strip().rstrip("/")
     order_id = event.get("admin_order_id")
-    if include_admin_link and base_url.startswith("https://") and isinstance(order_id, int):
+    if buttons:
+        payload["reply_markup"] = {"inline_keyboard": [buttons]}
+    elif include_admin_link and base_url.startswith("https://") and isinstance(order_id, int):
         payload["reply_markup"] = {
             "inline_keyboard": [[{"text": "Открыть заказ", "url": f"{base_url}/{order_id}"}]],
         }
@@ -203,6 +266,32 @@ def _send_message(
         raise RuntimeError("Telegram delivery failed") from exc
     if not body.get("ok"):
         raise RuntimeError("Telegram rejected the notification")
+
+
+def courier_buttons(event: dict[str, Any]) -> list[dict[str, str]]:
+    """Open the order in the courier cabinet and dial the client (Telegram buttons cannot use tel: links)."""
+    site = os.environ.get("STAFF_SITE_BASE_URL", "").strip().rstrip("/")
+    if not site.startswith("https://"):
+        return []
+    buttons = []
+    public_id = str(event.get("order_id") or "")
+    if re.fullmatch(r"ord_[0-9a-f]{32}", public_id):
+        buttons.append({"text": "📦 Открыть заказ", "url": f"{site}/staff/orders/{public_id}"})
+    digits = "".join(character for character in str(event.get("phone") or "") if character.isdigit())
+    if len(digits) == 9:
+        digits = f"992{digits}"
+    if re.fullmatch(r"992[0-9]{9}", digits):
+        buttons.append({"text": "📞 Позвонить", "url": f"{site}/call/{digits}"})
+    return buttons
+
+
+def format_courier_assembly_message(event: dict[str, Any]) -> str:
+    """Copy of the pharmacy picking list the courier can forward to the pharmacy."""
+    fields = default_policies()["pharmacy_telegram"]
+    text = format_configured_message(event, fields, "pharmacy_telegram")
+    first, _, rest = text.partition("\n")
+    pharmacy = html.escape(str(event.get("fulfillment_pharmacy_id") or 1))
+    return f"{first}\n🏥 Аптека {pharmacy} · переслать в аптеку\n{rest}"
 
 
 def _notification_event(event: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -230,30 +319,37 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     delivery_token = os.environ.get("TELEGRAM_DELIVERY_BOT_TOKEN", "").strip() or token
     legacy_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     owner_chat_id = os.environ.get("TELEGRAM_OWNER_CHAT_ID", "").strip() or legacy_chat_id
-    pharmacy_chat_id = os.environ.get("TELEGRAM_PHARMACY_CHAT_ID", "").strip() or owner_chat_id
-    delivery_chat_id = os.environ.get("TELEGRAM_DELIVERY_CHAT_ID", "").strip() or owner_chat_id
+    pharmacy_chat_id = os.environ.get("TELEGRAM_PHARMACY_CHAT_ID", "").strip()
+    delivery_chat_id = os.environ.get("TELEGRAM_DELIVERY_CHAT_ID", "").strip()
     if not token or not owner_chat_id:
         raise RuntimeError("Telegram notification configuration is incomplete")
-    if notification.get("notification_kind") == "staff_manual_order":
-        deliveries = [(token, owner_chat_id, format_owner_message(notification), True)]
-        configured_delivery_chat = os.environ.get("TELEGRAM_DELIVERY_CHAT_ID", "").strip()
-        if configured_delivery_chat and configured_delivery_chat != owner_chat_id:
-            deliveries.append((delivery_token, configured_delivery_chat, format_delivery_message(notification), False))
-    else:
-        deliveries = (
-            (token, owner_chat_id, format_owner_message(notification), True),
-            (token, pharmacy_chat_id, format_pharmacy_message(notification), True),
-            (delivery_token, delivery_chat_id, format_delivery_message(notification), False),
-        )
-    for message_token, chat_id, text, include_admin_link in deliveries:
-        _send_message(
-            message_token,
-            chat_id,
-            text,
-            notification,
-            include_admin_link=include_admin_link,
-        )
-    result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": len(deliveries)}
+    order_id = notification.get("admin_order_id")
+    if type(order_id) is not int or order_id <= 0:
+        raise RuntimeError("Notification order ID is missing")
+    # Pharmacy and courier are notified only about website orders; staff orders are entered by them.
+    is_website_order = notification.get("notification_kind") != "staff_manual_order"
+    recipients = [("owner_telegram", token, owner_chat_id, True)]
+    if is_website_order and pharmacy_chat_id:
+        recipients.append(("pharmacy_telegram", token, pharmacy_chat_id, False))
+    if is_website_order and delivery_chat_id:
+        recipients.append(("courier_telegram", delivery_token, delivery_chat_id, False))
+    messages_sent = 0
+    for recipient, message_token, chat_id, include_admin_link in recipients:
+        claim = _claim_delivery(f"order:{order_id}:created", recipient)
+        if not claim["claimed"]:
+            continue
+        fields = claim.get("fields")
+        if not isinstance(fields, dict):
+            raise RuntimeError("Notification policy is missing")
+        _send_message(message_token, chat_id, format_configured_message(notification, fields, recipient),
+                      notification, include_admin_link=include_admin_link,
+                      buttons=courier_buttons(notification) if recipient == "courier_telegram" else None)
+        messages_sent += 1
+        if recipient == "courier_telegram":
+            _send_message(message_token, chat_id, format_courier_assembly_message(notification),
+                          notification, include_admin_link=False)
+            messages_sent += 1
+    result = {"ok": True, "order_reference": notification.get("order_reference"), "messages_sent": messages_sent}
     if is_api_gateway:
         return {
             "statusCode": 200,

@@ -64,3 +64,6 @@ next-env.d.ts
 # Development-only banner images and settings, never deploy.
 .local-banners/
 .staff-bootstrap/
+
+# software factory: per-job git worktrees (see .claude/skills/factory/SKILL.md)
+/.factory-worktrees/

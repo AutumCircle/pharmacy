@@ -1,0 +1,14 @@
+# Factory backlog
+
+`/factory next` takes the first unchecked item, runs it through the loop and ticks it off
+as `- [x] … → <job-id>`. One feature per line; write it the way you'd brief a developer.
+
+- [x] Rate-limit order tracking lookups: `/api/tracking` answers HTTP 429 with a Russian message after too many phone lookups from one client, so phone numbers can't be enumerated → 004-tracking-rate-limit
+- [x] Rate-limit `/api/checkout` per client so a script can't flood the pharmacy with fake orders; legitimate customers retrying once or twice must still succeed → 005-checkout-rate-limit
+- [x] Экран заказа для аптек 1 и 2: номер и дата заказа, лекарства в читаемой таблице (название, количество, цена, сумма по позиции, итог), важные данные выделены цветом, каждая аптека видит только свои позиции, сколько минут заказ ждёт обработки. Дословный запрос и решения владельца: factory/requests/2026-10-15-courier-pharmacy.md → 008-pharmacy-order-screen
+- [x] Действия фармацевта (решение владельца 2026-10-16: если лекарств нет в «Ватан 1», заказ/позиции должны отправляться в «Ватан 2» — см. factory/jobs/008-pharmacy-order-screen/rework-1.md): сначала «В наличии, цена верна» или «Нет в наличии / цена отличается» с указанием проблемы; после согласования «Начать сборку», затем «Собран»; курьер видит результат каждого действия. Статусы клиента не меняются. Дословный запрос и решения владельца: factory/requests/2026-10-15-courier-pharmacy.md → 010-pharmacist-actions-routing
+- [x] Фармацевт: «Начать сборку» и «Собран» как внутренние отметки каждой аптеки после согласования заказа, видимые курьеру (продолжение 010). Дословный запрос и решения — factory/requests/2026-10-16-pharmacy.md; план — раздел Follow-ups в factory/jobs/010-pharmacist-actions-routing/spec.md → 011-pharmacy-assembly-marks
+- [x] Оповещения аптеки о новом заказе: уведомление, повтор примерно каждые 3 минуты до реакции фармацевта, экранный сигнал и звук в открытом приложении, push для приложения на главном экране с проверкой разрешения. Дословный запрос и решения владельца: factory/requests/2026-10-15-courier-pharmacy.md → 012-pharmacy-order-alerts
+- [ ] Web Push для установленного приложения аптеки (продолжение 012): manifest, service worker, VAPID-ключи, хранение подписок (миграция), отправка из Lambda с повтором ~3 мин. Нужно решение владельца: делать ли устанавливаемым весь сайт или только /staff. План — раздел Risks/Follow-ups в factory/jobs/012-pharmacy-order-alerts/spec.md
+- [ ] Telegram-сообщение для «Ватан 2», когда к ней автоматически переходят позиции заказа (продолжение 010/012): новая переменная чата для аптеки 2 и вызов notifier из admin Lambda
+- [ ] Обзор заказов: показать лекарства, которые заказали дважды и больше (продолжение 007). Дословный запрос владельца и толкование — factory/jobs/007-orders-overview-drilldown/spec.md; уточнить: «в 2+ заказах за период» или «один клиент заказал повторно»

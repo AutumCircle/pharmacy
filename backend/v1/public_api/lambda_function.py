@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -23,10 +24,19 @@ from backend.v1.shared.contract import (
     validate_idempotency_key,
 )
 from backend.v1.shared.database import transaction
-from backend.v1.shared.marketing import is_bot_user_agent, validate_collection_event, validate_collection_slug
-from backend.v1.shared.responses import error_response, request_id, success, success_document
+from backend.v1.shared.marketing import (
+    is_bot_user_agent,
+    validate_collection_event,
+    validate_collection_slug,
+    validate_utm_link_event,
+)
+from backend.v1.shared.responses import ResponseEncoder, error_response, request_id, success, success_document
+from backend.v1.shared.order_time import order_time_iso
 from backend.v1.shared.search_ranking import did_you_mean, query_variants, rank_candidates, retrieval_terms
 
+
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.INFO)
 
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
@@ -378,7 +388,7 @@ def _order_response(order: dict[str, Any], items: list[dict[str, Any]]) -> dict[
         "items": items,
         "items_subtotal": int(order["items_subtotal"]),
         "order_total": int(order["order_total"]),
-        "created_at": order["created_at"].isoformat(),
+        "created_at": order_time_iso(order["created_at"]),
     }
 
 
@@ -417,7 +427,10 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
                 raise ContractError("IDEMPOTENCY_CONFLICT", "Idempotency key was reused with a different request", http_status=409)
             if existing["response_body"] is None:
                 raise ContractError("IDEMPOTENCY_IN_PROGRESS", "Order request is still being processed", http_status=409)
-            return existing["response_body"], int(existing["response_status"]), None
+            saved_response = dict(existing["response_body"])
+            if saved_response.get("created_at"):
+                saved_response["created_at"] = order_time_iso(saved_response["created_at"])
+            return saved_response, int(existing["response_status"]), None
 
         medicine_ids = [item["medicine_id"] for item in request["items"]]
         cur.execute(
@@ -439,22 +452,23 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             raise ContractError("ORDER_ITEMS_UNAVAILABLE", "One or more medicines are unavailable", http_status=409)
 
         order_items: list[dict[str, Any]] = []
-        subtotal = 0
+        subtotal = Decimal("0")
         base_total = Decimal("0")
         profit = Decimal("0")
         for item in request["items"]:
             medicine = medicines[item["medicine_id"]]
-            selling_price = int(medicine["selling_unit_price"])
-            line_total = selling_price * item["quantity"]
+            selling_price = Decimal(str(medicine["selling_unit_price"]))
+            quantity = Decimal(str(item["quantity"]))
+            line_total = selling_price * quantity
             subtotal += line_total
             base_price = Decimal(str(medicine["price"]))
-            base_line_total = base_price * item["quantity"]
+            base_line_total = base_price * quantity
             base_total += base_line_total
-            profit += (Decimal(selling_price) - base_price) * item["quantity"]
+            profit += (selling_price - base_price) * quantity
             order_items.append({
                 "medicine_id": medicine["id"],
                 "medicine_name": medicine["name"],
-                "quantity": item["quantity"],
+                "quantity": str(quantity),
                 "base_unit_price": base_price,
                 "base_line_total": base_line_total,
                 "selling_unit_price": selling_price,
@@ -521,15 +535,25 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
                 completed_at = CURRENT_TIMESTAMP
             WHERE idempotency_key = %s
             """,
-            (order["id"], json.dumps(response), normalized_key),
+            (order["id"], json.dumps(response, cls=ResponseEncoder), normalized_key),
         )
         notification = {
             "admin_order_id": int(order["id"]),
+            "order_id": public_id,
+            "created_at": order_time_iso(order["created_at"]),
+            "status": "pending",
+            "order_source": "Сайт" + (f" · {attribution['utm_source']}" if attribution.get("utm_source") else ""),
+            "fulfillment_pharmacy_id": 1,
             "order_reference": order_reference,
             "customer_name": request["customer_name"],
             "phone": request["phone"],
             "address": request["address"],
             "comment": request["comment"],
+            "source_collection": attribution.get("source_collection"),
+            "utm_source": attribution.get("utm_source"),
+            "utm_medium": attribution.get("utm_medium"),
+            "utm_campaign": attribution.get("utm_campaign"),
+            "utm_content": attribution.get("utm_content"),
             "items": [
                 {
                     "medicine_id": item["medicine_id"],
@@ -750,6 +774,31 @@ def record_collection_event(payload: dict[str, Any]) -> dict[str, Any]:
     return {"recorded": recorded}
 
 
+def record_utm_link_event(payload: dict[str, Any]) -> dict[str, Any]:
+    event = validate_utm_link_event(payload)
+    if is_bot_user_agent(event["user_agent"]):
+        return {"recorded": False, "reason": "bot"}
+    with transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO utm_link_events (
+                visitor_id, path, product_id, utm_source, utm_medium,
+                utm_campaign, utm_content, referrer, user_agent
+            )
+            SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s
+            WHERE %s::int IS NULL OR EXISTS (SELECT 1 FROM medicines WHERE id = %s)
+            RETURNING id
+            """,
+            (
+                event["visitor_id"], event["path"], event["product_id"],
+                event["utm_source"], event["utm_medium"], event["utm_campaign"], event["utm_content"],
+                event["referrer"], event["user_agent"][:300], event["product_id"], event["product_id"],
+            ),
+        )
+        recorded = cur.fetchone() is not None
+    return {"recorded": recorded}
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     current_request_id = request_id()
     method = event.get("httpMethod", "").upper()
@@ -773,6 +822,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return success(get_collection(tail[1]), request=current_request_id)
         if method == "POST" and path.endswith("/public/collection-events"):
             return success(record_collection_event(_body(event)), request=current_request_id)
+        if method == "POST" and path.endswith("/public/utm-link-events"):
+            return success(record_utm_link_event(_body(event)), request=current_request_id)
         if method == "GET" and path.endswith("/public/site-settings"):
             return success(get_site_settings(), request=current_request_id)
         if method == "GET" and path.endswith("/public/categories"):
@@ -791,7 +842,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raise ContractError("ROUTE_NOT_FOUND", "Route was not found", http_status=404)
     except ContractError as exc:
         return error_response(exc, request=current_request_id)
-    except psycopg2.Error:
+    except psycopg2.Error as exc:
+        LOGGER.error(
+            "Public API database error request_id=%s method=%s path=%s pgcode=%s detail=%s",
+            current_request_id, method, path, exc.pgcode, getattr(exc.diag, "message_primary", None),
+        )
         return error_response(ContractError("INTERNAL_ERROR", "Internal server error", http_status=500), request=current_request_id)
     except Exception:
+        LOGGER.exception("Public API unexpected error request_id=%s method=%s path=%s", current_request_id, method, path)
         return error_response(ContractError("INTERNAL_ERROR", "Internal server error", http_status=500), request=current_request_id)

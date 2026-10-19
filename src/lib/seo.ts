@@ -10,10 +10,25 @@ export const SITE_NAME = 'Аптека «Ватан»';
 export const SITE_SHORT_NAME = 'Аптека Ватан';
 export const SITE_CITY = 'Душанбе';
 
-export const DEFAULT_TITLE = 'Аптека Ватан — заказ и доставка лекарств в Душанбе';
+export const SITE_DOMAIN = 'aptekavatan.tj';
+export const SITE_TAJIK_NAME = 'Дорухонаи Ватан';
+
+/** Spellings people type for the brand: Russian, Tajik, Latin and the domain without a dot. */
+export const SITE_ALTERNATE_NAMES = [
+  SITE_SHORT_NAME,
+  'Ватан аптека',
+  SITE_TAJIK_NAME,
+  'Дорухона Ватан',
+  'Apteka Vatan',
+  'aptekavatan',
+  SITE_DOMAIN,
+  'Vatan pharmacy',
+];
+
+export const DEFAULT_TITLE = `Аптека Ватан — лекарства с доставкой в Душанбе | ${SITE_TAJIK_NAME}`;
 export const DEFAULT_DESCRIPTION =
-  'Аптека Ватан в Душанбе: тысячи лекарств и товаров для здоровья с актуальными ценами в сомони. '
-  + 'Закажите онлайн за пару минут — доставим по Душанбе, оплата наличными при получении.';
+  'Аптека Ватан (aptekavatan.tj) в Душанбе: тысячи лекарств с ценами в сомони, заказ онлайн, '
+  + 'доставка по Душанбе, оплата при получении. Дорухонаи Ватан — фармоиши дору бо расонидан дар Душанбе.';
 
 export const DEFAULT_KEYWORDS = [
   'аптека Ватан',
@@ -27,6 +42,9 @@ export const DEFAULT_KEYWORDS = [
   'купить лекарства Душанбе',
   'дорухона Душанбе',
   'дорухонаи Ватан',
+  'дорухона Ватан',
+  'aptekavatan',
+  'Apteka Vatan',
 ];
 
 export const LOGO_PATH = '/assets/apteka-vatan-logo.png';

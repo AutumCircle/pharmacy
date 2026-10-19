@@ -4,6 +4,21 @@ import { createPublicOrder, sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 import type { CreateOrderRequest, OrderAttribution } from '@/lib/api-v1/types';
 import { SOURCE_COOKIE, attributionForOrder, parseSource } from '@/lib/collections';
+import { clientAddress, createFixedWindowLimiter } from '@/lib/rate-limit';
+
+// Per-client (IP) limit on order attempts, kept in memory per Vercel instance.
+// 5 attempts per 10 minutes covers one order + two idempotent retries + one correction
+// (e.g. after ORDER_ITEMS_UNAVAILABLE) with headroom for carrier NAT. Must stay >= 3.
+// Not a global limit: counters are per warm instance and reset on cold start.
+const CHECKOUT_RATE_LIMIT = 5;
+const CHECKOUT_RATE_WINDOW_MS = 10 * 60 * 1000;
+const CHECKOUT_RATE_MAX_KEYS = 10_000;
+const checkoutLimiter = createFixedWindowLimiter({
+  limit: CHECKOUT_RATE_LIMIT,
+  windowMs: CHECKOUT_RATE_WINDOW_MS,
+  maxKeys: CHECKOUT_RATE_MAX_KEYS,
+});
+const RATE_LIMITED_MESSAGE = 'Слишком много попыток оформить заказ. Подождите несколько минут и попробуйте снова.';
 
 function isCreateOrderRequest(value: unknown): value is CreateOrderRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -18,7 +33,8 @@ function isCreateOrderRequest(value: unknown): value is CreateOrderRequest {
     const fields = item as Record<string, unknown>;
     return Object.keys(fields).every((key) => key === 'medicine_id' || key === 'quantity')
       && Number.isInteger(fields.medicine_id)
-      && Number.isInteger(fields.quantity);
+      && typeof fields.quantity === 'number' && Number.isFinite(fields.quantity)
+      && fields.quantity >= 0.5 && fields.quantity <= 99 && Number.isInteger(fields.quantity * 2);
   });
 }
 
@@ -36,6 +52,14 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: { code: 'VALIDATION_ERROR', message: 'Invalid order request' } },
         { status: 400 },
+      );
+    }
+    // Only well-formed attempts use quota; the key is the client IP only (never phone/name/address).
+    const decision = checkoutLimiter.consume(clientAddress(request.headers), Date.now());
+    if (!decision.allowed) {
+      return NextResponse.json(
+        { error: { code: 'RATE_LIMITED', message: RATE_LIMITED_MESSAGE } },
+        { status: 429, headers: { 'Retry-After': String(decision.retryAfterSeconds) } },
       );
     }
     // Attribution is taken from the latest tracked-link cookie; the browser body cannot set it.

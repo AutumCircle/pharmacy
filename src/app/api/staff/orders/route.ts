@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { STAFF_SESSION_COOKIE } from '@/lib/admin-session';
-import { createStaffOrder, listCourierOrders } from '@/lib/api-v1/staff-server';
+import { createStaffOrder, getStaffSession, listCourierOrders } from '@/lib/api-v1/staff-server';
 import { sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 import type { CreateStaffOrderRequest } from '@/lib/api-v1/staff-types';
+import { isCatalogOrderItem, isManualOrderItem } from '@/lib/staff-order-items';
 
 function isRequest(value: unknown): value is CreateStaffOrderRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const body = value as Record<string, unknown>;
-  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'source', 'items', 'pharmacy_id', 'comment']);
+  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'source', 'items', 'manual_items', 'pharmacy_id', 'comment']);
   return Object.keys(body).every((key) => allowed.has(key))
     && (body.customer_name === undefined || typeof body.customer_name === 'string')
     && typeof body.phone === 'string' && /^\d{9}$/.test(body.phone)
@@ -18,13 +19,9 @@ function isRequest(value: unknown): value is CreateStaffOrderRequest {
     && ['instagram', 'whatsapp', 'phone'].includes(String(body.source))
     && (body.pharmacy_id === undefined || body.pharmacy_id === 1 || body.pharmacy_id === 2)
     && Array.isArray(body.items) && body.items.length <= 50
-    && body.items.every((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-      const fields = item as Record<string, unknown>;
-      return Object.keys(fields).length === 2
-        && Number.isInteger(fields.medicine_id) && Number(fields.medicine_id) > 0
-        && Number.isInteger(fields.quantity) && Number(fields.quantity) >= 1 && Number(fields.quantity) <= 99;
-    });
+    && (body.manual_items === undefined || Array.isArray(body.manual_items) && body.manual_items.length <= 20 &&
+      body.manual_items.every(isManualOrderItem))
+    && body.items.every(isCatalogOrderItem);
 }
 
 export async function GET(request: Request) {
@@ -52,10 +49,14 @@ export async function POST(request: Request) {
   try {
     const token = (await cookies()).get(STAFF_SESSION_COOKIE)?.value;
     if (!token) return NextResponse.json({ error: 'Требуется вход' }, { status: 401 });
+    const account = await getStaffSession(token);
+    if (account.role !== 'courier') return NextResponse.json({ error: 'Создавать заказ может только доставщик' }, { status: 403 });
     const idempotencyKey = request.headers.get('idempotency-key');
     if (!idempotencyKey) return NextResponse.json({ error: 'Повторите отправку' }, { status: 400 });
     const body: unknown = await request.json();
-    if (!isRequest(body)) return NextResponse.json({ error: 'Проверьте заполнение полей' }, { status: 400 });
+    if (!isRequest(body) || body.pharmacy_id === undefined) {
+      return NextResponse.json({ error: 'Проверьте заполнение полей' }, { status: 400 });
+    }
     const response = await createStaffOrder(token, body, idempotencyKey);
     const notification = response.data._notification;
     delete response.data._notification;

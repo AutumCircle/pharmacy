@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { AdminDashboardSummary } from '@/lib/api-v1/admin-types';
+import { formatOrderDate } from '@/lib/order-time';
 
 type Props = {
   summary: AdminDashboardSummary;
@@ -33,7 +34,7 @@ export default function OrderEarningsPanel({ summary, days, compact = false }: P
         </div>
         <nav className="order-earnings-periods" aria-label="Период финансов">
           {[7, 30, 90].map((period) => (
-            <Link key={period} href={`${compact ? '/admin' : '/admin/orders'}?days=${period}`}
+            <Link key={period} href={compact ? `/admin?days=${period}` : `/admin/orders?view=finance&days=${period}`}
               className={period === days ? 'active' : ''}>{period} дней</Link>
           ))}
         </nav>
@@ -70,7 +71,7 @@ export default function OrderEarningsPanel({ summary, days, compact = false }: P
                 const total = Number(order.owner_total ?? profit + ownerDeliveryForOrder) || 0;
                 return <tr key={order.order_id}>
                   <td><Link href={`/admin/orders/${order.order_id}`}>№ {order.order_reference}</Link></td>
-                  <td>{new Date(order.created_at).toLocaleDateString('ru-RU', { timeZone: 'Asia/Dushanbe' })}</td>
+                  <td>{formatOrderDate(order.created_at)}</td>
                   <td className={profit > 0 ? 'positive-earning' : ''}>{money(profit, summary.currency)}</td>
                   <td className={ownerDeliveryForOrder > 0 ? 'positive-earning' : ''}>{money(ownerDeliveryForOrder, summary.currency)}</td>
                   <td className={courierForOrder > 0 ? 'positive-earning' : ''}>{money(courierForOrder, summary.currency)}</td>

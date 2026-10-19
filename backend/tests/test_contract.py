@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 
 from backend.v1.shared.contract import (
     ContractError,
@@ -6,6 +7,7 @@ from backend.v1.shared.contract import (
     normalize_phone,
     validate_create_order_request,
     validate_idempotency_key,
+    validate_order_quantity,
     validate_staff_order_request,
     validate_status_transition,
 )
@@ -38,6 +40,10 @@ class PhoneTests(unittest.TestCase):
 
     def test_accepts_formatted_local_phone(self):
         self.assertEqual(normalize_phone("917-12-34-56"), "+992917123456")
+
+    def test_keeps_local_phone_starting_with_992(self):
+        self.assertEqual(normalize_phone("992123456"), "+992992123456")
+        self.assertEqual(normalize_phone("+992 992 12 34 56"), "+992992123456")
 
     def test_rejects_excessive_phone(self):
         with self.assertRaises(ContractError):
@@ -90,6 +96,15 @@ class CreateOrderValidationTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_create_order_request(payload)
 
+    def test_accepts_tenths_without_accepting_arbitrary_decimals(self):
+        for value in ("0.1", "0.2", "0.3", "1.2", "0.25", "99"):
+            with self.subTest(value=value):
+                self.assertEqual(validate_order_quantity(value), Decimal(value).quantize(Decimal("0.01")))
+        for value in ("0", "0.05", "1.234", "99.1", "NaN", True):
+            with self.subTest(value=value):
+                with self.assertRaises(ContractError):
+                    validate_order_quantity(value)
+
 
 class IdempotencyTests(unittest.TestCase):
     def test_accepts_uuid(self):
@@ -102,6 +117,18 @@ class IdempotencyTests(unittest.TestCase):
 
 
 class StaffOrderValidationTests(unittest.TestCase):
+    def test_manual_medicine_is_validated_and_normalized(self):
+        base = {"phone": "917123456", "address": "Айни 29", "landmark": "школа",
+                "source": "phone", "items": [], "pharmacy_id": 2}
+        result = validate_staff_order_request({**base, "manual_items": [
+            {"medicine_name": "  Витамин   X  ", "price": "12.50", "quantity": 2}]})
+        self.assertEqual(result["manual_items"], [
+            {"medicine_name": "Витамин X", "price": "12.50", "quantity": 2}])
+        for bad in ("0", "-1", "NaN", "12.345", "1000000", "inf"):
+            with self.assertRaises(ContractError):
+                validate_staff_order_request({**base, "manual_items": [
+                    {"medicine_name": "Витамин X", "price": bad, "quantity": 1}]})
+
     def test_accepts_optional_name_and_required_contact_fields(self):
         result = validate_staff_order_request({
             "customer_name": "", "phone": "917123456", "address": "Айни 29",

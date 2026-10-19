@@ -1,0 +1,377 @@
+{
+  "updated": "2026-10-16T19:18:00Z",
+  "jobs": [
+    {
+      "id": "001-courier-delivery-checklist",
+      "title": "Чек-лист курьера в карточке заказа",
+      "branch": "factory/001-courier-delivery-checklist",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-15T05:10:56Z"
+    },
+    {
+      "id": "002-checkout-phone-input",
+      "title": "Поле телефона +992 при оформлении",
+      "branch": "factory/002-checkout-phone-input",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 0,
+      "note": "",
+      "updated": "2026-10-15T05:45:13Z"
+    },
+    {
+      "id": "003-courier-checklist-v2",
+      "title": "Чек-лист курьера v2 (7 шагов владельца)",
+      "branch": "factory/003-courier-checklist-v2",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human (сброс старой отметки «Позвонить» принят)",
+      "updated": "2026-10-15T12:26:22Z"
+    },
+    {
+      "id": "004-tracking-rate-limit",
+      "title": "Rate limit на отслеживание заказа",
+      "branch": "factory/004-tracking-rate-limit",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 0,
+      "note": "Отменено владельцем: поиск по телефону без лимита; merge откатан revert-коммитом",
+      "updated": "2026-10-15T12:26:22Z"
+    },
+    {
+      "id": "005-checkout-rate-limit",
+      "title": "Rate limit на оформление заказа",
+      "branch": "factory/005-checkout-rate-limit",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 0,
+      "note": "",
+      "updated": "2026-10-15T12:56:01Z"
+    },
+    {
+      "id": "006-tracking-scrape-block",
+      "title": "Отслеживание: 5 запросов/мин, блок 5 ч за перебор номеров",
+      "branch": "factory/006-tracking-scrape-block",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 1,
+      "note": "Владелец: блок в памяти сайта",
+      "updated": "2026-10-16T04:00:27Z"
+    },
+    {
+      "id": "007-orders-overview-drilldown",
+      "title": "Обзор заказов: кликабельные карточки, повторные лекарства, зарплата курьера",
+      "branch": "factory/007-orders-overview-drilldown",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-16T05:21:50Z"
+    },
+    {
+      "id": "008-pharmacy-order-screen",
+      "title": "Экран заказа для аптек 1 и 2",
+      "branch": "factory/008-pharmacy-order-screen",
+      "stage": "merged",
+      "round": 2,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 1,
+      "note": "approved by human",
+      "updated": "2026-10-16T10:11:09Z"
+    },
+    {
+      "id": "009-ios-carousels-endpoint",
+      "title": "Публичный JSON каруселей для iOS",
+      "branch": "factory/009-ios-carousels-endpoint",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "APPROVE",
+      "reworks": 0,
+      "note": "",
+      "updated": "2026-10-16T10:16:43Z"
+    },
+    {
+      "id": "010-pharmacist-actions-routing",
+      "title": "Действия фармацевта и авто-перенаправление в Ватан 2",
+      "branch": "factory/010-pharmacist-actions-routing",
+      "stage": "merged",
+      "round": 2,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "CHANGES",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-16T12:21:19Z"
+    },
+    {
+      "id": "011-pharmacy-assembly-marks",
+      "title": "Фармацевт: «Начать сборку» и «Собран»",
+      "branch": "factory/011-pharmacy-assembly-marks",
+      "stage": "merged",
+      "round": 2,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 1,
+      "note": "approved by human",
+      "updated": "2026-10-16T18:59:37Z"
+    },
+    {
+      "id": "012-pharmacy-order-alerts",
+      "title": "Оповещения аптеки о новом заказе",
+      "branch": "factory/012-pharmacy-order-alerts",
+      "stage": "merged",
+      "round": 2,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "CHANGES",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human; проверка на устройствах после выката",
+      "updated": "2026-10-16T19:18:00Z"
+    }
+  ]
+}

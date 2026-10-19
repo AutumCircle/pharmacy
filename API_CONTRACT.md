@@ -10,6 +10,7 @@ Homepage content routes:
 - `GET /v1/admin/homepage-banners` — all four banner slots (admin authorization required).
 - `PATCH /v1/admin/homepage-banners/{slot}` — update title, subtitle, HTTPS image URL, link, or active state.
 - `GET /v1/public/product-carousels` — active carousel sections in configured order with their available products.
+- `GET /api/product-carousels` (Next.js, public, no auth) — whitelisted JSON copy of the homepage carousels for the iOS app; see §5.4.
 - `GET|POST /v1/admin/product-carousels` — list compact carousel metadata (`product_count`) or create a section.
 - `PATCH|DELETE /v1/admin/product-carousels/{carousel_id}` — edit, activate/deactivate, reorder, or delete a section.
 - `PATCH /v1/admin/product-carousels/reorder` — save the complete section order in one transaction.
@@ -180,6 +181,134 @@ Medicine response item:
 - Total считается по действующим `category_medicines.medicine_id` links, связанным с medicines в наличии; ordering: `medicine.name ASC, medicine.id ASC`.
 - Неизвестная или отключённая категория возвращает `404 CATEGORY_NOT_FOUND`.
 
+### 5.4 Public product carousels JSON for iOS (`GET /api/product-carousels`)
+
+`GET https://www.aptekavatan.tj/api/product-carousels` — Next.js route handler
+(`src/app/api/product-carousels/route.ts`) для iOS-приложения и других публичных клиентов. Он
+отдаёт те же активные карусели, что и главная страница сайта.
+
+- **Без авторизации:** обычный HTTPS GET (URLSession). API-ключ, логин Vercel и доступ к AWS не нужны.
+  Сервер Next.js вызывает `getPublicProductCarousels()` → `GET /v1/public/product-carousels` в
+  API Gateway с серверным `API_KEY`. Ключ в ответ и в клиент не попадает. Путь данных не меняется:
+  Next.js → API Gateway → Python Lambda → RDS.
+- **Порядок:** как в Lambda (карусели по `sort_order, id`, товары по `sort_order, id`). Route
+  ничего не пересортировывает.
+- **Whitelist:** ответ строится через `toPublicCarouselsPayload` (`src/lib/public-carousels.ts`).
+  `country`, `vendor`, `catalog_updated_at`, `request_id`, базовая цена, прибыль, `is_active`,
+  внутренние ID и любые новые поля upstream не передаются.
+- **Пустые карусели:** карусели без товаров опускаются (как на главной). Если не осталось ни одной
+  карусели, ответ `200 {"carousels": []}`: массив, никогда не `null`.
+
+Поля успешного ответа `200`:
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `carousels` | array | Активные карусели в порядке показа |
+| `carousels[].slug` | string | Идентификатор секции |
+| `carousels[].title` | string | Заголовок секции |
+| `carousels[].sort_order` | integer | Порядок секции |
+| `carousels[].products` | array | Товары секции, не пустой |
+| `products[].medicine_id` | integer | ID товара (как в `/medicine/...` и в заказе) |
+| `products[].medicine_name` | string | Название |
+| `products[].selling_unit_price` | integer (JSON number) | Цена продажи в TJS, как на сайте |
+| `products[].currency` | string | Всегда `"TJS"` |
+| `products[].in_stock` | boolean | Есть ли в наличии |
+| `products[].image_url` | string \| null | URL изображения или `null` |
+| `products[].sort_order` | integer | Порядок товара в секции |
+
+Сейчас `selling_unit_price` — целое число (Lambda приводит его через `int()`). Если контракт
+Lambda когда-нибудь перейдёт на дробные цены, iOS должен декодировать поле как `Decimal`/`Double`.
+Поэтому лучше сразу декодировать его как число без привязки к `Int`.
+
+```json
+{
+  "carousels": [
+    {
+      "slug": "items-of-the-day",
+      "title": "Товары дня",
+      "sort_order": 10,
+      "products": [
+        {
+          "medicine_id": 1234,
+          "medicine_name": "Парацетамол 500 мг №10",
+          "selling_unit_price": 12,
+          "currency": "TJS",
+          "in_stock": true,
+          "image_url": "https://example.com/paracetamol.jpg",
+          "sort_order": 10
+        }
+      ]
+    }
+  ]
+}
+```
+
+Ошибка: любая ошибка upstream (ошибка конфигурации, timeout, недоступный или некорректный ответ
+API Gateway/Lambda, неожиданное исключение) → `503`, `Cache-Control: no-store`, `Retry-After: 30`:
+
+```json
+{ "error": { "code": "CAROUSELS_UNAVAILABLE", "message": "Секции товаров временно недоступны." } }
+```
+
+Upstream-коды, сообщения, details, stack traces и значения env не передаются. Клиент должен
+ориентироваться на HTTP status и `error.code`, а не на текст `message`.
+
+Кеширование: как на главной странице. Upstream fetch использует data cache Next.js с
+`revalidate: 60`. Успешный ответ отдаётся с
+`Cache-Control: public, s-maxage=60, stale-while-revalidate=300` (CDN Vercel). Route
+`force-dynamic`, поэтому на этапе build он не пререндерится.
+
+CORS-заголовков нет: нативному URLSession они не нужны. Отдельного rate limiting тоже нет:
+нагрузку на Lambda ограничивают CDN-кеш на 60 с и 60-секундный data cache.
+
+### 5.5 Public homepage banners JSON for iOS (`GET /api/homepage-banners`)
+
+`GET https://www.aptekavatan.tj/api/homepage-banners` — anonymous HTTPS GET. No Vercel
+login, AWS access or API key is needed in the iOS app. Next.js calls the same
+`getPublicHomepageBanners()` server helper as the homepage; only that server helper
+sends the API Gateway key. The route is read-only and does not access RDS directly.
+
+Success (`200`) has a root `banners` array, never `data.banners`:
+
+```json
+{
+  "banners": [{
+    "slot": "mobile",
+    "title": null,
+    "subtitle": null,
+    "image_url": "https://example.com/banner.png",
+    "link_url": "/catalog",
+    "cta_text": null,
+    "alt_text": "Аптека Ватан",
+    "fit_mode": "contain",
+    "mobile_override": false
+  }]
+}
+```
+
+This sample shows the principal fields only. Each actual banner additionally has
+the public presentation fields for image sizing/position, overlay, text layout,
+normalized element coordinates and optional mobile composition, as defined by
+`HomepageBanner` in `src/lib/api-v1/types.ts`. The explicit whitelist is in
+`src/lib/public-banners.ts`; unknown upstream fields, internal metadata and
+`request_id` are dropped. Banner order follows the homepage response and `slot`
+identifies placement: `left`, `center`, `right_top`, `right_bottom`, `mobile`.
+For a phone layout, use the `mobile` slot as the website does. An image-only banner
+has null text and should not create empty text or CTA elements. `image_url` can be
+null on a text-only banner. `link_url` may be a site-relative path; resolve it
+against `https://www.aptekavatan.tj` before opening. Empty or inactive banners
+are omitted; no banners means `200 {"banners": []}`.
+
+Success is cached for 60 seconds at both the upstream fetch and CDN. On upstream
+failure the route returns `503`, `Cache-Control: no-store`, `Retry-After: 30`:
+
+```json
+{ "error": { "code": "BANNERS_UNAVAILABLE", "message": "Баннеры временно недоступны." } }
+```
+
+Native URLSession does not need CORS headers. Treat `503` as an error with a retry,
+not as an empty banner list.
+
 ## 6. `create_order` — критический контракт
 
 `POST /v1/public/orders`
@@ -224,6 +353,7 @@ Validation:
 Обязательный алгоритм Lambda:
 
 1. Проверить caller, rate limit, schema и `Idempotency-Key`.
+   - Текущая реализация: per-IP лимит попыток создания заказа применяется в Next.js route `POST /api/checkout` (см. §11), до вызова Lambda. Lambda-side лимит и лимит по hash телефона для create order пока не реализованы.
 2. Повтор с тем же key и payload возвращает исходный response; тот же key с другим payload — `409 IDEMPOTENCY_CONFLICT`.
 3. В одной DB transaction получить все позиции по primary key `medicine_id`.
 4. Для каждой позиции потребовать ровно одну активную запись с `in_stock=true` и положительной `base_unit_price`.
@@ -290,7 +420,16 @@ Request:
 - Только exact normalized phone match; suffix/substring matching запрещён.
 - Endpoint выполняет parameterized filtered SQL с limit 20, а не вызывает admin `list_orders`.
 - Одинаковая форма ответа используется для неизвестного номера и номера без заказов.
-- Rate limit применяется по IP и hash нормализованного телефона; raw phone не пишется в access logs.
+- Rate limit применяется по IP и hash нормализованного телефона; raw phone не пишется в access logs. Текущее состояние (только Next.js `src/app/api/tracking/route.ts` + `src/lib/tracking-guard.ts`, Lambda не меняется):
+  - Ключ — client IP (первый адрес `x-forwarded-for`, затем `x-real-ip`, иначе общий bucket `unknown`). Guard проверяет только запросы с валидным телом; `400` квоту не расходует.
+  - (a) Не более **5** поисков за **60 секунд** с одного IP (fixed window). Сверх лимита — `429`, `Retry-After: <секунды>`, тело `{ "error": { "code": "RATE_LIMITED", "message": "Слишком много запросов. Пожалуйста, повторите через минуту." } }`.
+  - (b) Если с одного IP за **60 секунд** запрошено **5 разных** номеров, IP считается парсером и блокируется на **5 часов**: этот и все следующие поиски получают `429`, `Retry-After: <секунды>` (около 18000 при старте блокировки), тело `{ "error": { "code": "TRACKING_BLOCKED", "message": "Поиск заказов временно недоступен. Пожалуйста, попробуйте снова примерно через 5 часов." } }`. Повторы того же номера считаются в (a), но не в (b). Поиски, отклонённые лимитом (a), всё равно учитываются в (b).
+  - Порядок: активная блокировка, затем учёт номера (может начать блокировку), затем лимит (a), затем вызов Lambda. При `429` Lambda не вызывается.
+  - Номера хранятся только как HMAC-SHA-256 со случайным ключом процесса, не более 5 на IP, и удаляются через 60 секунд. Raw phone и hash в `console.*` не пишутся.
+  - До **10 000** IP в каждой таблице. При заполнении таблицы блокировок вытесняется блокировка, истекающая раньше всех (fail open), вместо отказа всем новым клиентам.
+  - **Ограничение (Option A, решение владельца — хранить в памяти сайта):** счётчики и блокировка хранятся в памяти каждого Vercel instance. Они теряются при cold start/redeploy и не общие между instances, поэтому 5-часовая блокировка **не гарантирована** — на практике она может длиться минуты; смена IP её обходит. Надёжная глобальная блокировка требует хранилища в Lambda/RDS (миграция, деплой Lambda, доверенная передача IP) или Vercel KV/Upstash — отдельная задача с согласованием владельца.
+  - Per-phone bucket намеренно не реализован: иначе атакующий мог бы заблокировать жертве отслеживание собственных заказов. Hash телефона используется только для подсчёта разных номеров на IP, поэтому требование «по IP и hash телефона» выполнено частично.
+  - Риск ложных срабатываний: общий IP (NAT мобильного оператора, семья) может попасть под (b). Сообщение нейтральное; пороги — именованные константы в `src/lib/tracking-guard.ts`.
 - Response содержит `order_reference`, status, `medicine_id`, item names/quantities/selling snapshots, `items_subtotal`, `order_total` и timestamps. Delivery fee отсутствует.
 - Точный адрес, полный телефон, base price, admin notes и чужие заказы исключены.
 
@@ -336,6 +475,93 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
 - Доставка (курьер): `PATCH /v1/staff/orders/{order_id}/status` с телом `{ "delivery_courier_amount": 20 }`. Курьер меняет только свою часть, не видит долю владельца и не может менять отменённый заказ (`409 ORDER_STATUS_CONFLICT`).
 - `GET /v1/admin/orders*` возвращает `delivery_courier_amount`, `delivery_owner_amount`, `delivery_fee`; dashboard — `delivery_owner_total` и `delivery_courier_total` по доставленным заказам за период.
 - Миграция: `db/migrations/0018_order_delivery_fee.sql` (аддитивная, существующие заказы получают 0/0).
+
+### 8.1.2 Курьер: товары, данные клиента, заработок
+
+- Каталог общий для аптек 1 и 2: `POST /v1/staff/orders` и `POST /v1/staff/orders/{order_id}/items` принимают каталожные позиции для любой аптеки.
+- У каждой каталожной позиции есть необязательное поле `unit_price` (цена для клиента, 0.01–999 999.99, не больше двух знаков после запятой). Без него цена по умолчанию: базовая цена каталога для заказов сотрудников и цена с наценкой для заказов с сайта. При добавлении товара, который уже есть в заказе, `unit_price` обновляет цену этой строки. `base_unit_price` всегда берётся из каталога.
+- **Свои заказы.** Курьер меняет содержимое только тех заказов, которые создал сам (`created_by_staff_account_id = 3`). Это данные клиента, добавление, правка и удаление товаров. Для заказов с сайта эти вызовы от курьера возвращают `403 FORBIDDEN`. Статус и свою плату за доставку курьер меняет во всех заказах. Администратор работает со всеми заказами, как раньше.
+- `GET /v1/staff/orders` и `GET /v1/staff/orders/{order_id}` (курьер) возвращают по каждой позиции `order_item_id`, `selling_unit_price` и `line_total`, а по заказу — `order_total`, `website_order` и `own_order`.
+- `PATCH /v1/staff/orders/{order_id}/customer` с телом `{ "customer_name": "Фарход", "phone": "917123456", "address": "...", "landmark": "..." }`. Работает в любом статусе: имя до 120 символов (можно пустое), адрес 3–500, ориентир 2–300. Увеличивает `edit_revision` и пишет `courier.order.customer_updated` в `admin_audit_log`.
+- `PATCH /v1/staff/orders/{order_id}/items/{order_item_id}` с телом `{ "quantity": 2, "unit_price": "18.50" }` (одно или оба поля) меняет строку. `DELETE` на тот же адрес удаляет её. Итог заказа пересчитывается, в журнал пишется `courier.order.item_updated` или `courier.order.item_removed`. Отменённый заказ не меняется (`409`).
+- **Чек-лист доставки (только заказы с сайта).** `GET /v1/staff/orders` и `GET /v1/staff/orders/{order_id}` возвращают `checklist_steps` — отсортированный массив отмеченных вручную шагов (`[]`, если нет). Чек-лист v2 — 7 шагов владельца. Шаги 1, 2, 6 курьер отмечает сам (задача 010: `COURIER_CHECKLIST_MANUAL_STEPS = {1, 2, 6}`); шаг 3 «Получить подтверждение наличия и цены» выводится из ответов аптек: выполнен, когда `pharmacy_answers_complete = true` или статус `confirmed`/`delivering`/`delivered`. Сохранённые ранее записи шага 3 остаются в таблице и игнорируются при чтении. Шаги 4, 5, 7 выводятся из статуса (4 — `confirmed`/`delivering`/`delivered`, кнопка «Согласовано» `pending → confirmed`; 5 — `delivering`/`delivered`, «Выехал» `confirmed → delivering`; 7 — `delivered`, «Доставлен» `delivering → delivered`) и через этот маршрут не сохраняются. Шаги внутренние для курьера: это не статусы заказа, `order_status_history` и страница `/tracking` не меняются.
+  - `PATCH /v1/staff/orders/{order_id}/checklist` (только курьер, `session_account(courier=True)`) с телом `{ "step": 2, "done": true }`. `done: true` сохраняет шаг, `done: false` снимает; повтор того же запроса — успешный no-op. Ответ: `{ "order_id": "...", "checklist_steps": [1, 2] }`. Каждое реальное изменение пишет `courier.order.checklist_updated` в `admin_audit_log`.
+  - Ошибки: лишние ключи, нецелый шаг, шаг вне 1–7 («Шаг должен быть числом от 1 до 7»), шаг 3 («Этот шаг отмечается ответом аптеки») или шаг 4/5/7 («Этот шаг отмечается сменой статуса заказа») → `400 VALIDATION_ERROR`; отменённый заказ → `409 ORDER_STATUS_CONFLICT`; заказ не с сайта → `409 CHECKLIST_NOT_AVAILABLE`; нет заказа или он удалён → `404 ORDER_NOT_FOUND`.
+  - Хранение: таблица `order_courier_checklist (order_id, step, completed_at, completed_by)` из миграции `db/migrations/0023_order_courier_checklist.sql`. Миграцию нужно применить до деплоя Lambda, иначе список заказов курьера перестанет работать. Для чек-листа v2 новая миграция не нужна (кроме 0023): CHECK `step BETWEEN 1 AND 8` уже допускает 1–7.
+  - Новые записи v2 хранят `completed_by = 'staff:3/v2'`. Любое другое значение `completed_by` — запись старого 8-шагового чек-листа (задача 001), она переводится при чтении в SQL (`_COURIER_ORDER_SELECT` и перечитывание после PATCH): старый 1 → новый 1, старый 4 → новый 2, старые 2, 5, 7 игнорируются (5 и 7 теперь выводятся из статуса). Данные не переписываются.
+  - `done: true` — `INSERT ... ON CONFLICT (order_id, step) DO UPDATE SET completed_by = EXCLUDED.completed_by, completed_at = now() WHERE order_courier_checklist.completed_by <> EXCLUDED.completed_by`: старая запись с тем же номером переводится в v2, повтор v2 — no-op. `done: false` удаляет запись `step = N` с любой меткой; для шага 2 также удаляется старая запись `step = 4` (`completed_by <> 'staff:3/v2'`).
+  - Next.js: `PATCH /api/staff/orders/{order_id}/checklist` проксирует запрос с серверной сессией сотрудника.
+- **Ответы аптек для курьера (задача 010).** `GET /v1/staff/orders` и `GET /v1/staff/orders/{order_id}` дополнительно возвращают:
+  - в каждой позиции `medicines[]`: `pharmacy_id` — текущая аптека позиции (`COALESCE(oi.fulfillment_pharmacy_id, аптека заказа)`), и `answers` — ответы всех аптек `[{pharmacy_id, answer, problem, answered_at}]` (`[]`, если ответов нет);
+  - в заказе: `pharmacy_answers_complete` (у каждой позиции есть ответ её текущей аптеки), `confirmed_total` (десятичная строка: SQL-сумма `line_total` позиций с текущим ответом `available`; `null`, пока ответы неполные или есть `price_differs`), `unavailable_count` (позиции с текущим ответом `unavailable` — их нет ни в одной аптеке, в сумму не входят), `answered_count` и `item_count` (для строки «Ответ аптек: N из M»). Всё считается в одном SQL через LATERAL, без N+1; цены от клиента не принимаются.
+  - Экран курьера показывает по позиции аптеку и ответ («Ватан 1: в наличии», «Ватан 1: нет → Ватан 2 · ждём ответ Ватан 2», «… нет ни в одной аптеке»), «Подтверждённая сумма: X сом» или «Сумма ещё не подтверждена аптекой»; рядом с шагом 4 — предупреждение, если сумма не подтверждена. «Согласовано» в Lambda не блокируется.
+- **Отметки сборки для курьера (задача 011, доработка 1).** `GET /v1/staff/orders` и `GET /v1/staff/orders/{order_id}` дополнительно возвращают:
+  - `assembly` — по одной записи на каждую аптеку сборки, по возрастанию `pharmacy_id`: `[{pharmacy_id, state, started_at, assembled_at}]`, где `state` — `waiting` (отметки нет, «Ждёт сборки»), `assembling` («Собирается») или `assembled` («Собран»). Аптеки сборки — различные текущие аптеки позиций (`COALESCE(oi.fulfillment_pharmacy_id, аптека заказа)`), у которых текущая аптека не ответила `unavailable` (позиции без ответа считаются). Аптека, у которой все позиции «Нет в наличии», в список не попадает. Для заказов, созданных сотрудником, — `[]`. Считается одним LATERAL в `_COURIER_ORDER_SELECT`, без N+1.
+  - `assembly_complete` — `true`, если заказ не отменён и каждая аптека из `assembly` отметила `assembled` (если аптек сборки нет — `true`). Со статусом не связано: сборка идёт, пока заказ «Новый». Пример: заказ 1 → 2, «Ватан 1» собран, у «Ватан 2» отметки нет → `[{pharmacy_id: 1, state: "assembled"}, {pharmacy_id: 2, state: "waiting"}]`, `assembly_complete: false`.
+  - **«Согласовано» ждёт сборку (доработка 1).** `PATCH /v1/staff/orders/{id}/status` курьера с `pending → confirmed` для заказа с сайта возвращает `409 ASSEMBLY_NOT_COMPLETE` «Сначала все аптеки должны отметить «Сборка сделана»», пока хотя бы одна аптека сборки не в `assembled` (проверка под `FOR UPDATE` строки заказа, то же правило, что и `assembly`). Заказы, где собирать нечего (все позиции «Нет в наличии»), и заказы курьера не блокируются. Смена статуса администратором не проверяет отметки. Остальные переходы не меняются.
+  - Экран курьера: блок «Сборка в аптеках» со строками «Ватан 1: собран», «Ватан 2: собирается», «Ватан 2: ждёт сборки»; в списке для заказов `pending` и `confirmed` — короткая строка «Сборка: …». Пока заказ `pending` и `assembly_complete = false`, кнопки «Согласовано» (шаг 4) и «Принять заказ» неактивны, рядом показывается та же причина. Для заказов, уже `confirmed` без полной сборки (до доработки или подтверждённых администратором), у шага 5 и «Выехал» остаётся предупреждение «Не все аптеки отметили «Собран»» — «Выехал» не блокируется. Старая Lambda без `assembly`: ни отметок, ни блокировки.
+  - **Цвета позиций (доработка 1):** позиция, переданная в «Ватан 2» и есть там, — оранжевая «В аптеке 2»; позиции нет ни в «Ватан 1», ни в «Ватан 2» — красная «Нет в наличии в обеих аптеках» (строка товара и метка; токены `--c-orange`/`--c-orange-soft` и `--c-brand`/`--c-brand-soft` в `staff.css`).
+- `GET /v1/staff/order-medicines` также возвращает `selling_unit_price` (цена с наценкой).
+- `GET /v1/staff/earnings`: в каждом дне `daily[]` есть `courier_orders_count` (создал курьер) и `website_orders_count` (заказы с сайта), помимо `orders_count` и `amount`.
+- Все новые маршруты покрыты существующим `ANY /v1/staff/{proxy+}`, менять API Gateway не нужно.
+
+### 8.1.2a Аптека: экран заказов на сборку
+
+- `GET /v1/staff/orders` с сессией аптеки (аккаунты 1 и 2, `list_pharmacy_preparation_orders`) возвращает только заказы с сайта (`created_by_staff_account_id IS NULL`) в статусах `pending`/`confirmed`, где хотя бы одна позиция назначена аптеке из проверенной Lambda сессии. Назначение позиции (задача 010): `COALESCE(oi.fulfillment_pharmacy_id, o.fulfillment_pharmacy_id, 1)`. Аптека видит **только свои позиции**, `base_total` считается по ним. Аптеку нельзя выбрать параметром запроса: любой ключ, кроме `limit` и `cursor` (например, `pharmacy_id`, `account_id`), даёт `400 VALIDATION_ERROR`. Существующие позиции с `NULL` ведут себя как раньше (весь заказ у аптеки заказа).
+- Вне политики `pharmacy_web` (без данных клиента) в каждой позиции возвращаются `order_item_id`, `my_answer` (`available`/`unavailable`/`price_differs`/`null`) и `my_problem`, в заказе — `routed_away_count` (позиции, которые эта аптека ответила «Нет в наличии» и которые теперь у другой аптеки; карточка показывает «Передано в Ватан 2: N поз.»). Если политика скрывает состав (`items`), позиций и кнопок ответа нет.
+- Поля заказа фильтруются политикой `pharmacy_web` (настройки оповещений). По умолчанию включены `order_reference`, `created_at`, `comment` (`notes`), `items`, `quantity`, `status`, `item_base_total`, `base_total`. Имя клиента, телефон, адрес, ориентир, клиентская сумма (`order_total`), `line_total`, `profit` и создатель по умолчанию не возвращаются. Сохранённые владельцем настройки имеют приоритет над этими значениями по умолчанию.
+- Цена для аптеки — базовая (цена аптеки), как в Telegram-оповещении аптеки: в `medicines[]` поля `base_unit_price = COALESCE(base_unit_price, price)` и `base_line_total = base_unit_price * quantity` (оба — десятичные строки из SQL), в заказе — `base_total` (сумма `base_line_total`). `item_base_total` управляет `base_unit_price` и `base_line_total`, `base_total` — итогом. Если они выключены, поля отсутствуют, и экран не показывает столбцы «Цена»/«Сумма» и строку «Итого». Экран не пересчитывает суммы в JS.
+- Всегда (вне политики, без данных клиента) возвращаются `waiting_since` и `awaiting_response`. С задачи 010: `awaiting_response = true`, пока заказ `pending` и у этой аптеки есть назначенная позиция без её ответа; `waiting_since` — самое раннее `COALESCE(oi.pharmacy_assigned_at, o.created_at)` среди таких позиций (для «Ватан 2» отсчёт идёт с момента передачи), иначе `created_at`. Экран показывает «Ожидает обработки N мин» только при `awaiting_response: true`: до 10 мин нейтрально, 10–19 мин жёлтым, от 20 мин красным; счётчик обновляется раз в 30 с без перезагрузки. Старая Lambda без этих полей: бейдж, цены и кнопки ответа не показываются.
+- **Ответ фармацевта по позициям (задача 010).** `POST /v1/staff/orders/{order_id}/pharmacy-answers` (только аптека, `session_account(pharmacy=True)`; курьер → `403`). Аптека берётся только из сессии.
+  - Тело: `{ "answers": [{ "order_item_id": 81, "answer": "available" }, { "order_item_id": 82, "answer": "price_differs", "problem": "цена 45 вместо 40" }] }`. Ровно ключ `answers`; в каждой записи ровно `order_item_id` и `answer`, плюс необязательный `problem` (и с задачи 011 — `base_unit_price` для «Ватан 2», см. ниже). Любые другие ключи (цены клиента, `pharmacy_id`) → `400`. 1–50 записей, без повторов `order_item_id`. `problem` (пробелы схлопываются): обязателен для `price_differs` (3–300 символов), необязателен для `unavailable` (если указан — 3–300), запрещён для `available`.
+  - Ошибки: валидация → `400 VALIDATION_ERROR`; нет заказа, он удалён, не с сайта или у этой аптеки нет в нём ни одной позиции → `404 ORDER_NOT_FOUND`; статус ≠ `pending` → `409 ORDER_STATUS_CONFLICT`; позиции нет в заказе → `404 ORDER_ITEM_NOT_FOUND`; позиция назначена другой аптеке → `403 FORBIDDEN`. При любой ошибке ничего не пишется.
+  - Строка заказа блокируется `FOR UPDATE`, позиции — `FOR UPDATE OF oi`. Ответы пишутся upsert-ом в `order_item_pharmacy_answers (order_item_id, pharmacy_id, answer, problem, answered_at, answered_by = 'staff:N')`. Аптека может менять свой ответ, пока заказ `pending` и позиция у неё.
+  - **Маршрутизация:** `unavailable` от «Ватан 1» в той же транзакции ставит позиции `fulfillment_pharmacy_id = 2`, `pharmacy_assigned_at = now()`; уходят только эти позиции. После этого «Ватан 1» не может изменить ответ по ней (`403`), кроме точного повтора. `price_differs` не маршрутизируется. `unavailable` от «Ватан 2» окончательный («нет ни в одной аптеке»), обратно в «Ватан 1» ничего не уходит; позиции заказов, изначально назначенных «Ватан 2», в «Ватан 1» не уходят.
+  - Повтор того же запроса — no-op без записи и без аудита, ответ тот же. Каждый изменяющий запрос пишет одну строку `admin_audit_log`: `actor_id = 'staff:N'`, `action = 'pharmacy.order.items_answered'`, `details = {pharmacy_id, items: [{order_item_id, answer}], routed_to_pharmacy_2: [ids]}` без данных клиента. `orders.status` и `order_status_history` не меняются.
+  - Ответ: `{ order_id, items: [{order_item_id, my_answer, my_problem}], routed_away_count, awaiting_response }` по позициям этой аптеки.
+  - **Правки администратора:** изменение количества (`item-adjustments`, повторное добавление того же товара через `POST /v1/admin/orders/{id}/items`) или базовой цены (`order_item_id` + `base_unit_price`) удаляет ответ текущей аптеки этой позиции; назначение сохраняется. Изменение только цены клиента ответ не удаляет. Новые позиции начинают без назначения (аптека заказа).
+  - Next.js: `POST /api/staff/orders/{order_id}/pharmacy-answers` проверяет тело той же валидацией (`src/lib/pharmacy-answers.ts`) и проксирует с серверной сессией. Экран: «В наличии, цена верна» отвечает `available` по всем неотвеченным позициям; «Нет в наличии / цена отличается» открывает выбор по каждой позиции с полем проблемы.
+  - Миграция `db/migrations/0024_order_item_pharmacy_answers.sql` (аддитивная): применить **до** деплоя Lambda, иначе списки заказов аптеки и курьера перестанут работать. Telegram-оповещения не меняются: «Ватан 2» узнаёт о переданных позициях только на экране `/staff/orders`.
+- **Сборка: «Начать сборку» / «Сборка сделана» (задача 011, доработка 1).** Внутренние отметки аптеки по своей части заказа. Сборка идёт, пока заказ «Новый» (`pending`), до звонка курьера клиенту; уже согласованные заказы тоже принимают отметки. Статусы клиента (`pending → confirmed → delivering → delivered`) и `/tracking` не меняются, новых статусов нет.
+  - Поток: «Ватан 1» нажимает «Начать сборку»; позицию, которой нет, отмечает «Нет в наличии» (ответ задачи 010) — она автоматически уходит в «Ватан 2»; остальное собирает и нажимает «Сборка сделана». «Ватан 2» по каждой переданной позиции: «В наличии» (цену аптеки можно оставить или изменить и сохранить) или «Нет в наличии», затем «Собрано». Часть «Ватан 2» становится «Собран», когда каждая её позиция «Собрано» или «Нет в наличии». Когда все аптеки сборки «Собран», курьер звонит клиенту и нажимает «Согласовано» (`pending → confirmed`, см. §8.1.2).
+  - В списке аптеки вне политики `pharmacy_web` (без данных клиента) в каждом заказе: `assembly_state` (`null` = «Ждёт сборки», `assembling`, `assembled`) — отметка этой аптеки; `assembly_available` — `true`, если статус `pending` или `confirmed` и у этой аптеки есть позиция для сборки (назначена ей, и её ответ не `unavailable`; позиция без ответа считается). В каждой позиции `medicines[]`: `routed_here` (позиция передана сюда из «Ватан 1», `pharmacy_assigned_at IS NOT NULL`) и `collected` (эта аптека отметила «Собрано»). Если политика показывает состав (`items`) — `routed_away`: позиции, которые эта аптека передала другой, `[{order_item_id, medicine_name, quantity?, pharmacy_id, answer}]` с ответом той аптеки (`quantity` — по политике `quantity`). Поля задачи 010 не меняются.
+  - `POST /v1/staff/orders/{order_id}/assembly` (только аптека, `session_account(pharmacy=True)`; курьер → `403`). Тело ровно `{ "state": "assembling" }` или `{ "state": "assembled" }`; любые другие ключи (включая `pharmacy_id`) и значения → `400 VALIDATION_ERROR`. Аптека берётся только из сессии.
+    - Ошибки (по порядку под `FOR UPDATE` строки заказа): нет заказа, он удалён, не с сайта или у аптеки нет в нём назначенных позиций → `404 ORDER_NOT_FOUND`; статус не `pending`/`confirmed` → `409 ORDER_STATUS_CONFLICT` «Сборка доступна только для нового или согласованного заказа»; все позиции этой аптеки «Нет в наличии» → `409 NOTHING_TO_ASSEMBLE` «Нечего собирать»; пропуск (нет отметки → `assembled`) или возврат (`assembled` → `assembling`) → `409 ASSEMBLY_STATE_CONFLICT`. При любой ошибке ничего не пишется.
+    - Переходы только вперёд: нет отметки → `assembling` → `assembled`; снять отметку нельзя. Переход — upsert строки `(order_id, аптека сессии)` в `order_pharmacy_assembly`; `assembled` ставит `assembled_at = now()`. «Сборка сделана» на заказе `pending` записывает `available` по ещё неотвеченным позициям этой аптеки (они собраны), чтобы курьер получил подтверждённую сумму. Повтор текущего состояния — no-op без записи и аудита. Каждое изменение пишет одну строку `admin_audit_log`: `action = 'pharmacy.order.assembly_marked'`, `details = {pharmacy_id, from_state, to_state}` и, если были такие позиции, `answered_available: [ids]`; без данных клиента. `orders.status` и `order_status_history` не меняются.
+    - Ответ: `{ order_id, pharmacy_id, state, started_at, assembled_at }`.
+  - `POST /v1/staff/orders/{order_id}/assembly/items` — «Собрано» по одной позиции (только аптека). Тело ровно `{ "order_item_id": 82 }`. Позиция должна быть назначена аптеке сессии (`403 FORBIDDEN`, иначе), заказ `pending`/`confirmed` (`409 ORDER_STATUS_CONFLICT`), её ответ — `available` (`409 ITEM_NOT_AVAILABLE` «Сначала отметьте «В наличии»»); нет позиции → `404 ORDER_ITEM_NOT_FOUND`. Пишет `order_item_assembly (order_item_id, pharmacy_id, collected_at, collected_by)` и одну строку аудита `pharmacy.order.item_collected` `{pharmacy_id, order_item_id}`; повтор — no-op. Часть аптеки следует за позициями одним SQL: хотя бы одна «Собрано» → `assembling`, все позиции «Собрано» или «Нет в наличии» → `assembled` (только вперёд; то же пересчитывается после ответов этой аптеки). Ответ: `{ order_id, order_item_id, pharmacy_id, collected: true, assembly_state }`.
+  - **Цена «Ватан 2» при сборке.** В `POST .../pharmacy-answers` запись с `answer: "available"` может содержать `base_unit_price` (строка или число, 0,01–999 999,99, не больше двух знаков; запятая допускается) — только для аптеки 2 (`403` для аптеки 1) и только с `available` (`400` иначе). Это лишь ввод: Lambda ставит `base_unit_price`, пересчитывает цену клиента по сохранённому правилу наценки `vatan_selling_unit_price(base)` (как при оформлении), `line_total = ROUND(selling × quantity, 2)` и итоги заказа (`items_subtotal = order_total = total_price = SUM(line_total)`, как правка базовой цены администратором), пишет аудит `pharmacy.order.item_price_changed` `{pharmacy_id, items: [{order_item_id, previous_base_unit_price, new_base_unit_price, new_selling_unit_price}]}`. Та же цена — не изменение. Суммы от клиента не принимаются.
+  - Правки администратора после сборки (количество, базовая цена) отметки не сбрасывают, поэтому «Собран» может устареть.
+  - Next.js: `POST /api/staff/orders/{order_id}/assembly` и `POST /api/staff/orders/{order_id}/assembly/items` проверяют тело той же валидацией (`src/lib/pharmacy-assembly.ts`) и проксируют с серверной сессией. Карточка аптеки при `assembly_available: true` показывает отметку («Сборка: Ждёт сборки / Собирается / Собран») и кнопку «Начать сборку» → «Сборка сделана» (у «Ватан 2», где все позиции переданы, вместо неё — блок «Переданы из Ватан 1» с действиями по позициям); при `409` — сообщение и обновление карточки. Цвета: переданная и есть в «Ватан 2» — оранжевая «В аптеке 2», нет в обеих — красная «Нет в наличии в обеих аптеках»; у «Ватан 1» под «Передано в Ватан 2» — список с этими метками. Без новых полей (старая Lambda) кнопок нет. Статус `confirmed` на карточке аптеки подписан «Согласован».
+  - Миграция `db/migrations/0025_order_pharmacy_assembly.sql` (аддитивная): таблицы `order_pharmacy_assembly (order_id, pharmacy_id, state, started_at, assembled_at, updated_by)`, PK `(order_id, pharmacy_id)`, и `order_item_assembly (order_item_id, pharmacy_id, collected_at, collected_by)`, PK `(order_item_id, pharmacy_id)`; обе `ON DELETE CASCADE`. **Порядок выкладки:** 1) применить 0025 к RDS; 2) задеплоить `admin-api-v1.zip`; 3) задеплоить Vercel. Новая Lambda без 0025 ломает списки заказов аптеки и курьера и «Согласовано». После деплоя «Новые» заказы с сайта нельзя согласовать, пока аптеки не отметят сборку. Оповещений об отметках нет (задача 012).
+- **Оповещения аптеки (задача 012).** В каждом заказе списка аптеки вне политики `pharmacy_web` (без данных клиента, без миграции, без новых записей в БД):
+  - `needs_attention: boolean` — `true`, пока эта аптека не отреагировала на заказ: нет её отметки сборки (`order_pharmacy_assembly`), нет её ответа (010) ни по одной назначенной ей позиции, нет «Собрано» по позиции и нет её ответа по позиции, которая уже передана другой аптеке (`routed_away_count = 0`; «Нет в наличии» от «Ватан 1» уводит позицию из её списка, но это тоже реакция). Действует для `pending` и `confirmed`.
+  - `attention_since: ISO | null` — не `null` только при `needs_attention: true`: самое раннее `pharmacy_assigned_at` назначенных позиций, если все они переданы сюда (для «Ватан 2» отсчёт с момента передачи), иначе `created_at` заказа.
+  - Экран (`src/components/PharmacyOrderAlerts.tsx` в `StaffShell` для роли `pharmacy`) опрашивает `GET /api/staff/orders` (первая страница очереди) каждые 30 с и сразу при возврате на вкладку. Заказ с `needs_attention: true` вызывает тост «Новый заказ № {order_reference}» / «Ожидает ответа N мин» при первом появлении на странице и затем не чаще раза в 180 с (`REMIND_MS`, `src/lib/pharmacy-alerts.ts`); при `needs_attention: false` или уходе из очереди тост убирается и повторы прекращаются. Заголовок вкладки — `(N)`, на `/staff/orders` — плашка «Новых заказов без ответа: N» и панель разрешения уведомлений. Звук — по кнопке «Включить звук» (ключ `localStorage` `vatan-pharmacy-sound`, отдельно от курьерского `vatan-order-sound`); после перезагрузки звук включается первым касанием. Системное уведомление — только при разрешении и скрытой вкладке, в `try/catch`. Текст тоста, уведомления и заголовка — только номер заказа и минуты, без данных клиента при любой политике. Старая Lambda без `needs_attention` — без напоминаний. Web Push при закрытом приложении — отдельная задача 012b.
+- Экран `/staff/orders` аптеки следует политике `pharmacy_web`, которую уже применила Lambda: поле показывается, если оно есть в ответе (владелец включил его в настройках оповещений), и скрыто, если его нет. Так выводятся имя клиента, телефон (ссылка `tel:`), адрес, ориентир, источник, создатель («Сайт» / «Сотрудник N»), столбец «Клиенту» (`line_total`, только если он есть у всех позиций), клиентская сумма (`order_total`) и разница (`profit`). По умолчанию все эти поля выключены, поэтому аптека их не видит. Модель карточки — `pharmacyOrderView` в `src/lib/pharmacy-order.ts`.
+- Изменения задачи 008 вступают в силу после деплоя `admin-api-v1.zip`; задача 010 требует сначала миграцию 0024, затем деплой Lambda; задача 011 — сначала миграцию 0025, затем Lambda, затем Vercel.
+
+### 8.1.3 Обзор заказов для администратора
+
+- `GET /v1/admin/orders/insights?days=1|7|30|90` (по умолчанию 7, календарные дни Душанбе). Возвращает:
+  - `live` — сколько заказов сейчас новых, собирается и в пути, и до 12 новых заказов;
+  - `totals` — за период: заказано (шт. и сумма), доставлено (шт. и сумма), средний чек, прибыль (цена клиента − цена аптеки), отменено, часть доставки курьера и владельца, сколько доставок сделал владелец (`delivery_owner_amount > 0` и `delivery_courier_amount = 0`);
+  - `daily` — по каждому дню периода, включая пустые: доставки сайта, курьера и аптек (шт. и суммы), прибыль и доли доставки;
+  - `top_medicines` — 10 лекарств с наибольшей суммой;
+  - `hours` — заказы по часам;
+  - `clients` — новые и постоянные номера;
+  - `delivered_orders` — до 200 доставленных заказов с прибылью и долями доставки.
+- `GET /v1/admin/orders/delivered-day` дополнительно отдаёт в `summary` поля `total_sales`, `website_sales`, `courier_sales`, `pharmacy_sales`, `courier_fee`, `owner_fee`, `owner_delivered`.
+- `GET /v1/admin/orders/insights/orders?days=1|7|30|90&metric=…&limit=1..100&cursor=…` — заказы (или клиенты), из которых состоит одна карточка обзора. Начало периода, фильтры и формулы `sales`/`base` — те же общие SQL-фрагменты, что в `orders/insights`, поэтому `summary` совпадает с карточкой.
+  - `days` — по умолчанию 7; `metric` — обязателен; `limit` — по умолчанию 50, максимум 100. Любой другой параметр, неверный `days`/`metric`/`limit` или испорченный `cursor` — `400 VALIDATION_ERROR`. `metric` выбирает один из фиксированных SQL-фрагментов и никогда не подставляется в SQL.
+  - `ordered` — не удалённые заказы, созданные за период, `status <> 'cancelled'`, по `created_at DESC, id DESC`. `summary`: `count` = `totals.ordered_count`, `sum` (по `order_total`) = `totals.ordered_sum`.
+  - `cancelled` — то же, но `status = 'cancelled'`. `summary.count` = `totals.cancelled_count`.
+  - `delivered` и `average_check` — доставленные заказы с датой доставки в периоде (`DELIVERED_DAY_CTE`), по `delivered_at DESC, id DESC`. `summary`: `count` = `totals.delivered_count`, `sum` (по `sales`) = `totals.delivered_sum`; средний чек = `sum / count`.
+  - `profit` — те же доставленные заказы, по `profit ASC, id ASC` (сначала убыточные). `summary.profit` = `totals.profit`.
+  - Строка заказа: `order_id` (`ord_…` или `legacy_N`), `order_reference`, `customer_name`, `status`, `created_at`, `delivered_at` (только для доставленных метрик), `created_by_staff_account_id`, `order_total`, `sales`, `base`, `profit` (= `sales − base`), `delivery_courier_amount`, `delivery_owner_amount`. `summary` заказных метрик: `count`, `sum`, `profit` по всем строкам, а не только по странице.
+  - `clients` — по одной строке на `phone_normalized` с неотменённым заказом, созданным в периоде: `customer_name` и `phone` из последнего заказа, `orders_in_period`, `first_order_at`, `is_new` (`first_order_at >=` начала периода). Порядок `first_order_at DESC`, при равенстве — по внутреннему id первого заказа (телефон не попадает в `cursor`). `summary`: `new_clients`, `returning_clients` = `clients`.
+  - Ответ: `{ metric, period_days, from, to, currency, summary, data, page: { next_cursor, has_more }, request_id }`. Пагинация keyset; `cursor` действителен только для той же `metric`.
+- Только чтение. Новые маршруты покрыты `ANY /v1/admin/{proxy+}`.
 
 ### 8.2 Categories
 
@@ -423,7 +649,12 @@ Responses и logs не содержат stack trace, SQL, environment values, cr
 
 - Public, admin и internal principals имеют разные permissions; unknown routes/actions — deny-by-default.
 - Текущая локальная development-конфигурация и API key сохраняются на Phase 2. Ротация выполняется при финальном production deployment; до этого ключ не переносится в новые client-side paths или logs.
-- Create order и tracking имеют отдельные per-IP/phone-hash rate limits.
+- Create order и tracking имеют отдельные per-IP/phone-hash rate limits (целевое требование). Текущее состояние:
+  - **Create order — реализован только per-IP лимит в Next.js** (`src/app/api/checkout/route.ts`, `src/lib/rate-limit.ts`): fixed window, не более **5** попыток за **10 минут** на один client IP (первый адрес `x-forwarded-for`, затем `x-real-ip`, иначе общий bucket `unknown`), до **10 000** отслеживаемых IP. Квоту расходуют только запросы с `Idempotency-Key` и валидным телом; повтор с тем же `Idempotency-Key` тоже считается попыткой. Лимит 5 покрывает один заказ, два повтора и одно исправление (например, после `ORDER_ITEMS_UNAVAILABLE`).
+  - Сверх лимита ответ `429` с заголовком `Retry-After: <секунды>` и телом `{ "error": { "code": "RATE_LIMITED", "message": "Слишком много попыток оформить заказ. Подождите несколько минут и попробуйте снова." } }`; Lambda и Telegram-уведомления не вызываются. Корзина, данные формы и pending idempotency key в браузере сохраняются.
+  - Счётчик хранится в памяти каждого Vercel instance: лимит не глобальный (фактический потолок — лимит × число тёплых instances), сбрасывается при cold start; это сдерживание флуда с одного IP, а не жёсткая гарантия.
+  - **Не реализовано:** Lambda/RDS-side лимит для create order и лимит по hash телефона. Требует миграции и деплоя Lambda (или Vercel KV/Upstash) — отдельная задача.
+  - Tracking (`/api/tracking`) имеет собственный per-IP guard в памяти Next.js: не более 5 поисков в минуту (`RATE_LIMITED`) и блокировка на 5 часов при 5 разных номерах за минуту (`TRACKING_BLOCKED`); оба ответа — `429` с `Retry-After`. Подробности и ограничения (per-instance, блокировка не гарантирована) — в §7. Lambda/RDS-side лимит для tracking не реализован.
 - Next.js задаёт upstream timeout и отмену. Автоматические retries разрешены только для safe reads; order retry — только с тем же idempotency key.
 - Admin reads/mutations используют `no-store`; search/get/categories могут иметь короткий TTL с invalidation после sync.
 - Lambda использует parameterized SQL, transactions и DB constraints для prices, quantities, statuses, idempotency и `medicine_id` references.

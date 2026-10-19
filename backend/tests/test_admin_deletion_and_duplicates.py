@@ -51,6 +51,20 @@ class DuplicateGroupingTests(unittest.TestCase):
 
 
 class OrderDeletionTests(unittest.TestCase):
+    def test_delivered_order_can_be_soft_deleted_and_audited(self):
+        cursor = MagicMock()
+        cursor.fetchone.side_effect = [
+            {"id": 8, "status": "delivered", "deleted_at": None, "reference": "VAT-8"},
+            {"deleted_at": datetime(2026, 10, 18, tzinfo=timezone.utc)},
+        ]
+        with patch("backend.v1.admin_api.lambda_function.transaction", fake_transaction_for(cursor)):
+            result = delete_order("order_8", "admin:test", "req_test")
+        self.assertTrue(result["deleted"])
+        statements = "\n".join(call.args[0] for call in cursor.execute.call_args_list)
+        self.assertIn("UPDATE orders", statements)
+        self.assertIn("INSERT INTO admin_audit_log", statements)
+        self.assertNotIn("DELETE FROM orders", statements)
+
     def test_soft_delete_preserves_dependencies_and_writes_audit(self):
         cursor = MagicMock()
         cursor.fetchone.side_effect = [

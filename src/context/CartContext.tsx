@@ -65,7 +65,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             && Number.isInteger((item as CartItem).medicine_id)
             && typeof (item as CartItem).medicine_name === 'string'
             && Number.isFinite((item as CartItem).selling_unit_price)
-            && Number.isInteger((item as CartItem).quantity)
+            && Number.isFinite((item as CartItem).quantity)
+            && (item as CartItem).quantity >= 0.5 && (item as CartItem).quantity <= 99
+            && Number.isInteger((item as CartItem).quantity * 2)
           ))) {
             const normalized = (parsed as CartItem[]).map((item) => ({
               ...item,

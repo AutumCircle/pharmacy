@@ -64,7 +64,17 @@ def build() -> Path:
         })
     telegram_destination = OUTPUT / "telegram-order-notifier.zip"
     telegram_source = ROOT / "backend" / "v1" / "telegram_notifier" / "lambda_function.py"
-    _write_deterministic_zip(telegram_destination, [("lambda_function.py", telegram_source)])
+    telegram_shared = ROOT / "backend" / "v1" / "shared" / "order_notification_settings.py"
+    _write_deterministic_zip(telegram_destination, [
+        ("lambda_function.py", telegram_source),
+        ("backend/__init__.py", ROOT / "backend" / "__init__.py"),
+        ("backend/v1/__init__.py", ROOT / "backend" / "v1" / "__init__.py"),
+        ("backend/v1/shared/__init__.py", ROOT / "backend" / "v1" / "shared" / "__init__.py"),
+        ("backend/v1/shared/contract.py", ROOT / "backend" / "v1" / "shared" / "contract.py"),
+        ("backend/v1/shared/order_notification_settings.py", telegram_shared),
+        ("backend/v1/shared/order_notification_messages.py", ROOT / "backend" / "v1" / "shared" / "order_notification_messages.py"),
+        ("backend/v1/shared/order_time.py", ROOT / "backend" / "v1" / "shared" / "order_time.py"),
+    ])
     telegram_payload = telegram_destination.read_bytes()
     manifest_packages.append({
         "file": telegram_destination.name,
@@ -192,6 +202,48 @@ def build() -> Path:
     manifest_packages.append({
         "file": collections_migration_destination.name, "handler": "lambda_function.lambda_handler",
         "sha256": hashlib.sha256(collections_migration_payload).hexdigest(), "size_bytes": len(collections_migration_payload),
+    })
+    utm_events_migration_destination = OUTPUT / "migration-0020-utm-events-once.zip"
+    _write_deterministic_zip(utm_events_migration_destination, [
+        ("lambda_function.py", ROOT / "backend" / "operations" / "utm_events_migration_once" / "lambda_function.py"),
+        ("migration.sql", ROOT / "db" / "migrations" / "0020_utm_link_events.sql"),
+    ])
+    utm_events_migration_payload = utm_events_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": utm_events_migration_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(utm_events_migration_payload).hexdigest(), "size_bytes": len(utm_events_migration_payload),
+    })
+    notification_migration_destination = OUTPUT / "migration-0021-order-notifications-once.zip"
+    _write_deterministic_zip(notification_migration_destination, [
+        ("lambda_function.py", ROOT / "backend" / "operations" / "order_notification_migration_once" / "lambda_function.py"),
+        ("migration.sql", ROOT / "db" / "migrations" / "0021_order_notification_settings.sql"),
+    ])
+    notification_migration_payload = notification_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": notification_migration_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(notification_migration_payload).hexdigest(),
+        "size_bytes": len(notification_migration_payload),
+    })
+    order_editing_migration_destination = OUTPUT / "migration-0022-order-editing-once.zip"
+    _write_deterministic_zip(order_editing_migration_destination, [
+        ("lambda_function.py", ROOT / "backend" / "operations" / "order_editing_migration_once" / "lambda_function.py"),
+        ("migration.sql", ROOT / "backend" / "operations" / "order_editing_migration_once" / "migration.sql"),
+    ])
+    order_editing_migration_payload = order_editing_migration_destination.read_bytes()
+    manifest_packages.append({
+        "file": order_editing_migration_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(order_editing_migration_payload).hexdigest(),
+        "size_bytes": len(order_editing_migration_payload),
+    })
+    tenths_destination = OUTPUT / "migration-0026-order-quantity-tenths-once.zip"
+    _write_deterministic_zip(tenths_destination, [
+        ("lambda_function.py", ROOT / "backend" / "operations" / "order_quantity_tenths_once" / "lambda_function.py"),
+        ("migration.sql", ROOT / "db" / "migrations" / "0026_order_quantity_tenths.sql"),
+    ])
+    tenths_payload = tenths_destination.read_bytes()
+    manifest_packages.append({
+        "file": tenths_destination.name, "handler": "lambda_function.lambda_handler",
+        "sha256": hashlib.sha256(tenths_payload).hexdigest(), "size_bytes": len(tenths_payload),
     })
     manifest = {
         "format": "vatan-lambda-packages/v1",

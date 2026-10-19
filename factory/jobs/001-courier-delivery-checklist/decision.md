@@ -1,0 +1,5 @@
+ESCALATE
+All four round-1 reviews say PASS. build.md checks off all 8 acceptance criteria (UI not clicked in a browser; backend suite has only the 2 known main failures). The owner's status answer is applied: no new statuses, step 3 is pending->confirmed, step 4 is a checkbox only. No change to agent.py, auth, secrets or infra, and no new dependency.
+Not safe to merge without a human: the change adds migration `db/migrations/0023_order_courier_checklist.sql`, which must be applied to live RDS. The shared `_COURIER_ORDER_SELECT` now joins `order_courier_checklist`, so if the new Lambda goes out before the table exists, the courier order list and card both fail.
+Before `/factory approve 001-courier-delivery-checklist` a human must: (1) take an RDS backup and try 0023 on staging; (2) commit to this order: apply 0023 to RDS, then deploy the admin Lambda, then Vercel. Make sure merging to main does not auto-deploy the Lambda before the table exists.
+Also confirm the Russian step titles and hints the builder wrote in `src/lib/courier-checklist.ts` (the original feature text was not in the repo), or reword them with `/factory rework`.

@@ -3,6 +3,10 @@ import { listLocalAdminBanners, withLocalBanners } from '@/lib/local-banners';
 
 import type { ApiErrorResponse, ApiSuccessResponse, OrderStatus } from './types';
 import type {
+  OrdersInsights,
+  OrdersInsightsPeriod,
+  OrdersDrillMetric,
+  OrdersDrillResponse,
   AdminApiListResponse,
   AdminCatalogStats,
   AdminCategory,
@@ -28,13 +32,17 @@ import type {
   AdminNumberedListResponse,
   AdminOrderDetail,
   AdminOrderSummary,
+  DeliveredDayResponse,
   AdminPricingSettings,
   AdminContactSettings,
+  AdminNotificationSettings,
+  AdminNotificationPreview,
   AdminProductCarousel,
   CatalogSyncSummary,
 } from './admin-types';
 import { ApiV1Error } from './server';
 import type { StaffAccount } from './staff-types';
+import type { StaffOrderMedicine } from './staff-types';
 
 export function listStaffAccounts(): Promise<ApiSuccessResponse<StaffAccount[]>> {
   return request('/v1/admin/staff');
@@ -171,6 +179,49 @@ export function listAdminOrders(values: {
 
 export function getAdminOrder(orderId: string): Promise<ApiSuccessResponse<AdminOrderDetail>> {
   return request(`/v1/admin/orders/${encodeURIComponent(orderId)}`);
+}
+
+export function updateAdminOrderCustomer(orderId: string, body: {
+  customer_name: string; phone: string; address: string; landmark: string | null;
+  comment: string | null; expected_revision: number;
+}): Promise<ApiSuccessResponse<{ order_id: string; edit_revision: number }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}`, { method: 'PATCH', body });
+}
+
+export function getAdminOrdersInsights(days: OrdersInsightsPeriod): Promise<ApiSuccessResponse<OrdersInsights>> {
+  return request(`/v1/admin/orders/insights${queryString({ days })}`);
+}
+
+export function getAdminOrdersInsightsDrilldown(
+  days: OrdersInsightsPeriod, metric: OrdersDrillMetric, cursor?: string,
+): Promise<OrdersDrillResponse> {
+  return request(`/v1/admin/orders/insights/orders${queryString({ days, metric, cursor, limit: 50 })}`);
+}
+
+export function listDeliveredAdminOrdersByDay(date: string, cursor?: string): Promise<DeliveredDayResponse> {
+  return request(`/v1/admin/orders/delivered-day${queryString({ date, cursor, limit: 30 })}`);
+}
+
+export function searchAdminOrderMedicines(query: string): Promise<AdminNumberedListResponse<StaffOrderMedicine>> {
+  return request(`/v1/admin/order-medicines${queryString({ q: query })}`);
+}
+
+export function addAdminOrderItems(orderId: string, items: Array<{ medicine_id: number; quantity: number; unit_price?: string }>, idempotencyKey: string): Promise<ApiSuccessResponse<{ added: number; quantity_increased: number }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/items`, {
+    method: 'POST', body: { items }, headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+export function addAdminManualOrderItems(orderId: string, manualItems: Array<{ medicine_name: string; price: string; quantity: number }>, idempotencyKey: string): Promise<ApiSuccessResponse<{ added: number; items_subtotal: string }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/manual-items`, {
+    method: 'POST', body: { manual_items: manualItems }, headers: { 'Idempotency-Key': idempotencyKey },
+  });
+}
+
+export function adjustAdminOrderItem(orderId: string, orderItemId: number, expectedQuantity: number, quantity: number): Promise<ApiSuccessResponse<{ removed: boolean; quantity: number; order_total: number | string }>> {
+  return request(`/v1/admin/orders/${encodeURIComponent(orderId)}/item-adjustments`, {
+    method: 'PATCH', body: { order_item_id: orderItemId, expected_quantity: expectedQuantity, quantity },
+  });
 }
 
 export function updateAdminOrderStatus(
@@ -581,8 +632,21 @@ export function getAdminCollectionStats(
   return request(`/v1/admin/collection-stats${queryString(values)}`);
 }
 
+export function getAdminNotificationSettings(): Promise<ApiSuccessResponse<AdminNotificationSettings>> {
+  return request('/v1/admin/order-notification-settings');
+}
+
+export function updateAdminNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>): Promise<ApiSuccessResponse<AdminNotificationSettings>> {
+  return request('/v1/admin/order-notification-settings', { method: 'PATCH', body });
+}
+
+export function previewAdminNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>): Promise<ApiSuccessResponse<AdminNotificationPreview>> {
+  return request('/v1/admin/order-notification-preview', { method: 'POST', body });
+}
+
 export function resetAdminCollectionStats(confirmation: string): Promise<ApiSuccessResponse<{
   events_deleted: number;
+  utm_events_deleted: number;
   orders_attribution_cleared: number;
 }>> {
   return request('/v1/admin/collection-stats/reset', {

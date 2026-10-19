@@ -113,6 +113,40 @@ def validate_collection_event(payload: Any) -> dict[str, Any]:
     }
 
 
+def validate_utm_link_event(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ContractError("VALIDATION_ERROR", "Request body must be a JSON object")
+    allowed = {"path", "product_id", "visitor_id", "referrer", "user_agent", *UTM_FIELDS}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ContractError(
+            "VALIDATION_ERROR", "Request validation failed",
+            fields={field: "field is not allowed" for field in unknown},
+        )
+    visitor_id = payload.get("visitor_id")
+    if not isinstance(visitor_id, str) or not VISITOR_ID_PATTERN.match(visitor_id):
+        raise ContractError("VALIDATION_ERROR", "Request validation failed", fields={"visitor_id": "is invalid"})
+    path = clean_text(payload.get("path"), 500)
+    if path is None or not path.startswith("/"):
+        raise ContractError("VALIDATION_ERROR", "Request validation failed", fields={"path": "is invalid"})
+    product_id = payload.get("product_id")
+    if product_id is not None and (
+        isinstance(product_id, bool) or not isinstance(product_id, int) or product_id <= 0
+    ):
+        raise ContractError("VALIDATION_ERROR", "Request validation failed", fields={"product_id": "is invalid"})
+    utm = normalize_utm(payload)
+    if not any(utm.values()):
+        raise ContractError("VALIDATION_ERROR", "At least one UTM label is required")
+    return {
+        "path": path,
+        "product_id": product_id,
+        "visitor_id": visitor_id,
+        "referrer": clean_text(payload.get("referrer"), 500),
+        "user_agent": payload.get("user_agent") if isinstance(payload.get("user_agent"), str) else "",
+        **utm,
+    }
+
+
 def parse_product_ids(value: Any) -> list[int]:
     """Accept a list of positive integers (admin form sends it already split)."""
 

@@ -310,6 +310,40 @@ def collection_stats(query: dict[str, Any]) -> dict[str, Any]:
              "orders": int(row["orders"]), "orders_total": row["orders_total"]}
             for row in cur.fetchall()
         ]
+        cur.execute(
+            f"""
+            SELECT COALESCE(e.utm_content, '') AS utm_content,
+                   COALESCE(e.utm_source, '') AS utm_source,
+                   COALESCE(e.utm_medium, '') AS utm_medium,
+                   COALESCE(e.utm_campaign, '') AS utm_campaign,
+                   e.product_id, MAX(m.name) AS product_name,
+                   COUNT(*) AS views, COUNT(DISTINCT e.visitor_id) AS unique_visitors
+            FROM utm_link_events e
+            LEFT JOIN medicines m ON m.id = e.product_id
+            WHERE TRUE {event_range}
+            GROUP BY 1, 2, 3, 4, e.product_id
+            ORDER BY COUNT(*) DESC, 4, 1
+            LIMIT 500
+            """,
+            tuple(event_params),
+        )
+        order_by_utm = {
+            (row["utm_content"], row["utm_source"], row["utm_medium"], row["utm_campaign"]): row
+            for row in utm_orders
+        }
+        utm_links = []
+        for row in cur.fetchall():
+            order = order_by_utm.get(
+                (row["utm_content"], row["utm_source"], row["utm_medium"], row["utm_campaign"]),
+                {},
+            )
+            utm_links.append({
+                "utm_content": row["utm_content"], "utm_source": row["utm_source"],
+                "utm_medium": row["utm_medium"], "utm_campaign": row["utm_campaign"],
+                "product_id": row["product_id"], "product_name": row["product_name"],
+                "views": int(row["views"]), "unique_visitors": int(row["unique_visitors"]),
+                "orders": int(order.get("orders", 0)), "orders_total": order.get("orders_total", 0),
+            })
 
         products: list[dict[str, Any]] | None = None
         if slug_filter:
@@ -367,6 +401,7 @@ def collection_stats(query: dict[str, Any]) -> dict[str, Any]:
         "to": end.isoformat() if end else None,
         "time_zone": STATS_TIME_ZONE,
         "collections": result_collections,
+        "utm_links": utm_links,
         "utm_orders": utm_orders,
     }
     if products is not None:
@@ -399,6 +434,8 @@ def reset_collection_stats(
             """
             WITH deleted_events AS (
                 DELETE FROM collection_events RETURNING 1
+            ), deleted_utm_events AS (
+                DELETE FROM utm_link_events RETURNING 1
             ), cleared_orders AS (
                 UPDATE orders
                 SET source_collection = NULL,
@@ -415,12 +452,14 @@ def reset_collection_stats(
             )
             SELECT
                 (SELECT COUNT(*) FROM deleted_events) AS events_deleted,
+                (SELECT COUNT(*) FROM deleted_utm_events) AS utm_events_deleted,
                 (SELECT COUNT(*) FROM cleared_orders) AS orders_attribution_cleared
             """
         )
         row = cur.fetchone()
         result = {
             "events_deleted": int(row["events_deleted"]),
+            "utm_events_deleted": int(row["utm_events_deleted"]),
             "orders_attribution_cleared": int(row["orders_attribution_cleared"]),
         }
         audit(

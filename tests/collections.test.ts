@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -51,6 +52,14 @@ test('Instagram story links identify the campaign and exact target', () => {
   assert.equal(link.searchParams.get('utm_medium'), 'story');
   assert.equal(link.searchParams.get('utm_campaign'), 'oct7-evening');
   assert.equal(link.searchParams.get('utm_content'), 'product_4048');
+});
+
+test('direct UTM landings are sent to the first-party event route', () => {
+  const source = readFileSync('src/lib/collections.ts', 'utf8');
+  const tracker = readFileSync('src/components/AttributionTracker.tsx', 'utf8');
+  assert.match(source, /fetch\('\/api\/utm-link-events'/);
+  assert.match(source, /const productMatch = .*medicine/);
+  assert.match(tracker, /sendUtmLinkEvent\(pathname, utm\)/);
 });
 
 test('source cookie round-trips and expires after seven days', () => {

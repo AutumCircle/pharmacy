@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { COLLECTION_PATH_PREFIX, readUtm, saveAttributionSource } from '@/lib/collections';
+import { COLLECTION_PATH_PREFIX, readUtm, saveAttributionSource, sendUtmLinkEvent } from '@/lib/collections';
 
 /**
  * Keeps UTM labels from the latest tracked link on any public page, so an order placed
@@ -14,7 +14,9 @@ export default function AttributionTracker() {
   useEffect(() => {
     if (pathname.startsWith('/admin') || pathname.startsWith('/staff')) return;
     if (pathname.startsWith(COLLECTION_PATH_PREFIX)) return;
-    saveAttributionSource(null, readUtm(window.location.search));
+    const utm = readUtm(window.location.search);
+    saveAttributionSource(null, utm);
+    sendUtmLinkEvent(pathname, utm);
   }, [pathname]);
   return null;
 }

@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Software Factory</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #e3e6eb; --text: #1b1f24; --muted: #6b7380;
+    --accent: #2f6fde; --pass: #1f8a4c; --pass-bg: #e3f4ea; --chg: #b7591a; --chg-bg: #fcebdc;
+    --pend: #9aa1ab; --human: #b7791f; --human-bg: #fff6e0; --merged: #6b4fd8;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1a1e24; --line: #2a3038; --text: #e6e9ee; --muted: #8b94a1;
+      --accent: #6b9bff; --pass: #4cc483; --pass-bg: #163626; --chg: #f0a060; --chg-bg: #3a2614;
+      --pend: #5d6571; --human: #f2c35b; --human-bg: #2e2612; --merged: #a593ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding: 20px 24px 8px; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pend); }
+  .dot.live { background: var(--pass); }
+  .dot.down { background: var(--chg); }
+  .hint { margin: 8px 24px; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 8px;
+          color: var(--muted); font-size: 13px; }
+  .hint code { font-family: var(--mono); color: var(--text); }
+
+  .human { margin: 8px 24px 0; padding: 12px 14px; border-radius: 10px;
+           background: var(--human-bg); border: 1px solid var(--human); }
+  .human h2 { margin: 0 0 10px; font-size: 13px; color: var(--human); text-transform: uppercase; letter-spacing: .06em; }
+  .human .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+
+  .board { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; padding: 16px 24px 32px; }
+  .col { min-width: 0; }
+  .col h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--muted);
+            text-transform: uppercase; letter-spacing: .06em; display: flex; justify-content: space-between; }
+  .col h2 .arrow { color: var(--line); }
+  .lane { display: flex; flex-direction: column; gap: 10px; min-height: 80px; padding: 8px;
+          border-radius: 10px; background: color-mix(in srgb, var(--line) 35%, transparent); }
+  @media (max-width: 900px) { .board { grid-template-columns: 1fr; } .lane { min-height: 0; } }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+          cursor: pointer; text-align: left; color: inherit; font: inherit; width: 100%;
+          transition: border-color .15s, box-shadow .15s; }
+  .card:hover, .card:focus-visible { border-color: var(--accent); outline: none; }
+  .card.selected { box-shadow: 0 0 0 2px var(--accent); }
+  .card.moved { animation: flash 1.2s ease-out; }
+  @keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+  .card.is-human { border-color: var(--human); }
+  .card .id { font: 11px var(--mono); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .card .title { font-weight: 600; margin: 2px 0 6px; overflow-wrap: anywhere; }
+  .card .note { font-size: 12px; color: var(--human); margin-top: 6px; }
+  .card .badges { white-space: nowrap; }
+  .badge { font: 600 10px var(--mono); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.APPROVE { color: var(--pass); border-color: var(--pass); }
+  .badge.ESCALATE { color: var(--human); border-color: var(--human); }
+
+  .rounds { display: flex; flex-direction: column; gap: 4px; }
+  .round { display: flex; align-items: center; gap: 4px; }
+  .round .r { font: 10px var(--mono); color: var(--muted); width: 22px; }
+  .chip { font: 600 10px var(--mono); padding: 2px 0; width: 42px; text-align: center; border-radius: 4px;
+          border: 1px dashed var(--pend); color: var(--pend); }
+  .chip.PASS { border: 1px solid transparent; background: var(--pass-bg); color: var(--pass); }
+  .chip.CHANGES { border: 1px solid transparent; background: var(--chg-bg); color: var(--chg); }
+  .round.old { opacity: .55; }
+
+  .empty { color: var(--muted); font-size: 12px; text-align: center; padding: 14px 0; }
+
+  aside { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100%); background: var(--panel);
+          border-left: 1px solid var(--line); display: none; flex-direction: column; z-index: 10;
+          box-shadow: -12px 0 32px rgba(0,0,0,.12); }
+  aside.open { display: flex; }
+  aside .top { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  aside .top h3 { margin: 0; font-size: 15px; flex: 1; overflow-wrap: anywhere; }
+  aside .top button { border: 0; background: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; }
+  aside .body { display: flex; flex: 1; min-height: 0; }
+  nav { width: 190px; flex: none; border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 0; }
+  nav .group { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 10px 16px 4px; }
+  nav button { display: flex; justify-content: space-between; width: 100%; border: 0; background: none; color: var(--text);
+               font: 13px system-ui, sans-serif; text-align: left; padding: 5px 16px; cursor: pointer; }
+  nav button:hover { background: var(--bg); }
+  nav button.active { background: var(--bg); color: var(--accent); font-weight: 600; }
+  nav button .v { font: 600 10px var(--mono); }
+  nav button .v.PASS, nav button .v.APPROVE { color: var(--pass); }
+  nav button .v.CHANGES { color: var(--chg); }
+  nav button .v.ESCALATE { color: var(--human); }
+  nav button .v.pending { color: var(--pend); }
+  .doc { flex: 1; overflow-y: auto; padding: 18px 24px 40px; min-width: 0; }
+  @media (max-width: 640px) { aside .body { flex-direction: column; } nav { width: auto; max-height: 34vh; border-right: 0; border-bottom: 1px solid var(--line); } }
+
+  .doc h1, .doc h2, .doc h3 { line-height: 1.25; margin: 1.2em 0 .4em; }
+  .doc h1 { font-size: 18px; margin-top: 0; } .doc h2 { font-size: 15px; } .doc h3 { font-size: 14px; }
+  .doc pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font: 12px/1.5 var(--mono); }
+  .doc code { font: 12px var(--mono); background: var(--bg); padding: 1px 4px; border-radius: 3px; }
+  .doc pre code { background: none; padding: 0; }
+  .doc ul, .doc ol { padding-left: 22px; }
+  .doc .verdict { display: inline-block; font: 600 12px var(--mono); padding: 4px 10px; border-radius: 6px; margin-bottom: 8px; }
+  .doc .verdict.PASS, .doc .verdict.APPROVE { background: var(--pass-bg); color: var(--pass); }
+  .doc .verdict.CHANGES { background: var(--chg-bg); color: var(--chg); }
+  .doc .verdict.ESCALATE { background: var(--human-bg); color: var(--human); }
+  .doc .missing { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Software Factory</h1>
+  <span class="status"><span class="dot" id="dot"></span><span id="status">loading…</span></span>
+</header>
+<div id="hint" class="hint" hidden></div>
+<section id="human" class="human" hidden><h2>Needs human</h2><div class="cards" id="human-cards"></div></section>
+<main class="board" id="board"></main>
+<aside id="drawer" aria-label="Job files">
+  <div class="top"><h3 id="d-title"></h3><button id="d-close" aria-label="Close">×</button></div>
+  <div class="body"><nav id="d-nav"></nav><article class="doc" id="d-doc"></article></div>
+</aside>
+
+<script>
+const STAGES = [
+  ['spec', 'Spec'], ['build', 'Build'], ['review', 'Review'], ['approve', 'Approve'], ['merged', 'Merged'],
+];
+const REVIEWERS = [['security', 'SEC'], ['ux', 'UX'], ['ui', 'UI'], ['code', 'CODE']];
+const DEMO = new URLSearchParams(location.search).has('demo');
+const POLL_MS = 2000;
+
+let board = { jobs: [] };
+let lastText = '';
+let lastStage = {};
+let selected = null;   // job id
+let openFile = null;   // path inside the job folder
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ---------- data ----------
+
+async function poll() {
+  if (DEMO) { apply(DEMO_TEXT); return; }
+  try {
+    const res = await fetch('board.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    apply(await res.text());
+    setStatus('live');
+  } catch (e) {
+    setStatus('down', e);
+  }
+}
+
+function apply(text) {
+  if (text === lastText) { renderStatusTime(); return; }
+  lastText = text;
+  try { board = JSON.parse(text); } catch { setStatus('down', new Error('board.json is not valid JSON')); return; }
+  board.jobs = Array.isArray(board.jobs) ? board.jobs : [];
+  render();
+}
+
+function setStatus(state, err) {
+  $('dot').className = 'dot ' + (state === 'live' ? 'live' : 'down');
+  const hint = $('hint');
+  if (state === 'down') {
+    $('status').textContent = 'cannot read board.json';
+    hint.hidden = false;
+    hint.innerHTML = location.protocol === 'file:'
+      ? 'Serve this folder instead of opening the file: <code>cd factory &amp;&amp; python3 -m http.server 8000</code>, then open <code>http://localhost:8000/dashboard.html</code>. Or try <code>?demo</code>.'
+      : 'Could not load <code>board.json</code> (' + esc(err && err.message) + '). Retrying…';
+  } else {
+    hint.hidden = true;
+    renderStatusTime();
+  }
+}
+
+function renderStatusTime() {
+  if (DEMO) { $('status').textContent = 'demo data'; $('dot').className = 'dot live'; return; }
+  const n = board.jobs.length;
+  $('status').textContent = `${n} job${n === 1 ? '' : 's'} · updated ${ago(board.updated)}`;
+}
+
+function ago(iso) {
+  if (!iso) return 'never';
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.round(s / 60) + 'm ago';
+  if (s < 86400) return Math.round(s / 3600) + 'h ago';
+  return new Date(iso).toLocaleDateString();
+}
+
+// ---------- board ----------
+
+function render() {
+  renderStatusTime();
+  const human = board.jobs.filter((j) => j.stage === 'needs-human');
+  $('human').hidden = human.length === 0;
+  $('human-cards').innerHTML = human.map(card).join('');
+
+  $('board').innerHTML = STAGES.map(([key, label], i) => {
+    const jobs = board.jobs.filter((j) => j.stage === key);
+    return `<section class="col">
+      <h2><span>${label} · ${jobs.length}</span>${i < STAGES.length - 1 ? '<span class="arrow">→</span>' : ''}</h2>
+      <div class="lane">${jobs.map(card).join('') || '<div class="empty">—</div>'}</div>
+    </section>`;
+  }).join('');
+
+  if (!board.jobs.length && !DEMO) {
+    $('board').insertAdjacentHTML('afterbegin',
+      '<div class="hint" style="grid-column:1/-1;margin:0">No jobs yet. Run <code>/factory &lt;feature&gt;</code> or <code>/factory next</code> in Claude Code. Preview with <code>?demo</code>.</div>');
+  }
+
+  document.querySelectorAll('.card').forEach((el) => {
+    el.onclick = () => openJob(el.dataset.id);
+  });
+  for (const j of board.jobs) lastStage[j.id] = j.stage;
+
+  if (selected) {
+    const job = board.jobs.find((j) => j.id === selected);
+    if (job) renderNav(job); else closeDrawer();
+  }
+}
+
+function card(j) {
+  const moved = lastStage[j.id] && lastStage[j.id] !== j.stage ? ' moved' : '';
+  const human = j.stage === 'needs-human' ? ' is-human' : '';
+  const sel = j.id === selected ? ' selected' : '';
+  const decision = j.decision ? `<span class="badge ${esc(j.decision)}">${esc(j.decision)}</span>` : '';
+  const round = j.round ? `<span class="badge">R${esc(j.round)}</span>` : '';
+  return `<button class="card${moved}${human}${sel}" data-id="${esc(j.id)}">
+    <div class="id"><span>${esc(j.id)}</span><span class="badges">${round} ${decision}</span></div>
+    <div class="title">${esc(j.title || j.id)}</div>
+    ${roundsHtml(j)}
+    ${j.note ? `<div class="note">${esc(j.note)}</div>` : ''}
+  </button>`;
+}
+
+// Every finished round from history, plus the live round while it is under review.
+function rounds(j) {
+  const list = (j.history || []).map((h) => ({ round: h.round, reviews: h.reviews || {}, done: true }));
+  const live = j.round && !list.some((h) => h.round === j.round);
+  if (live && (j.stage === 'review' || j.stage === 'build')) {
+    list.push({ round: j.round, reviews: j.stage === 'review' ? (j.reviews || {}) : {}, done: false });
+  }
+  return list;
+}
+
+function roundsHtml(j) {
+  const list = rounds(j);
+  if (!list.length) return '';
+  return `<div class="rounds">${list.map((r, i) => `<div class="round${i < list.length - 1 ? ' old' : ''}">
+      <span class="r">R${esc(r.round)}</span>
+      ${REVIEWERS.map(([k, label]) => {
+        const v = r.reviews[k] || 'pending';
+        return `<span class="chip ${esc(v)}" title="${k}: ${esc(v)}">${label}</span>`;
+      }).join('')}
+    </div>`).join('')}</div>`;
+}
+
+// ---------- drawer ----------
+
+function files(j) {
+  const out = [{ group: 'Job', items: [['spec.md', 'Spec'], ['build.md', 'Build']] }];
+  for (const r of rounds(j)) {
+    out.push({
+      group: 'Round ' + r.round,
+      items: REVIEWERS.map(([k]) => [`round-${r.round}/review-${k}.md`, k, r.reviews[k] || 'pending']),
+    });
+  }
+  const reworks = [];
+  for (let k = 1; k <= (j.reworks || 0); k++) reworks.push([`rework-${k}.md`, 'Rework note ' + k]);
+  if (reworks.length) out.push({ group: 'Human', items: reworks });
+  out.push({ group: 'Decision', items: [['decision.md', 'Decision', j.decision || 'pending']] });
+  return out;
+}
+
+function openJob(id) {
+  const job = board.jobs.find((j) => j.id === id);
+  if (!job) return;
+  selected = id;
+  openFile = null;
+  $('drawer').classList.add('open');
+  $('d-title').innerHTML = `<span style="font:12px var(--mono);color:var(--muted)">${esc(job.id)} · ${esc(job.branch || '')}</span><br>${esc(job.title || job.id)}`;
+  render();
+  showFile(job, 'spec.md');
+}
+
+function renderNav(job) {
+  $('d-nav').innerHTML = files(job).map((g) => `<div class="group">${esc(g.group)}</div>` +
+    g.items.map(([path, label, v]) => `<button data-path="${esc(path)}" class="${path === openFile ? 'active' : ''}">
+      <span>${esc(label)}</span>${v ? `<span class="v ${esc(v)}">${esc(v === 'pending' ? '…' : v)}</span>` : ''}
+    </button>`).join('')).join('');
+  $('d-nav').querySelectorAll('button').forEach((b) => { b.onclick = () => showFile(job, b.dataset.path); });
+}
+
+async function showFile(job, path) {
+  openFile = path;
+  renderNav(job);
+  const doc = $('d-doc');
+  doc.innerHTML = '<p class="missing">loading…</p>';
+  let text = null;
+  if (DEMO) {
+    text = DEMO_FILES[path] ?? null;
+  } else {
+    const url = ['jobs', job.id, ...path.split('/')].map(encodeURIComponent).join('/');
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (res.ok) text = await res.text();
+    } catch { /* shown as not written yet */ }
+  }
+  if (openFile !== path || selected !== job.id) return;
+  doc.innerHTML = text == null ? `<p class="missing">${esc(path)} has not been written yet.</p>` : markdown(text);
+}
+
+function closeDrawer() {
+  selected = null; openFile = null;
+  $('drawer').classList.remove('open');
+  render();
+}
+$('d-close').onclick = closeDrawer;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && selected) closeDrawer(); });
+
+// ---------- tiny markdown ----------
+
+function inline(s) {
+  return esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+
+function markdown(src) {
+  const lines = src.replace(/\r\n/g, '\n').split('\n');
+  let html = '';
+  let i = 0;
+  const first = (lines[0] || '').trim();
+  const v = first.match(/^(?:VERDICT:\s*)?(PASS|CHANGES|APPROVE|ESCALATE)\b/);
+  if (v) { html += `<div class="verdict ${v[1]}">${esc(first)}</div>`; i = 1; }
+
+  let para = [];
+  let list = null;
+  const flush = () => {
+    if (para.length) { html += `<p>${para.map(inline).join('<br>')}</p>`; para = []; }
+    if (list) { html += `</${list}>`; list = null; }
+  };
+  for (; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^```/.test(line)) {
+      flush();
+      const code = [];
+      for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
+      html += `<pre><code>${esc(code.join('\n'))}</code></pre>`;
+      continue;
+    }
+    const h = line.match(/^(#{1,3})\s+(.*)/);
+    if (h) { flush(); html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; continue; }
+    const li = line.match(/^\s*(?:([-*])|(\d+)\.)\s+(.*)/);
+    if (li) {
+      if (para.length) { html += `<p>${para.map(inline).join('<br>')}</p>`; para = []; }
+      const kind = li[1] ? 'ul' : 'ol';
+      if (list !== kind) { if (list) html += `</${list}>`; html += `<${kind}>`; list = kind; }
+      html += `<li>${inline(li[3])}</li>`;
+      continue;
+    }
+    if (!line.trim()) { flush(); continue; }
+    if (/^---+$/.test(line.trim())) { flush(); html += '<hr>'; continue; }
+    if (list) { flush(); }
+    para.push(line);
+  }
+  flush();
+  return html;
+}
+
+// ---------- demo ----------
+
+function demoBoard() {
+  const now = new Date().toISOString();
+  return {
+    updated: now,
+    jobs: [
+      { id: '001-tracking-rate-limit', title: 'Rate-limit order tracking lookups', branch: 'factory/001-tracking-rate-limit',
+        stage: 'merged', round: 2, decision: 'APPROVE', reworks: 0, note: '', updated: now,
+        reviews: { security: 'PASS', ux: 'PASS', ui: 'PASS', code: 'PASS' },
+        history: [
+          { round: 1, reviews: { security: 'CHANGES', ux: 'PASS', ui: 'PASS', code: 'PASS' } },
+          { round: 2, reviews: { security: 'PASS', ux: 'PASS', ui: 'PASS', code: 'PASS' } },
+        ] },
+      { id: '002-checkout-rate-limit', title: 'Rate-limit /api/checkout per client', branch: 'factory/002-checkout-rate-limit',
+        stage: 'needs-human', round: 1, decision: 'ESCALATE', reworks: 0, note: 'Limit values need a product decision', updated: now,
+        reviews: { security: 'PASS', ux: 'PASS', ui: 'PASS', code: 'PASS' },
+        history: [{ round: 1, reviews: { security: 'PASS', ux: 'PASS', ui: 'PASS', code: 'PASS' } }] },
+      { id: '003-rate-limiting', title: 'Rate limiting on admin login', branch: 'factory/003-rate-limiting',
+        stage: 'review', round: 2, decision: null, reworks: 0, note: '', updated: now,
+        reviews: { security: 'CHANGES', ux: 'PASS', ui: 'pending', code: 'PASS' },
+        history: [{ round: 1, reviews: { security: 'CHANGES', ux: 'PASS', ui: 'PASS', code: 'CHANGES' } }] },
+      { id: '004-search-empty-state', title: 'Friendlier empty search results', branch: 'factory/004-search-empty-state',
+        stage: 'build', round: 1, decision: null, reworks: 0, note: '', updated: now,
+        reviews: { security: 'pending', ux: 'pending', ui: 'pending', code: 'pending' }, history: [] },
+      { id: '005-favorites-count', title: 'Show favourites count in header', branch: 'factory/005-favorites-count',
+        stage: 'spec', round: 0, decision: null, reworks: 0, note: '', updated: now,
+        reviews: { security: 'pending', ux: 'pending', ui: 'pending', code: 'pending' }, history: [] },
+    ],
+  };
+}
+
+const DEMO_FILES = {
+  'spec.md': '# Demo spec\n\n## Goal\nThis is sample data. Real jobs load `factory/jobs/<job-id>/spec.md`.\n\n## Acceptance criteria\n1. Returns HTTP 429 after too many requests.\n2. Message is in Russian.\n3. Covered by `tests/*.test.ts`.',
+  'build.md': '## Round 1\n- Commits: `abc1234` Add limiter\n- Tests run: `npm run test:frontend` → pass',
+  'round-1/review-security.md': 'VERDICT: CHANGES\n\n- `src/app/api/tracking/route.ts:12` — client IP is taken from an untrusted header. Use the platform-provided address.',
+  'round-1/review-code.md': 'VERDICT: CHANGES\n\n- Missing test for the reset window.',
+  'decision.md': 'ESCALATE\n\nAll reviews pass, but the request limit is a product decision. Confirm the numbers, then run `/factory approve 002-checkout-rate-limit`.',
+};
+
+const DEMO_TEXT = DEMO ? JSON.stringify(demoBoard()) : '';
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

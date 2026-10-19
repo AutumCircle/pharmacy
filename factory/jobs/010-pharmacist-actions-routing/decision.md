@@ -1,0 +1,6 @@
+ESCALATE
+All four round-2 reviews (code, security, ui, ux) say PASS, and build.md marks every acceptance criterion as verified. Round 1 had one UI CHANGES verdict, which round 2 resolved.
+This job cannot merge without a human because it adds `db/migrations/0024_order_item_pharmacy_answers.sql`. The migration is additive (new columns on order_items and a new order_item_pharmacy_answers table) but has not been run. It must be applied to RDS before the new admin Lambda is deployed. Without it, the Lambda breaks both the pharmacy and the courier order lists.
+Before running `/factory approve`, a human must: (1) review 0024 and plan the rollout in this order: apply 0024 to RDS, then deploy the admin Lambda, then deploy Vercel. Do not merge or deploy the frontend or Lambda before the migration is applied. (2) Check the pharmacy and courier order screens in a browser at 360/390 px; this was never done.
+Product points to confirm: «Ватан 2» gets no Telegram message about routed items (deferred to job 012). «Ватан 1» and «Ватан 2» share the `pharmacy_web` policy. A manual courier PATCH for checklist step 3 now returns 400, because the pharmacy answers now drive that step.
+No change to `backend/local-agent/agent.py`, no new dependency (package.json only adds a test file to `test:frontend`), and no auth, secret or infra config change.

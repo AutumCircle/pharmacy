@@ -3,12 +3,14 @@ import './globals.css';
 import { CartProvider } from '../context/CartContext';
 import { FavoritesProvider } from '../context/FavoritesContext';
 import LayoutWrapper from '../components/LayoutWrapper';
+import { SITE_FOOTER } from '@/config/site-footer';
 import AttributionTracker from '../components/AttributionTracker';
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_KEYWORDS,
   DEFAULT_TITLE,
   LOGO_PATH,
+  SITE_ALTERNATE_NAMES,
   SITE_CITY,
   SITE_NAME,
   SITE_SHORT_NAME,
@@ -60,21 +62,24 @@ export const metadata: Metadata = {
 
 function siteStructuredData() {
   const siteUrl = getSiteUrl();
-  const sameAs = (process.env.SITE_SOCIAL_LINKS || '')
+  const envLinks = (process.env.SITE_SOCIAL_LINKS || '')
     .split(',')
     .map((link) => link.trim())
     .filter((link) => /^https:\/\//.test(link));
-  const phone = process.env.SITE_PHONE?.trim();
-  const street = process.env.SITE_STREET_ADDRESS?.trim();
+  const sameAs = [...new Set([SITE_FOOTER.instagram, ...envLinks])];
+  const phones = SITE_FOOTER.phones.map((phone) => phone.href.replace(/^tel:/, ''));
+  const street = process.env.SITE_STREET_ADDRESS?.trim()
+    || SITE_FOOTER.address.replace(new RegExp(`^${SITE_CITY},\\s*`), '');
+  const [opens, closes] = SITE_FOOTER.workingHours.split(/[–-]/).map((value) => value.trim());
   return [
     {
       '@context': 'https://schema.org',
       '@type': 'WebSite',
       '@id': `${siteUrl}/#website`,
       url: siteUrl,
-      name: SITE_NAME,
-      alternateName: [SITE_SHORT_NAME, 'Ватан аптека', 'Vatan pharmacy', 'Дорухонаи Ватан'],
-      inLanguage: 'ru',
+      name: SITE_SHORT_NAME,
+      alternateName: SITE_ALTERNATE_NAMES,
+      inLanguage: ['ru', 'tg'],
       publisher: { '@id': `${siteUrl}/#pharmacy` },
       potentialAction: {
         '@type': 'SearchAction',
@@ -87,22 +92,30 @@ function siteStructuredData() {
       '@type': 'Pharmacy',
       '@id': `${siteUrl}/#pharmacy`,
       name: SITE_NAME,
-      alternateName: [SITE_SHORT_NAME, 'Vatan pharmacy'],
+      alternateName: SITE_ALTERNATE_NAMES,
       url: siteUrl,
       logo: absoluteUrl(LOGO_PATH),
       image: absoluteUrl(LOGO_PATH),
       description: DEFAULT_DESCRIPTION,
-      ...(phone ? { telephone: phone } : {}),
+      telephone: process.env.SITE_PHONE?.trim() || phones[0],
       address: {
         '@type': 'PostalAddress',
-        ...(street ? { streetAddress: street } : {}),
+        streetAddress: street,
         addressLocality: SITE_CITY,
         addressCountry: 'TJ',
       },
+      ...(opens && closes ? {
+        openingHoursSpecification: {
+          '@type': 'OpeningHoursSpecification',
+          dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+          opens,
+          closes,
+        },
+      } : {}),
       areaServed: { '@type': 'City', name: SITE_CITY },
       currenciesAccepted: 'TJS',
       paymentAccepted: 'Cash',
-      ...(sameAs.length ? { sameAs } : {}),
+      sameAs,
     },
   ];
 }
