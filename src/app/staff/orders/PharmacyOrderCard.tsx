@@ -1,12 +1,11 @@
-import { Fragment, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { PharmacyPreparationOrder } from '@/lib/api-v1/staff-types';
 import { formatOrderDateTime } from '@/lib/order-time';
 import { assemblyChip } from '@/lib/pharmacy-assembly';
 import { pharmacyOrderView } from '@/lib/pharmacy-order';
-import { money, quantityLabel } from '../format';
+import { money } from '../format';
 import PharmacyAssemblyButtons from './PharmacyAssemblyButtons';
-import PharmacyRoutedItems from './PharmacyRoutedItems';
-import PharmacyRowActions from './PharmacyRowActions';
+import PharmacyItemRow from './PharmacyItemRow';
 import WaitingMinutes from './WaitingMinutes';
 
 function safeDateTime(value: string): string | null {
@@ -18,43 +17,31 @@ function safeDateTime(value: string): string | null {
 }
 
 /**
- * Pharmacy order card. Shows what the owner's `pharmacy_web` policy lets the Lambda return
- * (see pharmacyOrderView): client name/phone/address/landmark, client totals, profit and creator
- * appear only when turned ON in the admin notification settings. Job 010: each item shows this
- * pharmacy's answer chip. Job 013: while the order is pending, each own row of the table has
- * «В наличии», «Нет в наличии» and «Изменить цену» (PharmacyRowActions); items «Ватан 1» sent to
- * «Ватан 2» stay in the same table, read-only, marked «Ватан 2» (orange) or «Нет в наличии в обеих
- * аптеках» (red). The status chip shows the stage («Собирается» / «Собран» / «Подтверждён»). With an
- * old Lambda response (no order_item_id) no answer column or controls are rendered.
- * Job 011 + rework 1: while the order is «Новый» (or confirmed) and this pharmacy has something to assemble
- * (`assembly_available`), the footer holds PharmacyAssemblyButtons («Начать сборку» -> «Сборка сделана»).
- * Items routed here from «Ватан 1» get per-item controls (PharmacyRoutedItems: «В наличии» + price,
- * «Нет в наличии», «Собрано»); the row controls cover the other items. Routed items carry the owner's
- * colours (orange «В аптеке 2», red «Нет в наличии в обеих аптеках»). Without the new fields (old Lambda)
- * none of these controls are rendered. `actions` overrides the footer.
+ * Pharmacy order card, one format for «Ватан 1» and «Ватан 2» (job 014). Shows what the owner's
+ * `pharmacy_web` policy lets the Lambda return (see pharmacyOrderView): client name/phone/address/landmark,
+ * client totals, profit and creator appear only when turned ON in the admin notification settings.
+ * The medicines table (PharmacyItemRow) holds every item of this pharmacy — including the items «Ватан 1»
+ * routed to «Ватан 2» — with the compact «В наличии» / «Нет в наличии» next to the sum, the tap-to-edit
+ * price and, for routed items, «Собрано». At «Ватан 1» items sent to «Ватан 2» stay in the table,
+ * read-only, marked «Ватан 2» (orange) or «Нет в наличии в обеих аптеках» (red). The status chip shows the
+ * stage («Собирается» / «Собран» / «Подтверждён»). With an old Lambda response (no order_item_id) no answer
+ * column or controls are rendered. «Начать сборку» / «Сборка сделана» (PharmacyAssemblyButtons) stay in
+ * the footer while this pharmacy has something to assemble. `actions` overrides the footer.
  */
 export default function PharmacyOrderCard({ order, now, actions, pharmacyId }: {
   order: PharmacyPreparationOrder; now: number; actions?: ReactNode; pharmacyId?: number;
 }) {
-  const view = pharmacyOrderView(order);
+  const view = pharmacyOrderView(order, pharmacyId);
   const createdAt = view.createdAt ? safeDateTime(view.createdAt) : null;
-  const priceColumns = view.showPrices;
-  const clientColumn = view.showClientPrices;
+  const columns = { prices: view.showPrices, client: view.showClientPrices, answer: view.answerColumn,
+    actions: view.actionColumn };
   const hasClient = !!(view.customerName || view.phone || view.address || view.landmark);
-  const answerColumn = view.answerColumn;
-  const routedItems = view.hasAnswers && view.medicines ? view.medicines.filter((item) => item.routedHere) : [];
-  const columns = 2 + (priceColumns ? 2 : 0) + (clientColumn ? 1 : 0) + (answerColumn ? 1 : 0);
   const chip = assemblyChip(view.assemblyState);
   const assembly = view.partControls ? <PharmacyAssemblyButtons orderId={order.order_id} state={view.assemblyState} />
     : view.assemblyState || view.assemblyAvailable ? <span className="pa-assembly-mark">Сборка: <span
       className={`pa-chip pa-tone-${chip.tone}`}>{chip.text}</span></span>
     : null;
-  const footer = actions ?? (assembly || routedItems.length > 0 ? <>
-    {assembly}
-    {routedItems.length > 0 && <PharmacyRoutedItems orderId={order.order_id} canAnswer={view.canAnswer}
-      items={routedItems.map((item) => ({ orderItemId: item.orderItemId as number, name: item.name,
-        unitPrice: item.unitPrice, myAnswer: item.myAnswer, collected: item.collected, crossMark: item.crossMark }))} />}
-  </> : null);
+  const footer = actions ?? assembly;
   return <article className="courier-order-card pharmacy-order-card">
     <header className="pharmacy-order-head">
       <div>
@@ -79,34 +66,20 @@ export default function PharmacyOrderCard({ order, now, actions, pharmacyId }: {
           <thead><tr>
             <th scope="col">Лекарство</th>
             <th scope="col" className="num">Кол-во</th>
-            {priceColumns && <th scope="col" className="num">Цена</th>}
-            {priceColumns && <th scope="col" className="num">Сумма</th>}
-            {clientColumn && <th scope="col" className="num">Клиенту</th>}
-            {answerColumn && <th scope="col">Ответ</th>}
+            {columns.prices && <th scope="col" className="num">Цена</th>}
+            {columns.prices && <th scope="col" className="num">Сумма</th>}
+            {columns.actions && <th scope="col" className="pa-act"><span className="sr-only">Наличие</span></th>}
+            {columns.client && <th scope="col" className="num">Клиенту</th>}
+            {columns.answer && <th scope="col">Ответ</th>}
           </tr></thead>
-          <tbody>{view.rows.map((item) => <Fragment key={item.key}>
-            <tr className={item.kind === 'routed' ? `pa-row-routed pa-item-tone-${item.chip?.tone ?? 'orange'}` : undefined}>
-              <td className="name">{item.name}
-                {item.myProblem && <small className="pa-item-problem">{item.myProblem}</small>}
-                {item.hint && <small className="pa-routed-hint">{item.hint}</small>}</td>
-              <td className="num qty">{item.quantity != null ? quantityLabel(item.quantity) : '—'}</td>
-              {priceColumns && <td className="num">{item.kind === 'routed' ? '—' : money(item.unitPrice)}</td>}
-              {priceColumns && <td className="num">{item.kind === 'routed' ? '—' : money(item.lineTotal)}</td>}
-              {clientColumn && <td className="num">{item.kind === 'routed' ? '—' : money(item.clientLineTotal)}</td>}
-              {answerColumn && <td className="answer">{item.chip && <span className={`pa-chip pa-tone-${item.chip.tone}`}>
-                {item.chip.text}</span>}
-                {item.collected && <span className="pa-chip pa-tone-ok pa-chip-extra">Собрано</span>}</td>}
-            </tr>
-            {item.canAct && item.orderItemId !== null && <tr className="pa-row-actions">
-              <td colSpan={columns}><PharmacyRowActions orderId={order.order_id} orderItemId={item.orderItemId}
-                name={item.name} unitPrice={item.unitPrice} myAnswer={item.myAnswer} pharmacyId={pharmacyId} /></td>
-            </tr>}
-          </Fragment>)}</tbody>
+          <tbody>{view.rows.map((row) => <PharmacyItemRow key={row.key} orderId={order.order_id} row={row}
+            columns={columns} confirmText={view.unavailableConfirm} />)}</tbody>
           {view.total != null && <tfoot><tr>
-            <th scope="row" colSpan={priceColumns ? 3 : 1}>Итого</th>
+            <th scope="row" colSpan={columns.prices ? 3 : 1}>Итого</th>
             <td className="num total">{money(view.total)}</td>
-            {clientColumn && <td className="num">{view.clientTotal != null ? money(view.clientTotal) : ''}</td>}
-            {answerColumn && <td />}
+            {columns.actions && <td />}
+            {columns.client && <td className="num">{view.clientTotal != null ? money(view.clientTotal) : ''}</td>}
+            {columns.answer && <td />}
           </tr></tfoot>}
         </table>
       </div>}

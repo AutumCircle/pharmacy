@@ -421,20 +421,33 @@ label.c-check-row { cursor: pointer; }
 .pa-chip-extra { margin-left: 4px; }
 .pa-item-tone-bad { box-shadow: inset 4px 0 0 var(--c-brand); }
 .pa-item-tone-orange { box-shadow: inset 4px 0 0 var(--c-orange); }
-.pa-routed-items { display: grid; gap: 10px; width: 100%; padding: 12px; border: 1.5px solid var(--c-orange); border-radius: 12px; background: var(--c-card); }
-.pa-routed-items .pa-item { padding-left: 10px; }
 .pa-item-marks { display: flex; flex-wrap: wrap; gap: 6px; }
 .pa-item-marks:empty { display: none; }
-.pa-price-edit { display: grid; gap: 8px; }
-/* Job 013: row controls and items sent to «Ватан 2» inside the pharmacy medicines table. */
-.pharmacy-items tr:has(+ tr.pa-row-actions) td { border-bottom: 0; }
-.pharmacy-items tr.pa-row-actions td { padding-top: 0; white-space: normal; }
-.pa-row-controls { display: grid; gap: 6px; }
-.pa-row-controls .pa-btn { flex: 1 1 120px; min-height: 44px; font-size: 14px; }
-.pa-row-controls .pa-btn.selected { box-shadow: inset 0 0 0 2px rgba(0,0,0,.18); }
-.pa-row-controls .pa-btn.selected:disabled { opacity: .8; cursor: default; }
-.pa-row-controls .pa-btn-ghost { min-height: 40px; }
-.pa-row-confirm { margin: 0; font-size: 14px; font-weight: 700; color: var(--c-brand-dark); }
+/* Job 013: items sent to «Ватан 2» inside the pharmacy medicines table. Job 014: one compact format for
+   «Ватан 1» and «Ватан 2» — small buttons next to the sum, tap the price to edit it. */
+.pharmacy-items td.pa-act, .pharmacy-items th.pa-act { padding-left: 4px; width: 1%; white-space: nowrap; }
+.pa-mini-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 220px; }
+.pa-mini { min-height: 32px; padding: 4px 9px; border: 1.5px solid var(--c-line); border-radius: 8px; background: var(--c-card);
+  color: var(--c-ink); font: inherit; font-size: 13px; font-weight: 750; line-height: 1.2; cursor: pointer; white-space: nowrap; }
+.pa-mini:hover:not(:disabled) { filter: brightness(.95); }
+.pa-mini:focus-visible, .pa-price-tap:focus-visible { outline: 3px solid rgba(196,22,28,.3); outline-offset: 1px; }
+.pa-mini:disabled { opacity: .6; cursor: progress; }
+.pa-mini-ok { border-color: var(--c-ok); color: var(--c-ok); }
+.pa-mini-bad { border-color: var(--c-brand); color: var(--c-brand-dark); }
+.pa-mini.selected { background: var(--c-ok-soft); }
+.pa-mini-bad.selected { background: var(--c-brand-soft); }
+.pa-mini.selected:disabled { opacity: 1; cursor: default; }
+.pa-row-confirm { font-size: 13px; font-weight: 750; color: var(--c-brand-dark); white-space: normal; }
+.pa-price-tap { min-height: 32px; padding: 2px 4px; border: 0; border-bottom: 1.5px dashed var(--c-muted); background: none; color: inherit;
+  font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+.pa-price-tap:hover:not(:disabled) { color: var(--c-brand-dark); border-bottom-color: var(--c-brand); }
+.pa-price-inline { display: inline-flex; align-items: center; gap: 4px; }
+.pa-price-inline input { width: 84px; min-height: 32px; padding: 4px 6px; border: 1.5px solid var(--c-brand); border-radius: 8px; font: inherit;
+  font-size: 14px; text-align: right; color: var(--c-ink); }
+.pa-price-inline input:focus { outline: none; box-shadow: 0 0 0 3px rgba(196,22,28,.12); }
+.pa-price-inline .pa-mini { min-width: 32px; padding: 4px 6px; }
+.pa-row-error { margin-top: 4px; font-size: 13px; }
+@media (max-width: 420px) { .pa-mini-group { max-width: 150px; } }
 .pa-routed-hint { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--c-muted); }
 .pharmacy-items tr.pa-row-routed td { background: var(--c-orange-soft); color: var(--c-orange); }
 .pharmacy-items tr.pa-row-routed td.name { box-shadow: inset 4px 0 0 var(--c-orange); }

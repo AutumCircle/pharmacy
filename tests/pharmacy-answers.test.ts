@@ -6,6 +6,7 @@ import {
   crossPharmacyMark, normalizePharmacyPrice,
   isAmountConfirmed, pharmacyAnswerChip, validatePharmacyAnswersRequest,
   ROW_ACTION_LABELS, routedAwayMark, rowActionRequest, sendChangeNotificationSafely, splitChangeNotification,
+  unavailableConfirmText,
 } from '../src/lib/pharmacy-answers.ts';
 
 const at = '2026-10-16T09:00:00+00:00';
@@ -158,7 +159,7 @@ test('answersProgressText shows N of M only for new Lambda responses', () => {
 
 test('job 013: row actions build the existing pharmacy-answers payload', () => {
   assert.deepEqual(ROW_ACTION_LABELS, { available: 'В наличии', unavailable: 'Нет в наличии', price: 'Изменить цену',
-    save: 'Сохранить' });
+    save: 'Сохранить', cancel: 'Отмена', collect: 'Собрано', confirm: 'Да' });
   assert.deepEqual(rowActionRequest(81, 'available'),
     { ok: true, value: { answers: [{ order_item_id: 81, answer: 'available' }] } });
   assert.deepEqual(rowActionRequest(81, 'unavailable'),
@@ -206,4 +207,26 @@ test('job 013: the route strips _notification and survives a notifier failure', 
   await sendChangeNotificationSafely(notification, async () => { throw new Error('notifier down'); },
     (error) => errors.push(error));
   assert.equal(errors.length, 1);
+});
+
+test('job 014: tapping the price posts «В наличии» with the base price through pharmacy-answers', () => {
+  assert.deepEqual(rowActionRequest(82, 'price', '22,5', '20.00'),
+    { ok: true, value: { answers: [{ order_item_id: 82, answer: 'available', base_unit_price: '22.50' }] } });
+  assert.equal(unavailableConfirmText(1), 'Передать в Ватан 2?');
+  assert.equal(unavailableConfirmText(2), 'Нет в обеих аптеках?');
+  assert.equal(unavailableConfirmText(null), 'Передать в Ватан 2?');
+});
+
+test('job 014: the pharmacy-answers route strips _notification and sends it in after()', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const route = await readFile(new URL('../src/app/api/staff/orders/[order_id]/pharmacy-answers/route.ts',
+    import.meta.url), 'utf8');
+  assert.match(route, /import \{ NextResponse, after \} from 'next\/server'/);
+  assert.match(route, /splitChangeNotification\(response\.data\)/);
+  assert.match(route, /after\(\(\) => sendChangeNotificationSafely\(notification, sendOrderNotification,/);
+  assert.match(route, /NextResponse\.json\(\{ \.\.\.response, data \}/);
+  // The inline price editor and the row buttons post to this same route (no other fetch).
+  const row = await readFile(new URL('../src/app/staff/orders/PharmacyItemRow.tsx', import.meta.url), 'utf8');
+  assert.match(row, /post\('pharmacy-answers', checked\.value, id\)/);
+  assert.doesNotMatch(row, /fetch\(/);
 });

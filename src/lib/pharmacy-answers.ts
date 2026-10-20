@@ -116,13 +116,28 @@ export function validatePharmacyAnswersRequest(body: unknown): AnswersValidation
   return { ok: true, value: { answers } };
 }
 
-/** Job 013 row controls of the pharmacy medicines table («Цена отличается» is no longer offered). */
+/**
+ * Row controls of the pharmacy medicines table («Цена отличается» is no longer offered). Job 014: the
+ * same compact controls for «Ватан 1» and «Ватан 2» next to the line sum; the price itself is tapped to
+ * edit it (`price` / `save` / `cancel` are the accessible names of that inline editor).
+ */
 export const ROW_ACTION_LABELS = {
   available: 'В наличии',
   unavailable: 'Нет в наличии',
   price: 'Изменить цену',
   save: 'Сохранить',
+  cancel: 'Отмена',
+  collect: 'Собрано',
+  confirm: 'Да',
 } as const;
+
+/**
+ * Job 014: the inline confirmation of «Нет в наличии» at both pharmacies. «Ватан 1» passes the item to
+ * «Ватан 2»; at «Ватан 2» the item is then missing in both pharmacies.
+ */
+export function unavailableConfirmText(pharmacyId: number | null | undefined): string {
+  return pharmacyId === 2 ? 'Нет в обеих аптеках?' : 'Передать в Ватан 2?';
+}
 
 export type RowAction = 'available' | 'unavailable' | 'price';
 

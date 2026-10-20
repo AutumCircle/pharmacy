@@ -246,7 +246,8 @@ test('job 013: row controls only on own rows of a pending order with answer fiel
     { order_item_id: 82, medicine_name: 'B', my_answer: 'available', routed_here: true },
   ] };
   const pending = pharmacyOrderView({ ...base, status: 'pending' });
-  assert.deepEqual(pending.rows?.map((row) => row.canAct), [true, false], 'routed-here items keep the «Ватан 2» controls');
+  // Job 014: routed-here items get the same row controls (no separate «Ватан 2» list).
+  assert.deepEqual(pending.rows?.map((row) => row.canAct), [true, true]);
   const confirmed = pharmacyOrderView({ ...base, status: 'confirmed', stage: 'confirmed' });
   assert.deepEqual(confirmed.rows?.map((row) => row.canAct), [false, false]);
   assert.equal(confirmed.stageLabel, 'Подтверждён');
@@ -262,4 +263,81 @@ test('job 013: row controls only on own rows of a pending order with answer fiel
     routed_away: [{ order_item_id: 82, medicine_name: 'B', pharmacy_id: 2, answer: null }] }).rows, null);
   // Status hidden by the policy: no stage chip.
   assert.equal(pharmacyOrderView({ order_id: 'ord_x', stage: 'assembled' }).stageLabel, null);
+});
+
+// --- job 014: one compact format for «Ватан 1» and «Ватан 2» -----------------------------------------
+
+const rowShape = (row: { kind: string; canAct: boolean; canEditPrice: boolean; canCollect: boolean;
+  chip: { text: string; tone: string } | null; unitPrice: unknown; lineTotal: unknown }) =>
+  [row.kind, row.canAct, row.canEditPrice, row.canCollect, row.chip?.text ?? null, row.unitPrice, row.lineTotal];
+
+test('job 014: the same row view for «Ватан 1» and «Ватан 2»', () => {
+  const medicines = [
+    { order_item_id: 81, medicine_name: 'A', quantity: 1, base_unit_price: '10.00', base_line_total: '10.00', my_answer: null },
+    { order_item_id: 82, medicine_name: 'B', quantity: 2, base_unit_price: '5.00', base_line_total: '10.00',
+      my_answer: 'available' },
+  ];
+  const one = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines }, 1);
+  const two = pharmacyOrderView({ order_id: 'ord_x', status: 'pending',
+    medicines: medicines.map((item) => ({ ...item, routed_here: false })) }, 2);
+  assert.deepEqual(one.rows?.map(rowShape), two.rows?.map(rowShape));
+  assert.deepEqual(one.rows?.map(rowShape), [
+    ['own', true, true, false, 'Ждёт ответа', '10.00', '10.00'],
+    ['own', true, true, false, 'В наличии', '5.00', '10.00'],
+  ]);
+  assert.equal(one.actionColumn, true);
+  assert.equal(two.actionColumn, true);
+});
+
+test('job 014: «Ватан 2» routed items are table rows with compact controls, price edit and «Собрано»', () => {
+  const view = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', assembly_available: true,
+    medicines: [
+      { order_item_id: 82, medicine_name: 'B', quantity: 1, base_unit_price: '20.00', base_line_total: '20.00',
+        my_answer: null, routed_here: true },
+      { order_item_id: 83, medicine_name: 'C', quantity: 1, base_unit_price: '30.00', base_line_total: '30.00',
+        my_answer: 'available', routed_here: true },
+      { order_item_id: 84, medicine_name: 'D', quantity: 1, base_unit_price: '40.00', base_line_total: '40.00',
+        my_answer: 'available', routed_here: true, collected: true },
+      { order_item_id: 85, medicine_name: 'E', quantity: 1, base_unit_price: '50.00', base_line_total: '50.00',
+        my_answer: 'unavailable', routed_here: true },
+    ] }, 2);
+  assert.deepEqual(view.rows?.map((row) => [row.orderItemId, row.canAct, row.canEditPrice, row.canCollect, row.chip?.text]), [
+    [82, true, true, false, 'Ждёт ответа'],
+    [83, true, true, true, 'В аптеке 2'],
+    // Collected: final, no controls.
+    [84, false, false, false, 'В аптеке 2'],
+    // «Нет в наличии»: no price editor; the buttons stay to change the answer back.
+    [85, true, false, false, 'Нет в наличии в обеих аптеках'],
+  ]);
+  assert.equal(view.rows?.find((row) => row.orderItemId === 85)?.chip?.tone, 'bad');
+  assert.equal(view.partControls, false, '«Сборка сделана» comes from the per-item «Собрано»');
+});
+
+test('job 014: «Нет в наличии» at «Ватан 2» is «нет в обеих аптеках» and both pharmacies confirm it', () => {
+  const own = { order_id: 'ord_x', status: 'pending', medicines: [
+    { order_item_id: 81, medicine_name: 'A', my_answer: 'unavailable' }] };
+  assert.deepEqual(pharmacyOrderView(own, 2).rows?.[0].chip, { text: 'Нет в наличии в обеих аптеках', tone: 'bad' });
+  assert.deepEqual(pharmacyOrderView(own, 1).rows?.[0].chip, { text: 'Нет в наличии', tone: 'bad' });
+  assert.equal(pharmacyOrderView(own, 1).unavailableConfirm, 'Передать в Ватан 2?');
+  assert.equal(pharmacyOrderView(own, 2).unavailableConfirm, 'Нет в обеих аптеках?');
+});
+
+test('job 014: no price editor when the policy hides prices, no answer controls once confirmed', () => {
+  const hidden = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines: [
+    { order_item_id: 81, medicine_name: 'A', quantity: 1, my_answer: null }] }, 1);
+  assert.equal(hidden.showPrices, false);
+  assert.deepEqual(hidden.rows?.map((row) => [row.canAct, row.canEditPrice]), [[true, false]]);
+  const confirmed = pharmacyOrderView({ order_id: 'ord_x', status: 'confirmed', medicines: [
+    { order_item_id: 81, medicine_name: 'A', quantity: 1, base_unit_price: '1.00', base_line_total: '1.00', my_answer: 'available' },
+    { order_item_id: 82, medicine_name: 'B', quantity: 1, base_unit_price: '1.00', base_line_total: '1.00', my_answer: 'available',
+      routed_here: true }] }, 2);
+  assert.deepEqual(confirmed.rows?.map((row) => [row.canAct, row.canEditPrice, row.canCollect]),
+    [[false, false, false], [false, false, true]]);
+  assert.equal(confirmed.actionColumn, true);
+  // Routed-away rows at «Ватан 1» stay read-only.
+  const routedAway = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines: [],
+    routed_away: [{ order_item_id: 82, medicine_name: 'B', pharmacy_id: 2, answer: null }] }, 1);
+  assert.deepEqual(routedAway.rows?.map((row) => [row.kind, row.canAct, row.canEditPrice, row.canCollect]),
+    [['routed', false, false, false]]);
+  assert.equal(routedAway.actionColumn, false);
 });
