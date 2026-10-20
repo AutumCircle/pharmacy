@@ -212,6 +212,9 @@ export type PharmacyPreparationOrder = {
 export type PharmacyPreparationOrderList = {
   data: PharmacyPreparationOrder[];
   page: { next_cursor: string | null; has_more: boolean };
+  /** Job 014: the owner's alarm for both pharmacies (no client data). Missing on an older Lambda; the
+   * client parses and clamps it (parseAlarmConfig) and falls back to classic / 60 s / 60 s. */
+  alarm?: { ringtone: string; duration_seconds: number; interval_seconds: number };
   request_id: string;
 };
 

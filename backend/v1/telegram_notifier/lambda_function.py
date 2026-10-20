@@ -324,7 +324,8 @@ def _price_change_text(change: dict[str, Any], fields: dict[str, Any]) -> str:
 
 
 def format_pharmacy_change_message(event: dict[str, Any], fields: dict[str, Any]) -> str:
-    """Job 013: a pharmacy changed a price or passed an item to «Ватан 2». No client data at all."""
+    """Job 013: a pharmacy changed a price or passed an item to «Ватан 2»; job 014: «Ватан 2» has no
+    stock either («нет в наличии в обеих аптеках»). No client data at all."""
     reference = html.escape(str(event.get("order_reference") or "—"))
     pharmacy = event.get("pharmacy_id")
     pharmacy_label = f"Ватан {pharmacy}" if pharmacy in (1, 2) else "Аптека"
@@ -337,6 +338,8 @@ def format_pharmacy_change_message(event: dict[str, Any], fields: dict[str, Any]
         line = f"• «{name}» × {_quantity(change.get('quantity'))} — "
         if change.get("kind") == "routed":
             line += "передано в Ватан 2"
+        elif change.get("kind") == "unavailable_both":
+            line += "нет в наличии в обеих аптеках"
         elif change.get("kind") == "price":
             line += _price_change_text(change, fields)
         else:

@@ -106,6 +106,17 @@ database credentials или Telegram token. Next.js вызывает API Gateway
 7. Job 013: the customer, courier and admin see one derived stage — «Собирается» → «Собран» →
    «Подтверждён» → «В пути» → «Доставлен» — computed in Lambda (`backend/v1/shared/order_stage.py`)
    from `orders.status` and the pharmacies' «Сборка сделана» marks; there is no stage column.
+8. Job 014: pharmacy alerts (`src/components/PharmacyOrderAlerts.tsx`). Sound cannot be switched off: the
+   `AudioContext` is created on page load and resumed at once (works without a tap in an installed Chrome/Edge
+   app or when the site may play sound); otherwise the first touch or key press anywhere unlocks it — browsers
+   forbid sound before the first interaction in an ordinary tab. Each order waiting for «Сборка сделана» rings
+   with the owner's ringtone, duration and interval (admin «Уведомления заказов», stored as `pharmacy_alarm` in
+   the `order_notification_settings.policies` JSONB, returned to pharmacies as the queue's `alarm`; default
+   classic / 60 s every 60 s for both pharmacies) and, when allowed, shows a system notification every time.
+   Closed-app notifications (Web Push) remain backlog. When «Ватан 1» routes an item to «Ватан 2», a stale
+   «Собран» mark of «Ватан 2» is reopened in the same transaction (audit `pharmacy.order.assembly_reopened`).
+   Both pharmacies use one order table (`PharmacyItemRow`); a «Ватан 2» «Нет в наличии» is announced to the
+   owner/courier as «нет в наличии в обеих аптеках».
 
 Telegram notifier variables are configured only in AWS, never in Git:
 

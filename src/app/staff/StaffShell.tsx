@@ -28,8 +28,8 @@ async function loadWebsiteOrders(): Promise<AlertOrder[]> {
   }));
 }
 
-export default function StaffShell({ children, role, accountId }: {
-  children: React.ReactNode; role: 'pharmacy' | 'courier' | null; accountId: 1 | 2 | 3 | null;
+export default function StaffShell({ children, role }: {
+  children: React.ReactNode; role: 'pharmacy' | 'courier' | null;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -62,7 +62,7 @@ export default function StaffShell({ children, role, accountId }: {
       </header>
       <main className="staff-main">{children}</main>
       <NewOrderAlerts load={loadWebsiteOrders} enabled={role === 'courier'} />
-      <PharmacyOrderAlerts enabled={role === 'pharmacy'} pharmacyId={accountId} />
+      <PharmacyOrderAlerts enabled={role === 'pharmacy'} />
     </div>
   );
 }

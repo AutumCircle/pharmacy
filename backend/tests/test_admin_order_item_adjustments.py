@@ -8,7 +8,7 @@ from backend.v1.admin_api.lambda_function import (
 )
 from backend.v1.telegram_notifier.lambda_function import format_configured_message as notifier_formatter
 from backend.v1.shared.contract import ContractError
-from backend.v1.shared.order_notification_settings import default_policies
+from backend.v1.shared.order_notification_settings import default_pharmacy_alarm, default_policies
 from backend.v1.shared.order_notification_messages import format_configured_message
 
 
@@ -151,7 +151,8 @@ class AdminOrderItemAdjustmentTests(unittest.TestCase):
     def test_preview_uses_delivery_formatter_and_removes_hidden_fields(self):
         policies = default_policies()
         policies['owner_telegram']['phone'] = False
-        preview = preview_order_notifications({'courier_enabled': True, 'policies': policies, 'revision': 1})
+        preview = preview_order_notifications({'courier_enabled': True, 'policies': policies, 'revision': 1,
+                                               'pharmacy_alarm': default_pharmacy_alarm()})
         self.assertNotIn('Телефон', preview['telegram']['owner_telegram'])
         self.assertIn('Новый заказ VAT-1042', preview['telegram']['owner_telegram'])
         self.assertIs(format_configured_message, notifier_formatter)

@@ -1,6 +1,8 @@
 import { parseOrderTime } from './order-time.ts';
 import { orderStageLabel } from './order-stage.ts';
-import { crossPharmacyMark, pharmacyAnswerChip, routedAwayMark } from './pharmacy-answers.ts';
+import {
+  BOTH_PHARMACIES_MISSING, crossPharmacyMark, pharmacyAnswerChip, routedAwayMark, unavailableConfirmText,
+} from './pharmacy-answers.ts';
 import { nextAssemblyAction } from './pharmacy-assembly.ts';
 
 export type WaitingLevel = 'normal' | 'warning' | 'urgent';
@@ -71,6 +73,9 @@ type Chip = { text: string; tone: string };
  * Job 013: one row of the pharmacy medicines table. `own` rows are this pharmacy's items (with the row
  * controls while the order is pending); `routed` rows are items «Ватан 1» answered «Нет в наличии» that
  * now sit at «Ватан 2» — read-only, with an orange «Ватан 2» or red «Нет в наличии в обеих аптеках» chip.
+ * Job 014: «Ватан 1» and «Ватан 2» use the same rows; items routed to «Ватан 2» are own rows there (no
+ * separate list), with the compact «В наличии» / «Нет в наличии» next to the sum, the tap-to-edit price
+ * and «Собрано».
  */
 export type PharmacyTableRow = {
   key: string;
@@ -87,8 +92,12 @@ export type PharmacyTableRow = {
   collected: boolean;
   /** Answer-column chip; null on an old Lambda response without answers. */
   chip: Chip | null;
-  /** «В наличии» / «Нет в наличии» / «Изменить цену» are shown on this row. */
+  /** Compact «В наличии» / «Нет в наличии» next to the sum (own row of a pending order, not collected). */
   canAct: boolean;
+  /** The price can be tapped to edit it: canAct, the price is shown by the policy, not «Нет в наличии». */
+  canEditPrice: boolean;
+  /** «Собрано» for an item routed here and answered «В наличии» (rework 1, «Ватан 2»). */
+  canCollect: boolean;
   /** Small hint under the name of a routed row («Ждёт ответа Ватан 2» while «Ватан 2» has not answered). */
   hint: string | null;
 };
@@ -126,6 +135,10 @@ export type PharmacyOrderView = {
   rows: PharmacyTableRow[] | null;
   /** The table has an answer column (answers present or routed rows to mark). */
   answerColumn: boolean;
+  /** Job 014: the narrow controls column next to the sum (some row has controls). */
+  actionColumn: boolean;
+  /** Job 014: the inline «Нет в наличии» confirmation of this pharmacy. */
+  unavailableConfirm: string;
   /** Show «Начать сборку» / «Сборка сделана» (hidden when every own item came routed: those are per item). */
   partControls: boolean;
   /** Job 011: this pharmacy's mark (null = «Ждёт сборки» or an old Lambda). */
@@ -156,7 +169,7 @@ function amount(value: unknown): Money | null {
  * a field is shown when the API returns it (owner turned it ON) and hidden when it is absent.
  * Defaults (Lambda side) keep client identity, client totals, profit and creator OFF.
  */
-export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView {
+export function pharmacyOrderView(order: PharmacyOrderInput, pharmacyId?: number | null): PharmacyOrderView {
   const medicines = Array.isArray(order.medicines) ? order.medicines : null;
   const hasItems = !!medicines && medicines.length > 0;
   const showPrices = hasItems
@@ -175,22 +188,30 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
     const myAnswer = hasAnswers ? itemAnswer(item.my_answer) : null;
     const routedHere = hasAnswers && item.routed_here === true;
     const crossMark = hasAnswers ? crossPharmacyMark(routedHere, myAnswer) : null;
+    const collected = hasAnswers && item.collected === true;
+    const unitPrice = showPrices ? amount(item.base_unit_price) : null;
+    // Same controls for both pharmacies (job 014); a collected item is final.
+    const canAct = canAnswer && !collected;
+    // «Нет в наличии» at «Ватан 2» means the item is missing in both pharmacies.
+    const bothMissing = pharmacyId === 2 && myAnswer === 'unavailable'
+      ? { text: BOTH_PHARMACIES_MISSING, tone: 'bad' } : null;
     return {
       key: `own-${hasAnswers ? item.order_item_id : `i${index}`}`,
       kind: 'own',
       orderItemId: hasAnswers ? item.order_item_id ?? null : null,
       name: item.medicine_name,
       quantity: item.quantity ?? null,
-      unitPrice: showPrices ? amount(item.base_unit_price) : null,
+      unitPrice,
       lineTotal: showPrices ? amount(item.base_line_total) : null,
       clientLineTotal: showClientPrices ? amount(item.line_total) : null,
       myAnswer,
       myProblem: hasAnswers ? text(item.my_problem) : null,
       routedHere,
-      collected: hasAnswers && item.collected === true,
-      chip: hasAnswers ? crossMark ?? pharmacyAnswerChip(myAnswer) : null,
-      // «Ватан 2» keeps its per-item controls for items routed here (PharmacyRoutedItems).
-      canAct: canAnswer && !routedHere,
+      collected,
+      chip: hasAnswers ? crossMark ?? bothMissing ?? pharmacyAnswerChip(myAnswer) : null,
+      canAct,
+      canEditPrice: canAct && unitPrice !== null && myAnswer !== 'unavailable',
+      canCollect: routedHere && myAnswer === 'available' && !collected,
       hint: null,
     };
   });
@@ -202,7 +223,7 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
         key: `routed-${id ?? `i${index}`}`, kind: 'routed', orderItemId: id, name: entry.medicine_name,
         quantity: entry.quantity ?? null, unitPrice: null, lineTotal: null, clientLineTotal: null,
         myAnswer: 'unavailable', myProblem: null, routedHere: false, collected: false,
-        chip: routedAwayMark(itemAnswer(entry.answer)), canAct: false,
+        chip: routedAwayMark(itemAnswer(entry.answer)), canAct: false, canEditPrice: false, canCollect: false,
         hint: itemAnswer(entry.answer) === null ? 'Ждёт ответа Ватан 2' : null,
       };
     }) : [];
@@ -246,6 +267,8 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
     routedAwayCount: typeof order.routed_away_count === 'number' && order.routed_away_count > 0 ? order.routed_away_count : 0,
     rows,
     answerColumn: hasAnswers || routedRows.length > 0,
+    actionColumn: ownRows.some((row) => row.canAct || row.canCollect),
+    unavailableConfirm: unavailableConfirmText(pharmacyId),
     partControls: assemblyAvailable
       && !(hasAnswers && !!medicines && medicines.length > 0 && medicines.every((item) => item.routed_here === true)),
     assemblyState,

@@ -223,7 +223,10 @@ class PharmacyAnswerTests(unittest.TestCase):
         _, cursor = self._run({'answers': [
             {'order_item_id': 81, 'answer': 'unavailable'},
             {'order_item_id': 82, 'answer': 'price_differs', 'problem': 'дороже на 5'}]})
-        audits = [call for call in cursor.execute.call_args_list if 'admin_audit_log' in call.args[0]]
+        # Job 014: routing also issues the conditional «Ватан 2» reopen statement, whose own audit row is
+        # written by SQL only when a part was reopened; it is checked in test_staff_accounts.
+        audits = [call for call in cursor.execute.call_args_list
+                  if 'admin_audit_log' in call.args[0] and 'UPDATE order_pharmacy_assembly' not in call.args[0]]
         self.assertEqual(len(audits), 1)
         actor, action, resource_type, resource_id, request, raw = audits[0].args[1]
         self.assertEqual((actor, action, resource_type, resource_id, request),

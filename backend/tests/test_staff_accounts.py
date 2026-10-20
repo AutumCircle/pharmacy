@@ -738,6 +738,191 @@ class StaffTests(unittest.TestCase):
             staff.login({'username': 'employee_one', 'password': 'Example-only-strong7!'})
         self.assertEqual(error.exception.http_status, 429)
 
+    # --- job 014: «Ватан 2» is alerted again when «Ватан 1» routes another item ------------------
+
+    def _routing_db(self):
+        """A tiny stand-in for the rows the routing touches: the order, its items and the two
+        pharmacies' assembly marks. «Ватан 2» already collected its earlier routed item (82), so its
+        part is «Собран»; «Ватан 1» still assembles and now routes item 83."""
+        test = self
+
+        class RoutingDb:
+            def __init__(self):
+                self.parts = {1: 'assembling', 2: 'assembled'}
+                self.statements = []
+                self._one, self._all = None, []
+
+            def execute(self, sql, params=None):
+                self.statements.append((sql, params))
+                flat = ' '.join(sql.split())
+                self._one, self._all = None, []
+                if flat.startswith('SELECT id, public_id'):
+                    self._one = {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'order_reference': '2010-007',
+                                 'status': 'pending', 'created_by_staff_account_id': None,
+                                 'fulfillment_pharmacy_id': None}
+                elif 'FOR UPDATE OF oi' in flat:
+                    self._all = [
+                        {'id': 81, 'pharmacy_id': 1, 'answer': 'available', 'problem': None,
+                         'medicine_name': 'A', 'quantity': Decimal('1'), 'base_unit_price': Decimal('10.00'),
+                         'selling_unit_price': Decimal('12')},
+                        {'id': 82, 'pharmacy_id': 2, 'answer': 'unavailable', 'problem': None,
+                         'medicine_name': 'B', 'quantity': Decimal('1'), 'base_unit_price': Decimal('20.00'),
+                         'selling_unit_price': Decimal('24')},
+                        {'id': 83, 'pharmacy_id': 1, 'answer': None, 'problem': None,
+                         'medicine_name': 'C', 'quantity': Decimal('2'), 'base_unit_price': Decimal('5.00'),
+                         'selling_unit_price': Decimal('6')}]
+                elif 'UPDATE order_pharmacy_assembly' in flat:
+                    test.assertIn("WHERE order_id = %s AND pharmacy_id = 2 AND state = 'assembled'", flat)
+                    if self.parts.get(2) == 'assembled':
+                        self.parts[2] = 'assembling'
+                elif flat.startswith('SELECT parts.pharmacy_id, asm.state'):
+                    self._all = [{'pharmacy_id': pid, 'state': state} for pid, state in sorted(self.parts.items())]
+
+            def fetchone(self):
+                return self._one
+
+            def fetchall(self):
+                return self._all
+
+        return RoutingDb()
+
+    def test_vatan2_assembled_part_reopens_when_vatan1_routes_another_item(self):
+        from backend.v1.admin_api.lambda_function import _require_assembly_complete, answer_pharmacy_order_items
+        from backend.v1.shared.order_stage import assembly_complete, order_stage
+        db = self._routing_db()
+        transactions = []
+
+        @contextmanager
+        def routing_transaction():
+            transactions.append(db)
+            yield db
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', routing_transaction):
+            answer_pharmacy_order_items('ord_' + 'a' * 32, {'answers': [{'order_item_id': 83, 'answer': 'unavailable'}]},
+                                        1, 'req_' + 'c' * 32)
+        # One transaction: the routing UPDATE, then the reopen of «Ватан 2»'s part, then its audit row.
+        self.assertEqual(len(transactions), 1)
+        sqls = [' '.join(sql.split()) for sql, _ in db.statements]
+        route = next(i for i, sql in enumerate(sqls) if sql.startswith('UPDATE order_items SET fulfillment_pharmacy_id = 2'))
+        reopen = next(i for i, sql in enumerate(sqls) if 'UPDATE order_pharmacy_assembly' in sql)
+        self.assertGreater(reopen, route)
+        self.assertIn("SET state = 'assembling', assembled_at = NULL", sqls[reopen])
+        self.assertIn('pharmacy.order.assembly_reopened', str(db.statements[reopen]))
+        self.assertEqual(db.parts, {1: 'assembling', 2: 'assembling'})
+        # «Ватан 2»'s queue row now needs attention again (alarm, banner, counter).
+        row = self._pharmacy_rows(pharmacy_id=2, extra={
+            'assemblable_count': 2, 'assembly_state': db.parts[2], 'unanswered_count': 1,
+            'stage_assembled': assembly_complete(True, db.parts.values())})[0]['data'][0]
+        self.assertIs(row['needs_attention'], True)
+        # The order is no longer «Собран», and the courier's «Согласовано» is blocked.
+        self.assertEqual(order_stage('pending', assembly_complete(True, db.parts.values())), 'assembling')
+        self.assertEqual(row['stage'], 'assembling')
+        with self.assertRaises(ContractError) as blocked:
+            _require_assembly_complete(db, 7)
+        self.assertEqual(blocked.exception.code, 'ASSEMBLY_NOT_COMPLETE')
+
+    def test_vatan2_part_is_not_touched_without_routing(self):
+        from backend.v1.admin_api.lambda_function import answer_pharmacy_order_items
+        db = self._routing_db()
+
+        @contextmanager
+        def routing_transaction():
+            yield db
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', routing_transaction):
+            answer_pharmacy_order_items('ord_' + 'a' * 32, {'answers': [{'order_item_id': 83, 'answer': 'available'}]},
+                                        1, 'req_' + 'c' * 32)
+        self.assertFalse(any('UPDATE order_pharmacy_assembly' in sql for sql, _ in db.statements))
+        self.assertEqual(db.parts[2], 'assembled')
+
+    # --- job 014: alarm in the queue and the owner's change notifications ----------------------------
+
+    def test_pharmacy_queue_carries_alarm_for_both_pharmacies(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        for pharmacy_id in (1, 2):
+            with self.subTest(pharmacy_id=pharmacy_id):
+                result, _ = self._pharmacy_rows(pharmacy_id=pharmacy_id)
+                self.assertEqual(result['alarm'], {'ringtone': 'classic', 'duration_seconds': 60,
+                                                   'interval_seconds': 60})
+        saved = {'ringtone': 'bell', 'duration_seconds': 30, 'interval_seconds': 90}
+        all_off = {'pharmacy_web': {field: False for field in FIELDS}, 'pharmacy_alarm': saved}
+        for pharmacy_id in (1, 2):
+            with self.subTest(pharmacy_id=pharmacy_id, saved=True):
+                result, cursor = self._pharmacy_rows(pharmacy_id=pharmacy_id, policies=all_off)
+                self.assertEqual(result['alarm'], saved)
+                # Same two read-only statements as before: no new query for the alarm.
+                self.assertEqual(cursor.execute.call_count, 2)
+                self.assertNotIn('alarm', result['data'][0])
+
+    def _answer(self, pharmacy_id, payload, items):
+        from backend.v1.admin_api.lambda_function import answer_pharmacy_order_items
+        cursor = Mock()
+        cursor.fetchone.side_effect = [
+            {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'order_reference': '2010-007', 'status': 'pending',
+             'created_by_staff_account_id': None, 'fulfillment_pharmacy_id': None,
+             'customer_name': 'PRIVATE', 'phone': '+992917123456', 'address': 'PRIVATE ADDRESS'},
+            {'selling_unit_price': Decimal('54'), 'line_total': Decimal('54.00')},
+        ]
+        cursor.fetchall.return_value = items
+
+        @contextmanager
+        def answer_transaction():
+            yield cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', answer_transaction):
+            return answer_pharmacy_order_items('ord_' + 'a' * 32, payload, pharmacy_id, 'req_' + 'd' * 32)
+
+    @staticmethod
+    def _item(item_id, pharmacy_id, answer=None):
+        return {'id': item_id, 'pharmacy_id': pharmacy_id, 'answer': answer, 'problem': None,
+                'medicine_name': 'Парацетамол', 'quantity': Decimal('2'), 'base_unit_price': Decimal('40.00'),
+                'selling_unit_price': Decimal('48')}
+
+    def _assert_change_notification(self, result, pharmacy_id, kind):
+        notification = result['_notification']
+        self.assertEqual(notification['notification_kind'], 'pharmacy_item_change')
+        self.assertEqual(notification['pharmacy_id'], pharmacy_id)
+        self.assertEqual(notification['event_key'], 'order:7:pharmacy-change:req_' + 'd' * 32)
+        self.assertEqual([change['kind'] for change in notification['changes']], [kind])
+        self.assertEqual(notification['changes'][0]['medicine_name'], 'Парацетамол')
+        text = json.dumps(notification, ensure_ascii=False)
+        for secret in ('PRIVATE', '917123456', 'customer_name', 'phone', 'address', 'landmark', 'comment'):
+            self.assertNotIn(secret, text)
+        return notification['changes'][0]
+
+    def test_owner_is_told_about_vatan1_price_change(self):
+        result = self._answer(1, {'answers': [{'order_item_id': 81, 'answer': 'available', 'base_unit_price': '45'}]},
+                              [self._item(81, 1)])
+        change = self._assert_change_notification(result, 1, 'price')
+        self.assertEqual((change['old_base_unit_price'], change['new_base_unit_price']), ('40.00', '45.00'))
+
+    def test_owner_is_told_about_vatan2_price_change(self):
+        result = self._answer(2, {'answers': [{'order_item_id': 82, 'answer': 'available', 'base_unit_price': '45'}]},
+                              [self._item(81, 1, 'available'), self._item(82, 2)])
+        change = self._assert_change_notification(result, 2, 'price')
+        self.assertEqual(change['new_selling_unit_price'], '54')
+
+    def test_owner_is_told_about_vatan1_routing(self):
+        result = self._answer(1, {'answers': [{'order_item_id': 81, 'answer': 'unavailable'}]},
+                              [self._item(81, 1), self._item(82, 1)])
+        self._assert_change_notification(result, 1, 'routed')
+
+    def test_owner_is_told_about_vatan2_unavailable_in_both(self):
+        result = self._answer(2, {'answers': [{'order_item_id': 82, 'answer': 'unavailable'}]},
+                              [self._item(81, 1, 'available'), self._item(82, 2)])
+        change = self._assert_change_notification(result, 2, 'unavailable_both')
+        self.assertEqual(change, {'kind': 'unavailable_both', 'medicine_name': 'Парацетамол', 'quantity': '2'})
+        # Repeating the same answer is a no-op and announces nothing.
+        again = self._answer(2, {'answers': [{'order_item_id': 82, 'answer': 'unavailable'}]},
+                             [self._item(81, 1, 'available'), self._item(82, 2, 'unavailable')])
+        self.assertNotIn('_notification', again)
+        # «Ватан 2» «В наличии» or «Цена отличается» is not a «нет в обеих» event.
+        for answer in ({'order_item_id': 82, 'answer': 'available'},
+                       {'order_item_id': 82, 'answer': 'price_differs', 'problem': 'дороже на 5'}):
+            with self.subTest(answer=answer):
+                plain = self._answer(2, {'answers': [answer]}, [self._item(81, 1, 'available'), self._item(82, 2)])
+                self.assertNotIn('_notification', plain)
+
 
 if __name__ == '__main__':
     unittest.main()

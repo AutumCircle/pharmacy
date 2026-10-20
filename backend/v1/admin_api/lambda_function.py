@@ -41,7 +41,7 @@ from backend.v1.shared.xlsx_export import (
 )
 from backend.v1.shared import collection_admin, staff_accounts
 from backend.v1.shared.order_notification_settings import (
-    CHANNELS as NOTIFICATION_CHANNELS, effective_settings, validate_update,
+    CHANNELS as NOTIFICATION_CHANNELS, effective_settings, stored_policies, validate_update,
 )
 from backend.v1.shared.order_notification_messages import format_configured_message
 from backend.v1.shared.order_time import absolute_order_time, order_time_dushanbe, order_time_iso
@@ -444,7 +444,7 @@ def get_order_notification_settings() -> dict[str, Any]:
 def preview_order_notifications(payload: dict[str, Any]) -> dict[str, Any]:
     """Render a fixed sample with the exact formatter used by Telegram delivery."""
     try:
-        enabled, policies, _ = validate_update(payload)
+        enabled, policies, _, _alarm = validate_update(payload)
     except ValueError as exc:
         raise ContractError("VALIDATION_ERROR", "Неверные настройки предпросмотра") from exc
     sample = {
@@ -490,7 +490,7 @@ def preview_order_notifications(payload: dict[str, Any]) -> dict[str, Any]:
 
 def update_order_notification_settings(payload: dict[str, Any], actor_id: str, current_request_id: str) -> dict[str, Any]:
     try:
-        enabled, policies, revision = validate_update(payload)
+        enabled, policies, revision, alarm = validate_update(payload)
     except ValueError as exc:
         raise ContractError("VALIDATION_ERROR", "Неверные настройки уведомлений") from exc
     with transaction() as cur:
@@ -506,12 +506,14 @@ def update_order_notification_settings(payload: dict[str, Any], actor_id: str, c
                            updated_at = CURRENT_TIMESTAMP, updated_by = %s
                        WHERE singleton_id = 1
                        RETURNING courier_enabled, policies, revision, updated_at, updated_by""",
-                    (enabled, json.dumps(policies), enabled, actor_id))
+                    (enabled, json.dumps(stored_policies(policies, alarm)), enabled, actor_id))
         saved = effective_settings(cur.fetchone())
         _write_admin_audit(cur, actor_id=actor_id, action="order.notification_settings_updated",
                            resource_type="order_notification_settings", resource_id="1", request=current_request_id,
-                           details={"previous": {"courier_enabled": current["courier_enabled"], "policies": current["policies"]},
-                                    "current": {"courier_enabled": enabled, "policies": policies}})
+                           details={"previous": {"courier_enabled": current["courier_enabled"], "policies": current["policies"],
+                                                 "pharmacy_alarm": current["pharmacy_alarm"]},
+                                    "current": {"courier_enabled": enabled, "policies": policies,
+                                                "pharmacy_alarm": alarm}})
     return saved
 
 
@@ -1666,7 +1668,10 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         )
         rows = [dict(row) for row in cur.fetchall()]
         cur.execute("SELECT courier_enabled, policies, revision FROM order_notification_settings WHERE singleton_id = 1")
-        policy = effective_settings(cur.fetchone())["policies"]["pharmacy_web"]
+        settings = effective_settings(cur.fetchone())
+        policy = settings["policies"]["pharmacy_web"]
+        # Job 014: the owner's alarm (ringtone, duration, interval) for both pharmacies; no client data.
+        alarm = settings["pharmacy_alarm"]
     has_more = len(rows) > limit
     rows = rows[:limit]
     next_cursor = None
@@ -1744,7 +1749,7 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                                    ("item_base_total", "base_line_total")):
                     if not policy[field]:
                         item.pop(key, None)
-    return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
+    return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}, "alarm": alarm}
 
 
 PHARMACY_ANSWERS = ("available", "unavailable", "price_differs")
@@ -1826,8 +1831,9 @@ def answer_pharmacy_order_items(
     routes. Either pharmacy may send its own (base) price with «В наличии» for its own item (job 013; was
     «Ватан 2» only); client prices and totals are recomputed in SQL. orders.status and
     order_status_history are never touched. Repeating the same request is a no-op (no writes, no audit)
-    and returns the same projection. A request that routes an item or changes a price also returns
-    `_notification` (owner/courier Telegram, no client data); the Next.js route strips it.
+    and returns the same projection. A request that routes an item, changes a price or (job 014) records a
+    «Ватан 2» «Нет в наличии» also returns `_notification` (owner/courier Telegram, no client data); the
+    Next.js route strips it. Routing also reopens a stale «Собран» mark of «Ватан 2» (job 014).
     """
     if pharmacy_id not in (1, 2):
         raise ContractError("FORBIDDEN", "Доступ только для аптеки", http_status=403)
@@ -1859,6 +1865,7 @@ def answer_pharmacy_order_items(
                                 "Ответить можно только по новому заказу", http_status=409)
         changes: list[dict[str, Any]] = []
         routed: list[int] = []
+        unavailable_both: list[int] = []
         price_changes: list[dict[str, Any]] = []
         for entry in answers:
             item = items.get(entry["order_item_id"])
@@ -1885,6 +1892,8 @@ def answer_pharmacy_order_items(
             changes.append(entry)
             if pharmacy_id == 1 and entry["answer"] == "unavailable":
                 routed.append(entry["order_item_id"])
+            elif pharmacy_id == 2 and entry["answer"] == "unavailable":
+                unavailable_both.append(entry["order_item_id"])  # job 014: owner/courier are told
         if changes:
             cur.execute("""INSERT INTO order_item_pharmacy_answers
                                (order_item_id, pharmacy_id, answer, problem, answered_by)
@@ -1900,6 +1909,7 @@ def answer_pharmacy_order_items(
                 cur.execute("""UPDATE order_items SET fulfillment_pharmacy_id = 2, pharmacy_assigned_at = now()
                                WHERE order_id = %s AND id = ANY(%s)""",
                             (order["id"], routed))
+                _reopen_pharmacy_two_assembly(cur, order["id"], order_id, routed, current_request_id)
             _write_admin_audit(cur, actor_id=actor, action="pharmacy.order.items_answered",
                                resource_type="order", resource_id=order_id, request=current_request_id,
                                details={"pharmacy_id": pharmacy_id,
@@ -1927,10 +1937,32 @@ def answer_pharmacy_order_items(
         "awaiting_response": any(item["answer"] is None for item in mine),
     }
     notification = _pharmacy_change_notification(order, order_id, pharmacy_id, items, routed, repriced,
-                                                 current_request_id)
+                                                 current_request_id, unavailable_both)
     if notification:
         result["_notification"] = notification
     return result
+
+
+def _reopen_pharmacy_two_assembly(
+    cur: Any, order_db_id: int, order_id: str, routed: list[int], current_request_id: str,
+) -> None:
+    """Job 014: «Ватан 1» just routed new items to «Ватан 2». If «Ватан 2» had already marked its part
+    «Собран» (e.g. it collected an earlier routed item), that mark is stale: reopen it to «Собирается» so
+    «Ватан 2» is alerted again, the order leaves «Собран» and «Согласовано» waits. Items already collected
+    keep their «Собрано». One statement in the routing transaction; the audit row is written only when a
+    part was actually reopened. The actor is always 'staff:1': only «Ватан 1» routes items (see
+    answer_pharmacy_order_items); pass the actor in if that ever changes."""
+    cur.execute("""WITH reopened AS (
+                       UPDATE order_pharmacy_assembly
+                       SET state = 'assembling', assembled_at = NULL, updated_by = 'staff:1'
+                       WHERE order_id = %s AND pharmacy_id = 2 AND state = 'assembled'
+                       RETURNING order_id)
+                   INSERT INTO admin_audit_log (actor_id, action, resource_type, resource_id, request_id, details)
+                   SELECT 'staff:1', 'pharmacy.order.assembly_reopened', 'order', %s, %s, %s::jsonb
+                   FROM reopened""",
+                (order_db_id, order_id, current_request_id,
+                 json.dumps({"pharmacy_id": 2, "from_state": "assembled", "to_state": "assembling",
+                             "routed_order_item_ids": sorted(routed)})))
 
 
 def _decimal_text(value: Any) -> str | None:
@@ -1939,18 +1971,22 @@ def _decimal_text(value: Any) -> str | None:
 
 def _pharmacy_change_notification(
     order: Any, order_id: str, pharmacy_id: int, items: dict[int, dict[str, Any]], routed: list[int],
-    repriced: dict[int, dict[str, Any]], current_request_id: str,
+    repriced: dict[int, dict[str, Any]], current_request_id: str, unavailable_both: list[int] | None = None,
 ) -> dict[str, Any] | None:
-    """Job 013 owner/courier Telegram payload for a price change or a routing to «Ватан 2».
+    """Job 013 owner/courier Telegram payload for a price change or a routing to «Ватан 2»; job 014 adds
+    «Ватан 2» «Нет в наличии» (kind "unavailable_both": the item is missing in both pharmacies).
 
     Only the reference, the pharmacy and the changed items (name, quantity, prices); never the client
-    name, phone, address, landmark or comment. None when nothing was routed or repriced."""
+    name, phone, address, landmark or comment. None when nothing was routed, repriced or reported missing."""
+    missing = set(unavailable_both or ())
     changes: list[dict[str, Any]] = []
-    for item_id in sorted(set(routed) | set(repriced)):
+    for item_id in sorted(set(routed) | set(repriced) | missing):
         item = items.get(item_id) or {}
         base = {"medicine_name": item.get("medicine_name"), "quantity": _decimal_text(item.get("quantity"))}
         if item_id in routed:
             changes.append({"kind": "routed", **base})
+        if item_id in missing:
+            changes.append({"kind": "unavailable_both", **base})
         if item_id in repriced:
             change = repriced[item_id]
             changes.append({"kind": "price", **base,

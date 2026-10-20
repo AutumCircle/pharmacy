@@ -1,9 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AdminNotificationPreview, AdminNotificationSettings, NotificationChannel, NotificationField } from '@/lib/api-v1/admin-types';
 import { formatOrderDateTime } from '@/lib/order-time';
+import { alarmSettingsOrDefault, validateAlarmForm, type PharmacyAlarmSettings } from '@/lib/pharmacy-alarm';
+import PharmacyAlarmSettingsForm, { type AlarmFormState } from './PharmacyAlarmSettings';
 import { previewNotificationSettings, saveNotificationSettings } from './actions';
+
+function alarmForm(settings: AdminNotificationSettings): AlarmFormState {
+  const alarm = alarmSettingsOrDefault(settings.pharmacy_alarm);
+  return { ringtone: alarm.ringtone, duration: String(alarm.duration_seconds), interval: String(alarm.interval_seconds) };
+}
 
 const channels: Array<{ key: NotificationChannel; label: string }> = [
   { key: 'owner_telegram', label: 'Владелец · Telegram' },
@@ -40,12 +47,18 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
   const [previewBusy, setPreviewBusy] = useState(true);
   const [previewError, setPreviewError] = useState('');
   const [openPreview, setOpenPreview] = useState<NotificationChannel | null>(null);
+  // Job 014: the pharmacy alarm (ringtone, duration, interval) is edited as text and checked on save.
+  const [alarm, setAlarm] = useState<AlarmFormState>(() => alarmForm(initialSettings));
+  const [alarmErrors, setAlarmErrors] = useState<string[]>([]);
+  const savedAlarm: PharmacyAlarmSettings = useMemo(() => alarmSettingsOrDefault(saved.pharmacy_alarm), [saved]);
 
   useEffect(() => {
     let active = true;
     const timer = window.setTimeout(async () => {
+      // The Telegram/web preview does not depend on the alarm; the saved alarm keeps the payload valid.
       const result = await previewNotificationSettings({
         courier_enabled: draft.courier_enabled, policies: draft.policies, revision: draft.revision,
+        pharmacy_alarm: savedAlarm,
       });
       if (!active) return;
       if (result.success) { setPreview(result.preview); setPreviewError(''); }
@@ -53,7 +66,7 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
       setPreviewBusy(false);
     }, 250);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [draft]);
+  }, [draft, savedAlarm]);
 
   function toggle(channel: NotificationChannel, field: NotificationField) {
     if (field === 'order_reference') return;
@@ -71,13 +84,26 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
     setPreviewBusy(true);
   }
 
+  function changeAlarm(next: AlarmFormState) {
+    setAlarm(next);
+    setAlarmErrors([]);
+    setMessage('');
+  }
+
   async function save() {
-    setBusy(true); setMessage('');
+    const checked = validateAlarmForm(alarm.ringtone, alarm.duration, alarm.interval);
+    if (!checked.ok) {
+      setAlarmErrors(checked.errors);
+      setMessage('Ошибка: проверьте настройки сигнала аптек');
+      return;
+    }
+    setBusy(true); setMessage(''); setAlarmErrors([]);
     const result = await saveNotificationSettings({
       courier_enabled: draft.courier_enabled, policies: draft.policies, revision: saved.revision,
+      pharmacy_alarm: checked.value,
     });
     if (result.success) {
-      setSaved(result.settings); setDraft(result.settings);
+      setSaved(result.settings); setDraft(result.settings); setAlarm(alarmForm(result.settings));
       setMessage('Настройки сохранены. Новые события будут использовать их сразу.');
     } else setMessage(`Ошибка: ${result.error}`);
     setBusy(false);
@@ -106,6 +132,7 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
           disabled={field.key === 'order_reference' || busy} onChange={() => toggle(channel.key, field.key)} />
       </label>)}
     </section>)}</div>
+    <PharmacyAlarmSettingsForm value={alarm} errors={alarmErrors} disabled={busy} onChange={changeAlarm} />
     <section className="notification-preview-section">
       <h2>Как это будет выглядеть</h2>
       <p>Пример с вымышленным заказом. Измените галочки — образец обновится, но сообщение никому не отправится.</p>
@@ -127,7 +154,7 @@ export default function NotificationSettingsClient({ initialSettings }: { initia
     </section>
     <div className="notification-settings-actions"><button type="button" disabled={busy} onClick={save}>
       {busy ? 'Сохраняем…' : 'Сохранить настройки'}</button>
-      <button type="button" disabled={busy} onClick={() => { setDraft(saved); setPreviewBusy(true); setMessage('Изменения отменены.'); }}>Сбросить изменения</button></div>
+      <button type="button" disabled={busy} onClick={() => { setDraft(saved); setAlarm(alarmForm(saved)); setAlarmErrors([]); setPreviewBusy(true); setMessage('Изменения отменены.'); }}>Сбросить изменения</button></div>
     {message && <p role="status" className={message.startsWith('Ошибка') ? 'error' : 'success'}>{message}</p>}
     <small>Последнее изменение: {saved.updated_at ? formatOrderDateTime(saved.updated_at) : 'по умолчанию'}{saved.updated_by ? ` · ${saved.updated_by}` : ''}</small>
   </div>;

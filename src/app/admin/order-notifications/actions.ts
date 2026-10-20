@@ -3,9 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/admin-auth';
 import { previewAdminNotificationSettings, updateAdminNotificationSettings } from '@/lib/api-v1/admin-server';
-import type { AdminNotificationSettings } from '@/lib/api-v1/admin-types';
+import type { AdminNotificationSettingsUpdate } from '@/lib/api-v1/admin-types';
 
-export async function saveNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>) {
+export async function saveNotificationSettings(body: AdminNotificationSettingsUpdate) {
   try {
     await requireAdminSession();
     const response = await updateAdminNotificationSettings(body);
@@ -17,7 +17,7 @@ export async function saveNotificationSettings(body: Pick<AdminNotificationSetti
   }
 }
 
-export async function previewNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>) {
+export async function previewNotificationSettings(body: AdminNotificationSettingsUpdate) {
   try {
     await requireAdminSession();
     const response = await previewAdminNotificationSettings(body);

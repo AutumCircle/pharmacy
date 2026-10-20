@@ -7,5 +7,5 @@ import { getStaffSession } from '@/lib/api-v1/staff-server';
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
   const token = (await cookies()).get(STAFF_SESSION_COOKIE)?.value;
   const account = token ? await getStaffSession(token).catch(() => null) : null;
-  return <StaffShell role={account?.role ?? null} accountId={account?.account_id ?? null}>{children}</StaffShell>;
+  return <StaffShell role={account?.role ?? null}>{children}</StaffShell>;
 }
