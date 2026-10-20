@@ -8,15 +8,47 @@ import { formatOrderSource } from '@/lib/collections';
 import OrderStatusControl from './OrderStatusControl';
 import OrderDeliveryEditor from './OrderDeliveryEditor';
 import OrderCustomerEditor from './OrderCustomerEditor';
-import OrderItems from './OrderItems';
+import OrderItems, { type OrderItemMeta } from './OrderItems';
 import OrderAddItems from './OrderAddItems';
 import OrderFulfillment from './OrderFulfillment';
+import OrderTimeline from './OrderTimeline';
 import OrderDeleteButton from '../OrderDeleteButton';
-import { money, origin, stageChip, statusLabels } from '../ui';
+import { money, origin, stageChip } from '../ui';
+import type { AdminOrderDetail } from '@/lib/api-v1/admin-types';
+import { allItemsUnavailable, courierItemAnswerLabel, courierItemAnswerTone } from '@/lib/pharmacy-answers';
+import { itemChangeText, itemPharmacyText, latestItemChanges, timelineEvents } from '@/lib/order-timeline';
 import '../orders-ui.css';
 
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Звонок' } as const;
-const actorLabels: Record<string, string> = { customer: 'клиент', admin: 'админ', staff: 'сотрудник', system: 'система' };
+
+/** Job 016: per-item pharmacy, answer chip and latest change for the items table. */
+function itemMeta(order: AdminOrderDetail): Record<number, OrderItemMeta> {
+  const fulfillmentItems = new Map((Array.isArray(order.fulfillment?.items) ? order.fulfillment.items : [])
+    .map((item) => [item.order_item_id, item]));
+  const latest = latestItemChanges(timelineEvents(order.timeline));
+  const orderPharmacy = order.fulfillment_pharmacy_id
+    ?? (order.created_by_staff_account_id === 2 ? 2 : 1);
+  return Object.fromEntries(order.items.map((item) => {
+    const answered = fulfillmentItems.get(item.order_item_id);
+    const pharmacy = itemPharmacyText(answered?.pharmacy_id ?? orderPharmacy, answered?.answers);
+    const label = answered ? courierItemAnswerLabel({ pharmacy_id: answered.pharmacy_id, answers: answered.answers }) : null;
+    const tone = answered ? courierItemAnswerTone({ pharmacy_id: answered.pharmacy_id, answers: answered.answers }) ?? 'wait' : 'wait';
+    const change = latest.get(item.order_item_id);
+    return [item.order_item_id, {
+      pharmacy: pharmacy.name, pharmacyNote: pharmacy.note,
+      answer: label ? { text: label, tone } : null,
+      change: change ? { text: itemChangeText(change), at: change.at, time: formatOrderDateTime(change.at) } : null,
+    } satisfies OrderItemMeta];
+  }));
+}
+
+function confirmedText(order: AdminOrderDetail): string {
+  const fulfillment = order.fulfillment;
+  if (!fulfillment || fulfillment.confirmed_total === null || fulfillment.confirmed_total === undefined
+    || fulfillment.confirmed_total === '') return 'ждёт ответа';
+  if (allItemsUnavailable(fulfillment)) return 'всё нет в наличии';
+  return money(fulfillment.confirmed_total, 2);
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -63,36 +95,33 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
 
     <div className="od-layout">
       <div className="od-main">
-        <section className="od-card od-o3">
-          <div className="od-card-head"><h2>Товары</h2><b>{money(itemsTotal, 2)}</b></div>
+        <section className="od-card od-o3" aria-labelledby="od-items-title">
+          <div className="od-card-head"><h2 id="od-items-title">Товары</h2><b>{money(itemsTotal, 2)}</b></div>
           <p className="od-muted od-small">Нажмите на товар, чтобы изменить количество, цену аптеки, цену клиенту или удалить его.</p>
-          <OrderItems orderId={order.order_id} items={order.items} status={order.status} />
+          <OrderItems orderId={order.order_id} items={order.items} status={order.status} meta={itemMeta(order)} />
+          <dl className="od-sums">
+            <div><dt>Сумма заказа</dt><dd>{money(itemsTotal, 2)}</dd></div>
+            {order.fulfillment && <div className={order.fulfillment.confirmed_total == null ? 'od-sum-wait' : 'od-sum-ok'}>
+              <dt>Подтверждено аптеками</dt><dd>{confirmedText(order)}</dd></div>}
+          </dl>
           <OrderAddItems orderId={order.order_id} status={order.status} websiteOrder={order.created_by_staff_account_id === null} />
         </section>
-        <section className="od-card od-o5">
-          <div className="od-card-head"><h2>История</h2></div>
-          <ol className="od-history">
-            {order.status_history.map((entry, index) => <li key={`${entry.created_at}-${index}`}>
-              <span className="od-dot" />
-              <div><strong>{entry.from_status ? `${statusLabels[entry.from_status]} → ` : 'Создан · '}{statusLabels[entry.to_status]}</strong>
-                <small>{formatOrderDateTime(entry.created_at)} · {actorLabels[entry.actor_type] ?? entry.actor_type}
-                  {entry.actor_id ? ` ${entry.actor_id}` : ''}</small>
-                {entry.reason && <p>{entry.reason}</p>}</div>
-            </li>)}
-          </ol>
+        <section className="od-card od-o5" aria-labelledby="od-history-title">
+          <div className="od-card-head"><h2 id="od-history-title">История</h2></div>
+          <OrderTimeline timeline={order.timeline} truncated={order.timeline_truncated === true}
+            statusHistory={order.status_history} />
         </section>
       </div>
       <aside className="od-side">
-        <OrderStatusControl key={`${order.status}-${order.stage ?? ''}`} orderId={order.order_id}
-          currentStatus={order.status} stage={order.stage} />
-        {order.fulfillment && <OrderFulfillment fulfillment={order.fulfillment} status={order.status}
-          itemNames={Object.fromEntries(order.items.map((item) => [item.order_item_id, item.medicine_name]))} />}
         <OrderCustomerEditor key={`${order.edit_revision}`} orderId={order.order_id} revision={order.edit_revision}
           customerName={order.customer_name || ''} phone={order.phone || ''} address={order.address || ''}
           landmark={order.landmark} comment={order.notes} />
+        {order.fulfillment && <OrderFulfillment fulfillment={order.fulfillment} status={order.status} />}
+        <OrderStatusControl key={`${order.status}-${order.stage ?? ''}`} orderId={order.order_id}
+          currentStatus={order.status} stage={order.stage} />
         <OrderDeliveryEditor key={`${order.delivery_courier_amount}-${order.delivery_owner_amount}`} orderId={order.order_id}
           courierAmount={Number(order.delivery_courier_amount || 0)} ownerAmount={Number(order.delivery_owner_amount || 0)} />
-        {(order.status === 'pending' || order.status === 'cancelled' || order.status === 'delivered') && <section className="od-card od-danger od-o6">
+        {(order.status === 'pending' || order.status === 'cancelled' || order.status === 'delivered') && <section className="od-card od-danger od-o7">
           <div className="od-card-head"><h2>Удаление</h2></div>
           <p className="od-muted od-small">Заказ исчезнет из списков и отчётов. История и состав сохранятся.</p>
           <OrderDeleteButton orderId={order.order_id} orderReference={order.order_reference || order.order_id}

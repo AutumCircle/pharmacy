@@ -515,3 +515,28 @@ label.c-check-row { cursor: pointer; }
   .pa-banner button, .pa-permission-row button { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .pa-toast { animation: none; } }
+
+/* Job 016: courier order card — client first, items grouped by pick-up place, collapsed history. */
+.c-phone-link { color: var(--c-ink); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; }
+.c-phone-link:hover { text-decoration: underline; }
+.c-client .c-call { min-height: 52px; padding: 0 18px; font-size: 16px; }
+.c-client .c-call svg { width: 20px; height: 20px; }
+.c-phone-link:focus-visible, .c-call:focus-visible, .c-history > summary:focus-visible { outline: 3px solid var(--c-blue); outline-offset: 2px; }
+.c-pickup + .c-pickup { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--c-line); }
+.c-pickup-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 2px 0 6px; font-size: 15px; font-weight: 800; color: var(--c-ink); }
+.c-pickup-sum { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.c-pickup-unavailable .c-pickup-title { color: var(--c-brand-dark); }
+.c-pickup .c-assembly-line { margin: 0 0 6px; padding: 6px 10px; font-size: 13px; }
+.c-pickup .c-items { margin-bottom: 0; }
+.c-history > summary { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-bottom: 0; cursor: pointer; list-style: none; }
+.c-history > summary::-webkit-details-marker { display: none; }
+.c-history > summary::after { content: '▾'; margin-left: 4px; font-size: 16px; color: var(--c-muted); transition: transform .15s; }
+.c-history[open] > summary { margin-bottom: 8px; }
+.c-history[open] > summary::after { transform: rotate(180deg); }
+.c-history-count { margin-left: auto; padding: 1px 8px; border-radius: 999px; background: #fff; color: var(--c-muted); font-size: 12px; letter-spacing: 0; }
+.c-history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.c-history-list li { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--c-line); font-size: 14px; }
+.c-history-list strong { font-weight: 650; overflow-wrap: anywhere; }
+.c-history-list small { color: var(--c-muted); font-size: 12px; }
+.c-history-list p { margin: 2px 0 0; padding: 4px 8px; border-radius: 8px; background: var(--c-amber-soft); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .c-history > summary::after { transition: none; } }

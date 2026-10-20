@@ -117,6 +117,10 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    «Собран» mark of «Ватан 2» is reopened in the same transaction (audit `pharmacy.order.assembly_reopened`).
    Both pharmacies use one order table (`PharmacyItemRow`); a «Ватан 2» «Нет в наличии» is announced to the
    owner/courier as «нет в наличии в обеих аптеках».
+9. Job 016: order history («История») without a new table — the admin Lambda builds `timeline` from
+   `orders.created_at`, `order_status_history` and `admin_audit_log` (`backend/v1/shared/order_timeline.py`, whitelisted
+   keys only, newest 200) for `GET /v1/admin/orders/{id}` and a filtered short one for the courier's
+   `GET /v1/staff/orders/{id}`; Russian text in `src/lib/order-timeline.ts`. Needs the admin Lambda redeployed.
 
 Telegram notifier variables are configured only in AWS, never in Git:
 

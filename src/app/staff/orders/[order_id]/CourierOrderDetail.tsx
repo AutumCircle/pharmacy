@@ -17,6 +17,9 @@ import MedicinePicker, { invalidLine, lineTotal, type PickerLine } from '../Medi
 import QuantityStepper from '../QuantityStepper';
 import { nextStep, stagePill } from '../status';
 import { ORDER_STAGE_LABELS, TRACKING_STEPS, trackingStepIndex, type OrderStage } from '@/lib/order-stage';
+import {
+  TIMELINE_TRUNCATED_TEXT, groupByPickup, timelineActorLabel, timelineEventText, timelineEvents,
+} from '@/lib/order-timeline';
 
 type Item = CourierOrder['medicines'][number];
 
@@ -51,15 +54,21 @@ function Progress({ status, stage }: { status: CourierOrderStatus; stage?: Order
   </ol>;
 }
 
-/** Job 011: each pharmacy's assembly mark, read-only for the courier. Hidden for an old Lambda. */
-function AssemblySection({ order }: { order: CourierOrder }) {
-  const lines = courierAssemblyLines(order);
-  if (!lines.length || order.status === 'cancelled') return null;
-  return <section className="c-block c-assembly" aria-labelledby="c-assembly-title">
-    <div className="c-block-title"><h2 id="c-assembly-title">Сборка в аптеках</h2></div>
-    <ul className="c-assembly-lines">{lines.map((line) =>
-      <li key={line.pharmacyId} className={`c-assembly-line c-assembly-${line.state}`}>{line.text}</li>)}</ul>
-  </section>;
+/** Job 016: the courier's short history (created, statuses, pharmacy answers and prices, assembly,
+ * checklist), collapsed. The Lambda filters it for the courier; hidden for an older Lambda. */
+function HistorySection({ order }: { order: CourierOrder }) {
+  if (!Array.isArray(order.timeline)) return null;
+  const events = timelineEvents(order.timeline);
+  return <details className="c-block c-history">
+    <summary className="c-block-title"><h2>История</h2><span className="c-history-count">{events.length}</span></summary>
+    {order.timeline_truncated && <p className="c-muted c-small">{TIMELINE_TRUNCATED_TEXT}</p>}
+    {events.length === 0 ? <p className="c-muted c-small">Событий пока нет.</p>
+      : <ol className="c-history-list">{events.map((event, index) => <li key={`${event.at}-${index}`}>
+        <strong>{timelineEventText(event)}</strong>
+        <small><time dateTime={event.at}>{formatOrderDateTime(event.at)}</time> · {timelineActorLabel(event)}</small>
+        {event.kind === 'status_changed' && event.reason && <p>{event.reason}</p>}
+      </li>)}</ol>}
+  </details>;
 }
 
 function CustomerSection({ order, base, onSaved }: { order: CourierOrder; base: string; onSaved: () => void }) {
@@ -104,13 +113,13 @@ function CustomerSection({ order, base, onSaved }: { order: CourierOrder; base: 
     </section>;
   }
 
-  return <section className="c-block">
-    <div className="c-block-title"><h2>Клиент</h2>
+  return <section className="c-block c-client" aria-labelledby="c-client-title">
+    <div className="c-block-title"><h2 id="c-client-title">Клиент</h2>
       {order.own_order && <button type="button" className="c-link" onClick={open}>Изменить</button>}</div>
     <div className="c-customer">
       <div className="c-customer-main">
         <strong>{order.customer_name || 'Имя не указано'}</strong>
-        <span>{order.phone}</span>
+        <a className="c-phone-link" href={`tel:${order.phone}`}>{order.phone}</a>
       </div>
       <a className="c-call" href={`tel:${order.phone}`}>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1L6.6 10.8Z" /></svg>
@@ -218,14 +227,26 @@ function ItemsSection({ order, base, onSaved }: { order: CourierOrder; base: str
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); }
   }
 
-  return <section className="c-block">
-    <div className="c-block-title"><h2>Товары</h2><strong>{money(order.order_total)}</strong></div>
-    {order.medicines.length ? <ul className="c-items">{order.medicines.map((item) =>
-      <ItemRow key={`${item.order_item_id}-${item.quantity}-${item.selling_unit_price}`} item={item} base={base}
-        editable={editable} delivered={delivered} onSaved={onSaved} />)}</ul>
-      : <p className="c-muted">Товаров пока нет.</p>}
+  // Job 016: grouped by where to pick the item up; each pharmacy group shows its «Сборка» mark.
+  const groups = groupByPickup(order.medicines.map((item) => ({ ...item, pharmacy_id: item.pharmacy_id ?? order.pharmacy_id ?? 1 })));
+  const assembly = order.status === 'cancelled' ? [] : courierAssemblyLines(order);
+  return <section className="c-block" aria-labelledby="c-items-title">
+    <div className="c-block-title"><h2 id="c-items-title">Товары</h2><strong>{money(order.order_total)}</strong></div>
     {order.website_order && order.status !== 'cancelled' && 'confirmed_total' in order && order.medicines.length > 0 &&
       <p className={`c-confirmed${isAmountConfirmed(order) ? ' ok' : ''}`} role="status">{confirmedAmountText(order)}</p>}
+    {groups.length ? groups.map((group) => {
+      const pharmacyId = group.group === 'pharmacy-2' ? 2 : group.group === 'pharmacy-1' ? 1 : null;
+      const mark = pharmacyId ? assembly.find((line) => line.pharmacyId === pharmacyId) : undefined;
+      const sum = group.items.reduce((total, item) => total + Number(item.line_total ?? 0), 0);
+      return <div key={group.group} className={`c-pickup c-pickup-${group.group}`}>
+        <h3 className="c-pickup-title"><span>{group.title}</span>
+          {group.group !== 'unavailable' && <span className="c-pickup-sum">{money(sum)}</span>}</h3>
+        {mark && <p className={`c-assembly-line c-assembly-${mark.state}`}>{mark.text}</p>}
+        <ul className="c-items">{group.items.map((item) =>
+          <ItemRow key={`${item.order_item_id}-${item.quantity}-${item.selling_unit_price}`} item={item} base={base}
+            editable={editable} delivered={delivered} onSaved={onSaved} />)}</ul>
+      </div>;
+    }) : <p className="c-muted">Товаров пока нет.</p>}
     {editable && order.medicines.length > 0 && !adding && <p className="c-muted c-small">Нажмите на товар, чтобы изменить количество, цену или удалить.</p>}
     {editable && !adding && <button type="button" className="c-btn c-btn-outline c-btn-wide" onClick={() => setAdding(true)}>+ Добавить товар</button>}
     {adding && <div className="c-adder">
@@ -397,13 +418,13 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
       <span className={pill.className}>{pill.label}</span>
     </header>
     <Progress status={order.status} stage={order.stage} />
+    <CustomerSection order={order} base={base} onSaved={refresh} />
+    <ItemsSection order={order} base={base} onSaved={refresh} />
     <ChecklistSection key={`${order.status}:${(order.checklist_steps ?? []).join(',')}:${order.pharmacy_answers_complete ? 1 : 0}`}
       order={order} base={base}
       statusBusy={busy} onStatus={(next) => changeStatus(next)} onConflict={refresh} />
-    <AssemblySection order={order} />
-    <CustomerSection order={order} base={base} onSaved={refresh} />
-    <ItemsSection order={order} base={base} onSaved={refresh} />
     {order.status !== 'cancelled' && <FeeSection order={order} base={base} />}
+    <HistorySection order={order} />
     {error && <p className="c-error" role="alert">{error}</p>}
     {cancelling && <section className="c-block c-cancel">
       <label>Причина отмены<textarea rows={2} maxLength={300} value={reason} autoFocus
