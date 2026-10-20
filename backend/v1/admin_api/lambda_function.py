@@ -46,6 +46,13 @@ from backend.v1.shared.order_notification_settings import (
 from backend.v1.shared.order_notification_messages import format_configured_message
 from backend.v1.shared.order_time import absolute_order_time, order_time_dushanbe, order_time_iso
 from backend.v1.shared.order_stage import assembled_sql, assembly_complete, order_stage
+from backend.v1.shared.order_timeline import (
+    COURIER_ACTIONS,
+    TIMELINE_LIMIT,
+    build_timeline,
+    courier_view,
+    creator_actor,
+)
 
 
 DEFAULT_LIMIT = 20
@@ -1323,9 +1330,41 @@ def get_courier_order(order_id: str) -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(f"{_COURIER_ORDER_SELECT} WHERE {lookup} AND o.deleted_at IS NULL", lookup_values)
         row = cur.fetchone()
-    if not row:
-        raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
-    return _courier_order_row(dict(row))
+        if not row:
+            raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
+        # Job 016: the courier's short history, two bounded reads; only courier-visible audit actions.
+        public_order_id = row["public_id"] or f"legacy_{row['id']}"
+        limit = TIMELINE_LIMIT + 1
+        cur.execute(
+            """SELECT id, from_status, to_status, actor_type, actor_id, reason, created_at
+               FROM order_status_history WHERE order_id = %s
+               ORDER BY created_at DESC, id DESC LIMIT %s""",
+            (row["id"], limit),
+        )
+        status_rows = [dict(entry) for entry in cur.fetchall()]
+        cur.execute(
+            """SELECT id, actor_id, action, resource_type, resource_id, details, created_at
+               FROM admin_audit_log
+               WHERE resource_type = 'order' AND resource_id = %s AND action = ANY(%s::text[])
+               ORDER BY created_at DESC, id DESC LIMIT %s""",
+            (public_order_id, list(COURIER_ACTIONS), limit),
+        )
+        audit_rows = [dict(entry) for entry in cur.fetchall()]
+    result = _courier_order_row(dict(row))
+    medicines = result.get("medicines")
+    if isinstance(medicines, str):
+        medicines = json.loads(medicines)
+    item_names = {int(item["order_item_id"]): str(item.get("medicine_name") or "")
+                  for item in (medicines or []) if isinstance(item, dict) and item.get("order_item_id")}
+    creator = ({"actor": "customer"} if result.get("website_order")
+               else {"actor": "courier"} if result.get("own_order") else None)
+    events, truncated = build_timeline(
+        created_at=row["created_at"], creator=creator, status_rows=status_rows, audit_rows=audit_rows,
+        item_names=item_names, source_truncated=len(status_rows) >= limit or len(audit_rows) >= limit,
+    )
+    result["timeline"] = courier_view(events)
+    result["timeline_truncated"] = truncated
+    return result
 
 
 def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
@@ -3036,28 +3075,74 @@ def get_order(order_id: str) -> dict[str, Any]:
         items = [dict(row) for row in cur.fetchall()]
         cur.execute(
             """
-            SELECT from_status, to_status, actor_type, actor_id, reason, created_at
+            SELECT id, from_status, to_status, actor_type, actor_id, reason, created_at
             FROM order_status_history WHERE order_id = %s ORDER BY id ASC
             """,
             (internal_id,),
         )
-        history = [dict(row) for row in cur.fetchall()]
+        history_rows = [dict(row) for row in cur.fetchall()]
         fulfillment_row = None
         if order["created_by_staff_account_id"] is None:
             # Job 013: one more read, the courier projection of this website order (checklist, answers,
             # assembly marks). Staff-created orders have no pharmacy answers or marks.
             cur.execute(f"{_COURIER_ORDER_SELECT} WHERE o.id = %s", (internal_id,))
             fulfillment_row = cur.fetchone()
+        public_order_id = order["public_id"] or f"legacy_{internal_id}"
+        audit_rows, audit_truncated = _order_audit_rows(
+            cur, order, public_order_id, [str(item["order_item_id"]) for item in items])
     result = dict(order)
-    result["order_id"] = result.pop("public_id") or f"legacy_{result['id']}"
+    result["order_id"] = public_order_id
+    result.pop("public_id")
     result.pop("id")
     result["items"] = items
-    result["status_history"] = history
+    result["status_history"] = [{key: value for key, value in row.items() if key != "id"} for row in history_rows]
+    # Job 016: full history for the admin; whitelisted event keys only (shared.order_timeline).
+    result["timeline"], result["timeline_truncated"] = build_timeline(
+        created_at=order["created_at"], creator=creator_actor(order["created_by_staff_account_id"]),
+        status_rows=history_rows, audit_rows=audit_rows,
+        item_names={int(item["order_item_id"]): str(item["medicine_name"]) for item in items},
+        source_truncated=audit_truncated,
+    )
     result["created_at"] = order_time_iso(result["created_at"])
     result["fulfillment"] = _admin_fulfillment(fulfillment_row) if fulfillment_row else None
     result["stage"] = (result["fulfillment"]["stage"] if result["fulfillment"]
                        else order_stage(result["status"], False))
     return result
+
+
+_AUDIT_TIMELINE_COLUMNS = "id, actor_id, action, resource_type, resource_id, details, created_at"
+
+
+def _order_audit_rows(
+    cur: Any, order: Any, public_order_id: str, item_ids: list[str],
+) -> tuple[list[dict[str, Any]], bool]:
+    """Job 016: audit rows of one order for the admin timeline, two bounded reads (newest first).
+
+    1. The order itself and its current items (index admin_audit_log_resource_created).
+    2. Items removed since: matched by the order id/reference stored in `details`, restricted to
+       `order_item` rows written after the order was created. Not indexed; LIMIT keeps it bounded.
+    """
+    limit = TIMELINE_LIMIT + 1
+    cur.execute(
+        f"""SELECT {_AUDIT_TIMELINE_COLUMNS} FROM admin_audit_log
+            WHERE (resource_type = 'order' AND resource_id = %s)
+               OR (resource_type = 'order_item' AND resource_id = ANY(%s::text[]))
+            ORDER BY created_at DESC, id DESC LIMIT %s""",
+        (public_order_id, item_ids, limit),
+    )
+    current = [dict(row) for row in cur.fetchall()]
+    reference = str(order.get("order_reference") or order.get("public_id") or order["id"])
+    cur.execute(
+        f"""SELECT {_AUDIT_TIMELINE_COLUMNS} FROM admin_audit_log
+            WHERE resource_type = 'order_item' AND created_at >= %s
+              AND NOT (resource_id = ANY(%s::text[]))
+              AND (details->>'order_id' = %s OR details->>'order_reference' = %s
+                   OR details->>'reference' = %s)
+            ORDER BY created_at DESC, id DESC LIMIT %s""",
+        (order["created_at"], item_ids, public_order_id, reference, reference, limit),
+    )
+    removed = [dict(row) for row in cur.fetchall()]
+    return current + removed, len(current) >= limit or len(removed) >= limit
 
 
 def _admin_fulfillment(row: Any) -> dict[str, Any]:

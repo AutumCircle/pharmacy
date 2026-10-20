@@ -412,11 +412,12 @@ class CourierOrderTests(unittest.TestCase):
         cursor = Mock()
         cursor.fetchone.return_value = {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'own_order': True,
             'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'medicines': []}
+        cursor.fetchall.return_value = []
         with self._tx(cursor):
             result = get_courier_order('ord_' + 'a' * 32)
         self.assertEqual(result['order_id'], 'ord_' + 'a' * 32)
         self.assertNotIn('id', result)
-        sql, args = cursor.execute.call_args.args
+        sql, args = cursor.execute.call_args_list[0].args
         self.assertIn('o.public_id = %s', sql)
         self.assertIn('own_order', sql)
         self.assertEqual(args, ('ord_' + 'a' * 32,))
@@ -548,10 +549,11 @@ class CourierOrderTests(unittest.TestCase):
         cursor = Mock()
         cursor.fetchone.return_value = {'id': 7, 'public_id': 'ord_' + 'a' * 32,
             'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': None}
+        cursor.fetchall.return_value = []
         with self._tx(cursor):
             result = get_courier_order('ord_' + 'a' * 32)
         self.assertEqual(result['checklist_steps'], [])
-        self.assertIn('AS checklist_steps', cursor.execute.call_args.args[0])
+        self.assertIn('AS checklist_steps', cursor.execute.call_args_list[0].args[0])
 
     def test_courier_select_contains_legacy_case_mapping(self):
         sql = _COURIER_ORDER_SELECT
@@ -605,6 +607,7 @@ class CourierOrderTests(unittest.TestCase):
         cursor = Mock()
         cursor.fetchone.return_value = {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'medicines': [],
             'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': [1, 3, 6]}
+        cursor.fetchall.return_value = []
         with self._tx(cursor):
             result = get_courier_order('ord_' + 'a' * 32)
         self.assertEqual(result['checklist_steps'], [1, 6])
@@ -613,6 +616,7 @@ class CourierOrderTests(unittest.TestCase):
         cursor = Mock()
         cursor.fetchone.return_value = {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'medicines': [],
             'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': [], **extra}
+        cursor.fetchall.return_value = []
         with self._tx(cursor):
             return get_courier_order('ord_' + 'a' * 32), cursor
 
@@ -629,7 +633,7 @@ class CourierOrderTests(unittest.TestCase):
                                            unavailable_count=0, answered_count=2, item_count=2)
         self.assertIs(result['pharmacy_answers_complete'], True)
         self.assertIsNone(result['confirmed_total'])
-        sql = cursor.execute.call_args.args[0]
+        sql = cursor.execute.call_args_list[0].args[0]
         self.assertIn("COUNT(*) FILTER (WHERE cur.answer = 'price_differs') = 0", sql)
 
     def test_confirmed_total_is_decimal_string_when_complete(self):
@@ -637,7 +641,7 @@ class CourierOrderTests(unittest.TestCase):
                                            unavailable_count=1, answered_count=3, item_count=3)
         self.assertEqual(result['confirmed_total'], '57.50')
         self.assertEqual(result['unavailable_count'], 1)
-        sql = cursor.execute.call_args.args[0]
+        sql = cursor.execute.call_args_list[0].args[0]
         self.assertIn("SUM(oi.line_total) FILTER (WHERE cur.answer = 'available')", sql)
         self.assertIn("COUNT(*) FILTER (WHERE cur.answer = 'unavailable') AS unavailable_count", sql)
 
@@ -758,6 +762,49 @@ class CourierOrderTests(unittest.TestCase):
         with self._tx(cursor):
             result = list_courier_orders({})
         self.assertEqual(result['data'][0]['stage'], 'assembled')
+        self.assertEqual(cursor.execute.call_count, 1)
+
+    def test_get_courier_order_returns_short_timeline(self):
+        cursor = Mock()
+        created = datetime(2026, 10, 2, tzinfo=timezone.utc)
+        cursor.fetchone.return_value = {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'status': 'cancelled',
+            'website_order': True, 'created_at': created, 'checklist_steps': [],
+            'medicines': [{'order_item_id': 81, 'medicine_name': 'A', 'pharmacy_id': 1, 'answers': []}]}
+        cursor.fetchall.side_effect = [
+            [{'id': 2, 'from_status': 'pending', 'to_status': 'cancelled', 'actor_type': 'admin',
+              'actor_id': 'boss', 'reason': 'Клиент отказался', 'created_at': created.replace(hour=2)}],
+            [{'id': 9, 'actor_id': 'staff:1', 'action': 'pharmacy.order.items_answered', 'resource_type': 'order',
+              'resource_id': 'ord_' + 'a' * 32, 'created_at': created.replace(hour=1),
+              'details': {'pharmacy_id': 1, 'items': [{'order_item_id': 81, 'answer': 'available'}],
+                          'routed_to_pharmacy_2': []}}],
+        ]
+        with self._tx(cursor):
+            result = get_courier_order('ord_' + 'a' * 32)
+        self.assertEqual([(event['kind'], event['actor']) for event in result['timeline']],
+                         [('created', 'customer'), ('pharmacy_answer', 'pharmacy'), ('status_changed', 'admin')])
+        self.assertEqual(result['timeline'][1]['medicine_name'], 'A')
+        self.assertEqual(result['timeline'][2]['reason'], 'Клиент отказался')
+        self.assertNotIn('boss', json.dumps(result['timeline'], ensure_ascii=False))
+        self.assertEqual(cursor.execute.call_count, 3)
+        history_sql, history_args = cursor.execute.call_args_list[1].args
+        audit_sql, audit_args = cursor.execute.call_args_list[2].args
+        self.assertIn('FROM order_status_history WHERE order_id = %s', history_sql)
+        self.assertIn('LIMIT %s', history_sql)
+        self.assertEqual(history_args, (7, 201))
+        self.assertIn('action = ANY(%s::text[])', audit_sql)
+        self.assertIn("resource_type = 'order' AND resource_id = %s", audit_sql)
+        self.assertEqual(audit_args[0], 'ord_' + 'a' * 32)
+        self.assertNotIn('order.customer_updated', audit_args[1])
+        self.assertNotIn('order.delivery_fee_updated', audit_args[1])
+
+    def test_courier_list_has_no_timeline(self):
+        cursor = Mock()
+        cursor.fetchall.return_value = [{'id': 7, 'public_id': 'ord_' + 'a' * 32, 'medicines': [],
+            'status': 'pending', 'website_order': True, 'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc),
+            'checklist_steps': [], 'assembly': []}]
+        with self._tx(cursor):
+            result = list_courier_orders({})
+        self.assertNotIn('timeline', result['data'][0])
         self.assertEqual(cursor.execute.call_count, 1)
 
     def test_item_price_requires_a_price(self):
