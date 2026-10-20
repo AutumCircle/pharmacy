@@ -51,6 +51,8 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
   const alarm = useRef(createAlarmSlot());
   const config = useRef<PharmacyAlarmConfig>(DEFAULT_ALARM_CONFIG);
   const count = useRef(0);
+  // An alarm came due while the browser still blocked audio: play it as soon as audio unlocks.
+  const pendingAlarm = useRef(false);
   const [running, setRunning] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -97,6 +99,15 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
     return () => { for (const name of UNLOCK_EVENTS) window.removeEventListener(name, handler, { capture: true }); };
   }, [enabled, running, unavailable, resume]);
 
+  useEffect(() => {
+    const context = audio.current;
+    if (!running || !pendingAlarm.current || !context || context.state !== 'running') return;
+    pendingAlarm.current = false;
+    if (count.current === 0) return;
+    const { ringtone, durationSeconds } = config.current;
+    try { alarm.current.play(() => schedulePharmacyAlarm(context, ringtone, durationSeconds)); } catch { /* signal still shown */ }
+  }, [running]);
+
   // Next.js resets the title on navigation; put the counter back.
   useEffect(() => {
     if (!enabled) return;
@@ -123,7 +134,7 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
           .map((order) => [order.order_id, order]));
         count.current = attention.size;
         // Nothing waits for «Сборка сделана» any more: silence at once.
-        if (attention.size === 0) slot.stop();
+        if (attention.size === 0) { slot.stop(); pendingAlarm.current = false; }
         setAttentionCount(attention.size);
         document.title = titleWithCount(document.title, attention.size);
         const due = new Set(result.due);
@@ -137,6 +148,7 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
         setAnnouncement(result.due.map((id) => alertText(attention.get(id)!, now).title).join('. '));
         const context = audio.current;
         if (context && context.state !== 'running') void context.resume().catch(() => undefined);
+        pendingAlarm.current = !context || context.state !== 'running';
         if (context && context.state === 'running') {
           const { ringtone, durationSeconds } = config.current;
           // A new due reminder stops the previous alarm instead of stacking on it.
@@ -183,10 +195,10 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
   if (!enabled) return null;
   const label = soundLabel(running);
   return <>
-    <button type="button" className={`pa-sound${running ? ' on' : ' wait'}`} onClick={onSoundClick}
-      aria-live="polite" title={label}>
+    <button type="button" className={`pa-sound${running ? ' on' : ' wait'}`} onClick={onSoundClick} title={label}>
       <span aria-hidden="true">🔔</span><span>{label}</span>
     </button>
+    <span className="sr-only" role="status" aria-live="polite">{label}</span>
     {unavailable && <p className="pa-sound-note" role="status">{SOUND_UNAVAILABLE}</p>}
     <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
     {toasts.length > 0 && <div className="pa-stack">

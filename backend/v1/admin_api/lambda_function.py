@@ -1950,7 +1950,8 @@ def _reopen_pharmacy_two_assembly(
     «Собран» (e.g. it collected an earlier routed item), that mark is stale: reopen it to «Собирается» so
     «Ватан 2» is alerted again, the order leaves «Собран» and «Согласовано» waits. Items already collected
     keep their «Собрано». One statement in the routing transaction; the audit row is written only when a
-    part was actually reopened."""
+    part was actually reopened. The actor is always 'staff:1': only «Ватан 1» routes items (see
+    answer_pharmacy_order_items); pass the actor in if that ever changes."""
     cur.execute("""WITH reopened AS (
                        UPDATE order_pharmacy_assembly
                        SET state = 'assembling', assembled_at = NULL, updated_by = 'staff:1'

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { ROW_ACTION_LABELS, rowActionRequest, type RowAction } from '@/lib/pharmacy-answers';
 import { validateItemCollectRequest } from '@/lib/pharmacy-assembly';
 import type { PharmacyTableRow } from '@/lib/pharmacy-order';
@@ -24,6 +24,22 @@ export default function PharmacyItemRow({ orderId, row, columns, confirmText }: 
   const { busy, error, setError, errorRef, post } = usePharmacyItemPost(orderId);
   const [price, setPrice] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // After the price editor or the confirmation closes, focus goes back to the price / the row buttons
+  // instead of falling to <body> (keyboard and screen-reader users).
+  const focusBack = useRef<'price' | 'actions' | null>(null);
+  const rowRef = useRef<HTMLTableRowElement>(null);
+
+  useEffect(() => {
+    if (!focusBack.current || price !== null || confirming) return;
+    const selector = focusBack.current === 'price' ? '.pa-price-tap' : '.pa-act button:not(:disabled)';
+    const target = rowRef.current?.querySelector<HTMLElement>(selector)
+      ?? rowRef.current?.querySelector<HTMLElement>('.pa-price-tap, .pa-act button:not(:disabled)');
+    target?.focus();
+    focusBack.current = null;
+  }, [price, confirming]);
+
+  function closePrice() { setPrice(null); setError(''); focusBack.current = 'price'; }
+  function closeConfirm() { setConfirming(false); focusBack.current = 'actions'; }
   const id = row.orderItemId;
   const isBusy = id !== null && busy === id;
   const routed = row.kind === 'routed';
@@ -32,7 +48,10 @@ export default function PharmacyItemRow({ orderId, row, columns, confirmText }: 
     if (id === null) return;
     const checked = rowActionRequest(id, action, value, row.unitPrice);
     if (!checked.ok) { setError(checked.error); return; }
-    if (await post('pharmacy-answers', checked.value, id)) { setPrice(null); setConfirming(false); }
+    if (await post('pharmacy-answers', checked.value, id)) {
+      focusBack.current = price !== null ? 'price' : 'actions';
+      setPrice(null); setConfirming(false);
+    }
   }
 
   function savePrice(event: FormEvent) {
@@ -41,7 +60,7 @@ export default function PharmacyItemRow({ orderId, row, columns, confirmText }: 
   }
 
   function priceKey(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Escape') { event.preventDefault(); setPrice(null); setError(''); }
+    if (event.key === 'Escape') { event.preventDefault(); closePrice(); }
   }
 
   function collect() {
@@ -60,7 +79,7 @@ export default function PharmacyItemRow({ orderId, row, columns, confirmText }: 
         <button type="submit" className="pa-mini pa-mini-ok" disabled={isBusy}
           aria-label={ROW_ACTION_LABELS.save} title={ROW_ACTION_LABELS.save}>{isBusy ? '…' : '✓'}</button>
         <button type="button" className="pa-mini" disabled={isBusy} aria-label={ROW_ACTION_LABELS.cancel}
-          title={ROW_ACTION_LABELS.cancel} onClick={() => { setPrice(null); setError(''); }}>×</button>
+          title={ROW_ACTION_LABELS.cancel} onClick={closePrice}>×</button>
       </form>
       : <button type="button" className="pa-price-tap" disabled={isBusy}
         aria-label={`${ROW_ACTION_LABELS.price}: ${row.name}, ${money(row.unitPrice)}`} title={ROW_ACTION_LABELS.price}
@@ -69,12 +88,13 @@ export default function PharmacyItemRow({ orderId, row, columns, confirmText }: 
     : routed ? '—' : money(row.unitPrice);
 
   const controls = id === null ? null : confirming
-    ? <div className="pa-mini-group" role="group" aria-label={`Подтверждение: ${row.name}`}>
+    ? <div className="pa-mini-group" role="group" aria-label={`Подтверждение: ${row.name}`}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeConfirm(); } }}>
       <span className="pa-row-confirm">{confirmText}</span>
       <button type="button" className="pa-mini pa-mini-bad" disabled={isBusy} autoFocus
         onClick={() => void send('unavailable')}>{isBusy ? '…' : ROW_ACTION_LABELS.confirm}</button>
       <button type="button" className="pa-mini" disabled={isBusy}
-        onClick={() => setConfirming(false)}>{ROW_ACTION_LABELS.cancel}</button>
+        onClick={closeConfirm}>{ROW_ACTION_LABELS.cancel}</button>
     </div>
     : (row.canAct || row.canCollect) && <div className="pa-mini-group" role="group" aria-label={`Ответ: ${row.name}`}>
       {row.canAct && <>
@@ -89,7 +109,7 @@ export default function PharmacyItemRow({ orderId, row, columns, confirmText }: 
         onClick={collect}>{isBusy ? '…' : ROW_ACTION_LABELS.collect}</button>}
     </div>;
 
-  return <tr className={routed ? `pa-row-routed pa-item-tone-${row.chip?.tone ?? 'orange'}` : undefined} aria-busy={isBusy}>
+  return <tr ref={rowRef} className={routed ? `pa-row-routed pa-item-tone-${row.chip?.tone ?? 'orange'}` : undefined} aria-busy={isBusy}>
     <td className="name">{row.name}
       {row.myProblem && <small className="pa-item-problem">{row.myProblem}</small>}
       {row.hint && <small className="pa-routed-hint">{row.hint}</small>}

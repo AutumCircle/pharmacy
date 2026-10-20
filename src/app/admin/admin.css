@@ -963,6 +963,7 @@
 .notification-alarm-listen button { min-height: 44px; padding: 9px 16px; border: 1px solid #b5121b; border-radius: 9px; background: white; color: #b5121b; font: inherit; font-weight: 700; cursor: pointer; }
 .notification-alarm-listen button:disabled { opacity: .55; cursor: default; }
 .notification-alarm-errors { margin: 12px 0 0; padding-left: 20px; }
+.notification-alarm-fields select:focus-visible,.notification-alarm-fields input:focus-visible,.notification-alarm-listen button:focus-visible { outline: 3px solid rgba(181,18,27,.3); outline-offset: 2px; }
 @media (max-width: 560px) { .notification-alarm-fields { grid-template-columns: 1fr; } .notification-alarm-listen button { width: 100%; } }
 @media (max-width: 760px) { .notification-preview-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .notification-settings-desktop { display: none; } .notification-settings-mobile { display: grid; gap: 14px; } .notification-settings-mobile section { background: white; border: 1px solid #e5e8eb; border-radius: 12px; padding: 16px; } .notification-settings-mobile h2 { font-size: 18px; margin: 0 0 12px; } .notification-settings-mobile label { display: flex; align-items: center; justify-content: space-between; gap: 15px; min-height: 44px; border-top: 1px solid #eef0f1; } .notification-courier-switch { align-items: flex-start; flex-direction: column; } }

@@ -341,3 +341,14 @@ test('job 014: no price editor when the policy hides prices, no answer controls 
     [['routed', false, false, false]]);
   assert.equal(routedAway.actionColumn, false);
 });
+
+test('job 014 round 2: row controls are at least 44 px on phones and touch screens', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const css = await readFile(new URL('../src/app/staff/staff.css', import.meta.url), 'utf8');
+  const start = css.indexOf('@media (max-width: 640px), (pointer: coarse) {');
+  assert.ok(start >= 0, 'coarse-pointer / narrow-screen rule exists');
+  const block = css.slice(start, css.indexOf('\n}', start));
+  assert.match(block, /\.pa-mini, \.pa-price-tap, \.pa-price-inline input \{ min-height: 44px; \}/);
+  assert.match(block, /\.pa-price-inline \.pa-mini \{ min-width: 44px; \}/);
+  assert.match(css, /@media \(max-width: 420px\) \{ \.pa-mini-group \{ max-width: 200px; \} \}/);
+});

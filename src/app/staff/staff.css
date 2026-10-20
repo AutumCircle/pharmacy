@@ -447,7 +447,13 @@ label.c-check-row { cursor: pointer; }
 .pa-price-inline input:focus { outline: none; box-shadow: 0 0 0 3px rgba(196,22,28,.12); }
 .pa-price-inline .pa-mini { min-width: 32px; padding: 4px 6px; }
 .pa-row-error { margin-top: 4px; font-size: 13px; }
-@media (max-width: 420px) { .pa-mini-group { max-width: 150px; } }
+/* Phones and touch screens: every row control is at least 44 x 44 px (UI_DESIGN_SPEC); desktop stays compact. */
+@media (max-width: 640px), (pointer: coarse) {
+  .pa-mini, .pa-price-tap, .pa-price-inline input { min-height: 44px; }
+  .pa-mini, .pa-price-inline .pa-mini { min-width: 44px; }
+  .pa-mini-group { gap: 6px; }
+}
+@media (max-width: 420px) { .pa-mini-group { max-width: 200px; } }
 .pa-routed-hint { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--c-muted); }
 .pharmacy-items tr.pa-row-routed td { background: var(--c-orange-soft); color: var(--c-orange); }
 .pharmacy-items tr.pa-row-routed td.name { box-shadow: inset 4px 0 0 var(--c-orange); }
@@ -503,7 +509,7 @@ label.c-check-row { cursor: pointer; }
   box-shadow: 0 6px 18px rgba(20,32,26,.14); }
 .pa-permission-hint { color: #8a5a00 !important; font-weight: 650; }
 .pa-permission-note { font-size: 13px; }
-.pa-permission-sound { font-size: 13px; font-weight: 650; }
+.pa-permission-sound { font-weight: 650; }
 @media (max-width: 420px) {
   .pa-banner { font-size: 15px; }
   .pa-banner button, .pa-permission-row button { width: 100%; }

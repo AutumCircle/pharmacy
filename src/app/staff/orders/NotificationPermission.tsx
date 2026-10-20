@@ -44,8 +44,7 @@ export default function NotificationPermission() {
     </div>
     <p>{view.installed}</p>
     {view.iosHint && <p className="pa-permission-hint">{view.iosHint}</p>}
-    <p className="pa-permission-sound">{SOUND_HINT}</p>
-    <p className="pa-permission-note">Сигнал и звук работают, пока эта страница открыта. При выключенном экране
-      и в режиме энергосбережения напоминания могут не приходить.</p>
+    <p className="pa-permission-note"><b className="pa-permission-sound">{SOUND_HINT}.</b> Сигнал и звук работают,
+      пока эта страница открыта; при выключенном экране и в энергосбережении напоминания могут не приходить.</p>
   </section>;
 }
