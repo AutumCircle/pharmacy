@@ -1900,6 +1900,7 @@ def answer_pharmacy_order_items(
                 cur.execute("""UPDATE order_items SET fulfillment_pharmacy_id = 2, pharmacy_assigned_at = now()
                                WHERE order_id = %s AND id = ANY(%s)""",
                             (order["id"], routed))
+                _reopen_pharmacy_two_assembly(cur, order["id"], order_id, routed, current_request_id)
             _write_admin_audit(cur, actor_id=actor, action="pharmacy.order.items_answered",
                                resource_type="order", resource_id=order_id, request=current_request_id,
                                details={"pharmacy_id": pharmacy_id,
@@ -1931,6 +1932,27 @@ def answer_pharmacy_order_items(
     if notification:
         result["_notification"] = notification
     return result
+
+
+def _reopen_pharmacy_two_assembly(
+    cur: Any, order_db_id: int, order_id: str, routed: list[int], current_request_id: str,
+) -> None:
+    """Job 014: «Ватан 1» just routed new items to «Ватан 2». If «Ватан 2» had already marked its part
+    «Собран» (e.g. it collected an earlier routed item), that mark is stale: reopen it to «Собирается» so
+    «Ватан 2» is alerted again, the order leaves «Собран» and «Согласовано» waits. Items already collected
+    keep their «Собрано». One statement in the routing transaction; the audit row is written only when a
+    part was actually reopened."""
+    cur.execute("""WITH reopened AS (
+                       UPDATE order_pharmacy_assembly
+                       SET state = 'assembling', assembled_at = NULL, updated_by = 'staff:1'
+                       WHERE order_id = %s AND pharmacy_id = 2 AND state = 'assembled'
+                       RETURNING order_id)
+                   INSERT INTO admin_audit_log (actor_id, action, resource_type, resource_id, request_id, details)
+                   SELECT 'staff:1', 'pharmacy.order.assembly_reopened', 'order', %s, %s, %s::jsonb
+                   FROM reopened""",
+                (order_db_id, order_id, current_request_id,
+                 json.dumps({"pharmacy_id": 2, "from_state": "assembled", "to_state": "assembling",
+                             "routed_order_item_ids": sorted(routed)})))
 
 
 def _decimal_text(value: Any) -> str | None:
