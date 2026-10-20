@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-16T19:18:00Z",
+  "updated": "2026-10-20T04:55:45Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -372,6 +372,43 @@
       "reworks": 0,
       "note": "approved by human; проверка на устройствах после выката",
       "updated": "2026-10-16T19:18:00Z"
+    },
+    {
+      "id": "013-ordering-flow-v2",
+      "title": "Порядок заказа v2: статусы, кнопки в таблице, напоминания",
+      "branch": "factory/013-ordering-flow-v2",
+      "stage": "merged",
+      "round": 2,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "CHANGES",
+            "ui": "CHANGES",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-20T04:55:45Z"
     }
   ]
 }
