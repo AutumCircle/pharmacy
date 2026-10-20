@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { permissionView, type PermissionInput } from '@/lib/pharmacy-alerts';
+import { SOUND_HINT, permissionView, type PermissionInput } from '@/lib/pharmacy-alerts';
 
 function readInput(): PermissionInput {
   const supported = 'Notification' in window;
@@ -44,6 +44,7 @@ export default function NotificationPermission() {
     </div>
     <p>{view.installed}</p>
     {view.iosHint && <p className="pa-permission-hint">{view.iosHint}</p>}
+    <p className="pa-permission-sound">{SOUND_HINT}</p>
     <p className="pa-permission-note">Сигнал и звук работают, пока эта страница открыта. При выключенном экране
       и в режиме энергосбережения напоминания могут не приходить.</p>
   </section>;

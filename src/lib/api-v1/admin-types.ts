@@ -2,6 +2,7 @@ import type { CursorPage, OrderStatus, PaymentMethod, PaymentStatus } from './ty
 import type { OrderStage } from '../order-stage';
 import type { CourierAssemblyMark, PharmacyItemAnswer } from './staff-types';
 import type { HomepageBanner } from './types';
+import type { PharmacyAlarmSettings } from '../pharmacy-alarm';
 
 export type AdminApiListResponse<T> = {
   data: T[];
@@ -471,8 +472,14 @@ export type AdminNotificationSettings = {
   courier_enabled: boolean;
   policies: Record<NotificationChannel, Record<NotificationField, boolean>>;
   revision: number;
+  /** Job 014: the pharmacy alarm. Missing on an older Lambda (the page then shows the defaults). */
+  pharmacy_alarm?: PharmacyAlarmSettings;
   updated_at: string | null;
   updated_by: string | null;
+};
+/** PATCH / preview body: all four keys are required by the Lambda (job 014). */
+export type AdminNotificationSettingsUpdate = Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'> & {
+  pharmacy_alarm: PharmacyAlarmSettings;
 };
 export type AdminNotificationPreview = {
   telegram: Record<Exclude<NotificationChannel, 'pharmacy_web'>, string>;

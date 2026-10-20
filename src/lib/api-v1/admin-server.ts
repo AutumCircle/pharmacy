@@ -36,6 +36,7 @@ import type {
   AdminPricingSettings,
   AdminContactSettings,
   AdminNotificationSettings,
+  AdminNotificationSettingsUpdate,
   AdminNotificationPreview,
   AdminProductCarousel,
   CatalogSyncSummary,
@@ -636,11 +637,11 @@ export function getAdminNotificationSettings(): Promise<ApiSuccessResponse<Admin
   return request('/v1/admin/order-notification-settings');
 }
 
-export function updateAdminNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>): Promise<ApiSuccessResponse<AdminNotificationSettings>> {
+export function updateAdminNotificationSettings(body: AdminNotificationSettingsUpdate): Promise<ApiSuccessResponse<AdminNotificationSettings>> {
   return request('/v1/admin/order-notification-settings', { method: 'PATCH', body });
 }
 
-export function previewAdminNotificationSettings(body: Pick<AdminNotificationSettings, 'courier_enabled' | 'policies' | 'revision'>): Promise<ApiSuccessResponse<AdminNotificationPreview>> {
+export function previewAdminNotificationSettings(body: AdminNotificationSettingsUpdate): Promise<ApiSuccessResponse<AdminNotificationPreview>> {
   return request('/v1/admin/order-notification-preview', { method: 'POST', body });
 }
 

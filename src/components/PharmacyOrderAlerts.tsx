@@ -4,11 +4,11 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { chime } from '@/components/NewOrderAlerts';
-import { schedulePharmacyAlarm } from '@/lib/pharmacy-alarm';
+import { createAlarmSlot, schedulePharmacyAlarm } from '@/lib/pharmacy-alarm';
 import {
-  PHARMACY_SOUND_KEY, POLL_MS, SOUND_BLOCKED, SOUND_UNAVAILABLE,
-  alertText, dueAlerts, remindIntervalMs, soundClickAction, soundLabel,
-  titleWithCount, type AlertQueueOrder,
+  DEFAULT_ALARM_CONFIG, PHARMACY_SOUND_KEY, POLL_MS, SOUND_UNAVAILABLE, UNLOCK_EVENTS,
+  alertText, dueAlerts, parseAlarmConfig, remindIntervalMs, soundLabel, systemNotification,
+  titleWithCount, type AlertQueueOrder, type PharmacyAlarmConfig,
 } from '@/lib/pharmacy-alerts';
 import { setAttentionCount } from '@/lib/pharmacy-alert-store';
 
@@ -16,83 +16,86 @@ type Toast = { id: string; title: string; body: string };
 
 const MAX_TOASTS = 4;
 
-function readSoundPreference() {
-  try { return window.localStorage.getItem(PHARMACY_SOUND_KEY) === '1'; } catch { return false; }
-}
-
-function writeSoundPreference(value: boolean) {
-  try { window.localStorage.setItem(PHARMACY_SOUND_KEY, value ? '1' : '0'); } catch { /* private mode */ }
-}
-
-async function loadQueue(): Promise<AlertQueueOrder[] | null> {
+async function loadQueue(): Promise<{ orders: AlertQueueOrder[]; alarm: PharmacyAlarmConfig } | null> {
   try {
-    // For a pharmacy session the Lambda returns this pharmacy's queue (first page, newest first).
+    // For a pharmacy session the Lambda returns this pharmacy's queue (first page, newest first) and the
+    // owner's alarm settings (`alarm`, job 014; missing on an older Lambda -> defaults).
     const response = await fetch('/api/staff/orders', { cache: 'no-store' });
     if (!response.ok) return null;
     const data: unknown = await response.json();
-    const rows = data && typeof data === 'object' ? (data as { data?: unknown }).data : null;
-    return Array.isArray(rows) ? rows as AlertQueueOrder[] : null;
+    const document = data && typeof data === 'object' ? data as { data?: unknown; alarm?: unknown } : null;
+    const rows = document ? document.data : null;
+    return Array.isArray(rows) ? { orders: rows as AlertQueueOrder[], alarm: parseAlarmConfig(document?.alarm) } : null;
   } catch {
     return null;
   }
 }
 
 /**
- * On-screen signal and optional sound for orders this pharmacy has not marked «Сборка сделана» yet
- * (job 013; the Lambda decides via `needs_attention`, an older Lambda without the field gives no
- * reminders). Each due reminder plays the 10-second alarm for both pharmacies; a new one replaces the
- * previous alarm. Repeats every minute for «Ватан 1» and every three minutes for «Ватан 2». Works only
- * while the page is open (closed-app notifications are job 014).
+ * Signal, sound and system notification for orders this pharmacy has not marked «Сборка сделана» yet
+ * (the Lambda decides via `needs_attention`; an older Lambda without the field gives no reminders).
+ *
+ * Job 014: sound is always on. The AudioContext is created on mount and resumed straight away (an
+ * installed app or a site allowed to play sound starts at once); otherwise the first touch or key press
+ * anywhere on the page unlocks it. Each due reminder plays the owner's ringtone for the owner's duration
+ * and repeats at the owner's interval (default 60 s every 60 s, the same for «Ватан 1» and «Ватан 2»);
+ * a new one replaces the ringing alarm. When notifications are allowed, every due reminder also shows a
+ * system notification (its own OS sound needs no gesture), whether the page is visible or hidden.
+ * Works only while the page is open (closed-app notifications are the Web Push backlog).
  */
-export default function PharmacyOrderAlerts({ enabled, pharmacyId }: { enabled: boolean; pharmacyId?: number | null }) {
+export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const lastAlerted = useRef(new Map<string, number>());
   const audio = useRef<AudioContext | null>(null);
-  const stopAlarm = useRef<(() => void) | null>(null);
+  const alarm = useRef(createAlarmSlot());
+  const config = useRef<PharmacyAlarmConfig>(DEFAULT_ALARM_CONFIG);
   const count = useRef(0);
-  const [sound, setSound] = useState(false);
-  const [unlocked, setUnlocked] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  // A tap on the control did not get running audio: the next tap switches the sound off (no dead-end).
-  const [unlockFailed, setUnlockFailed] = useState(false);
-  const [soundNote, setSoundNote] = useState<string | null>(null);
   // Screen-reader announcement of newly due orders only (the toast minutes change every poll).
   const [announcement, setAnnouncement] = useState('');
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setSound(readSoundPreference()));
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  /** Creates/resumes the AudioContext; must run inside a tap or keypress (autoplay rules). */
-  const unlock = useCallback((): { context: AudioContext; running: Promise<boolean> } | null => {
+  /** Creates (once) and resumes the AudioContext. Without a gesture the browser may keep it suspended. */
+  const resume = useCallback((): AudioContext | null => {
     try {
       if (!audio.current) {
         const Context = window.AudioContext
           || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!Context) return null;
+        if (!Context) { setUnavailable(true); return null; }
         const context = new Context();
-        context.onstatechange = () => setUnlocked(context.state === 'running');
+        context.onstatechange = () => setRunning(context.state === 'running');
         audio.current = context;
       }
       const context = audio.current;
-      const running = context.resume().then(() => context.state === 'running', () => false);
-      void running.then((ok) => setUnlocked(ok));
-      return { context, running };
+      if (context.state !== 'running') {
+        void context.resume().then(() => setRunning(context.state === 'running'), () => undefined);
+      } else {
+        setRunning(true);
+      }
+      return context;
     } catch {
+      setUnavailable(true);
       return null;
     }
   }, []);
 
-  // Preference on but no gesture yet (e.g. after a reload): unlock on the first tap or keypress.
+  // On mount: sound is on (an old '0' from before job 014 no longer switches it off) and audio is tried at once.
   useEffect(() => {
-    if (!enabled || !sound || unlocked) return;
-    const handler = () => { unlock(); };
-    window.addEventListener('pointerdown', handler);
-    window.addEventListener('keydown', handler);
-    return () => { window.removeEventListener('pointerdown', handler); window.removeEventListener('keydown', handler); };
-  }, [enabled, sound, unlocked, unlock]);
+    if (!enabled) return;
+    try { window.localStorage.setItem(PHARMACY_SOUND_KEY, '1'); } catch { /* private mode */ }
+    const frame = window.requestAnimationFrame(() => { resume(); });
+    return () => window.cancelAnimationFrame(frame);
+  }, [enabled, resume]);
+
+  // Still blocked (an ordinary tab after a reload): the first touch or key press anywhere unlocks it.
+  useEffect(() => {
+    if (!enabled || running || unavailable) return;
+    const handler = () => { resume(); };
+    for (const name of UNLOCK_EVENTS) window.addEventListener(name, handler, { capture: true, passive: true });
+    return () => { for (const name of UNLOCK_EVENTS) window.removeEventListener(name, handler, { capture: true }); };
+  }, [enabled, running, unavailable, resume]);
 
   // Next.js resets the title on navigation; put the counter back.
   useEffect(() => {
@@ -104,43 +107,46 @@ export default function PharmacyOrderAlerts({ enabled, pharmacyId }: { enabled: 
     if (!enabled) return;
     let cancelled = false;
     let busy = false;
+    const slot = alarm.current;
     async function poll() {
       if (busy) return;
       busy = true;
       try {
-        const orders = await loadQueue();
-        if (cancelled || !orders) return;
+        const queue = await loadQueue();
+        if (cancelled || !queue) return;
+        const { orders } = queue;
+        config.current = queue.alarm;
         const now = Date.now();
-        const result = dueAlerts(orders, lastAlerted.current, now, remindIntervalMs(pharmacyId));
+        const result = dueAlerts(orders, lastAlerted.current, now, remindIntervalMs(config.current));
         lastAlerted.current = result.lastAlerted;
         const attention = new Map(orders.filter((order) => order.needs_attention === true)
           .map((order) => [order.order_id, order]));
         count.current = attention.size;
-        if (attention.size === 0 && stopAlarm.current) { stopAlarm.current(); stopAlarm.current = null; }
+        // Nothing waits for «Сборка сделана» any more: silence at once.
+        if (attention.size === 0) slot.stop();
         setAttentionCount(attention.size);
         document.title = titleWithCount(document.title, attention.size);
         const due = new Set(result.due);
         setToasts((current) => [
           ...result.due.map((id) => ({ id, ...alertText(attention.get(id)!, now) })),
-          // Earlier toasts stay (with fresh minutes) until the order is reacted to or leaves the queue.
+          // Earlier toasts stay (with fresh minutes) until the order is assembled or leaves the queue.
           ...current.filter((toast) => attention.has(toast.id) && !due.has(toast.id))
             .map((toast) => ({ id: toast.id, ...alertText(attention.get(toast.id)!, now) })),
         ]);
         if (!result.due.length) return;
         setAnnouncement(result.due.map((id) => alertText(attention.get(id)!, now).title).join('. '));
         const context = audio.current;
-        if (readSoundPreference() && context && context.state === 'running') {
-          try {
-            // A new due reminder stops the previous alarm instead of stacking on it.
-            stopAlarm.current?.();
-            stopAlarm.current = schedulePharmacyAlarm(context);
-          } catch { /* the on-screen signal is still shown */ }
+        if (context && context.state !== 'running') void context.resume().catch(() => undefined);
+        if (context && context.state === 'running') {
+          const { ringtone, durationSeconds } = config.current;
+          // A new due reminder stops the previous alarm instead of stacking on it.
+          try { slot.play(() => schedulePharmacyAlarm(context, ringtone, durationSeconds)); } catch { /* signal still shown */ }
         }
-        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+        if ('Notification' in window && Notification.permission === 'granted') {
           for (const id of result.due) {
-            const text = alertText(attention.get(id)!, now);
-            // Throws on Android Chrome without a service worker; reliable delivery is follow-up 012b.
-            try { new Notification(text.title, { body: text.body, tag: `pharmacy-${id}` }); } catch { /* ignored */ }
+            const notification = systemNotification(attention.get(id)!, now);
+            // Throws on Android Chrome without a service worker; the toast and the title still work there.
+            try { new Notification(notification.title, notification.options as NotificationOptions); } catch { /* ignored */ }
           }
         }
       } finally {
@@ -154,52 +160,20 @@ export default function PharmacyOrderAlerts({ enabled, pharmacyId }: { enabled: 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
-      stopAlarm.current?.();
-      stopAlarm.current = null;
+      slot.stop();
       document.removeEventListener('visibilitychange', onVisible);
       setAttentionCount(null);
       count.current = 0;
       document.title = titleWithCount(document.title, 0);
     };
-  }, [enabled, pharmacyId]);
+  }, [enabled]);
 
-  function setPreference(value: boolean) {
-    if (!value) { stopAlarm.current?.(); stopAlarm.current = null; }
-    setSound(value);
-    writeSoundPreference(value);
-    setUnlockFailed(false);
-  }
-
-  /** This tap is the gesture: unlock, confirm with the chime, and report a failure instead of dead-ending. */
-  function tryUnlock(): boolean {
-    const audioState = unlock();
-    if (!audioState) {
-      setPreference(false);
-      setSoundNote(SOUND_UNAVAILABLE);
-      return false;
-    }
-    try { chime(audioState.context); } catch { /* blocked */ }
-    void audioState.running.then((ok) => {
-      setUnlockFailed(!ok);
-      setSoundNote(ok ? null : SOUND_BLOCKED);
-    });
-    return true;
-  }
-
+  /** The control is only a status indicator; a tap on it is one more touch that unlocks audio. */
   function onSoundClick() {
-    const action = soundClickAction(sound, unlocked, unlockFailed);
-    if (action === 'disable') {
-      setPreference(false);
-      setSoundNote(null);
-      return;
+    const context = resume();
+    if (context && context.state === 'running') {
+      try { chime(context); } catch { /* blocked */ }
     }
-    if (action === 'enable') {
-      setSoundNote(null);
-      if (tryUnlock()) setPreference(true);
-      return;
-    }
-    // «Нажмите, чтобы включить звук» after a reload.
-    tryUnlock();
   }
 
   function dismiss(id: string) {
@@ -207,15 +181,13 @@ export default function PharmacyOrderAlerts({ enabled, pharmacyId }: { enabled: 
   }
 
   if (!enabled) return null;
-  const label = soundLabel(sound, unlocked);
+  const label = soundLabel(running);
   return <>
-    <button type="button" className={`pa-sound${sound ? (unlocked ? ' on' : ' wait') : ''}`} onClick={onSoundClick}
-      // Keep the window-level unlock listener from flipping the state before this click is handled.
-      onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}
-      title={sound && unlocked ? 'Нажмите, чтобы выключить звук' : label}>
-      <span aria-hidden="true">{sound && unlocked ? '🔔' : '🔕'}</span><span>{label}</span>
+    <button type="button" className={`pa-sound${running ? ' on' : ' wait'}`} onClick={onSoundClick}
+      aria-live="polite" title={label}>
+      <span aria-hidden="true">🔔</span><span>{label}</span>
     </button>
-    {soundNote && <p className="pa-sound-note" role="status">{soundNote}</p>}
+    {unavailable && <p className="pa-sound-note" role="status">{SOUND_UNAVAILABLE}</p>}
     <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
     {toasts.length > 0 && <div className="pa-stack">
       {toasts.slice(0, MAX_TOASTS).map((toast) => <div key={toast.id} className="pa-toast">

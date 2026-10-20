@@ -490,6 +490,7 @@ label.c-check-row { cursor: pointer; }
   box-shadow: 0 6px 18px rgba(20,32,26,.14); }
 .pa-permission-hint { color: #8a5a00 !important; font-weight: 650; }
 .pa-permission-note { font-size: 13px; }
+.pa-permission-sound { font-size: 13px; font-weight: 650; }
 @media (max-width: 420px) {
   .pa-banner { font-size: 15px; }
   .pa-banner button, .pa-permission-row button { width: 100%; }
