@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-20T04:55:45Z",
+  "updated": "2026-10-20T08:04:57Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -409,6 +409,43 @@
       "reworks": 0,
       "note": "approved by human",
       "updated": "2026-10-20T04:55:45Z"
+    },
+    {
+      "id": "014-pharmacy-alerts-format",
+      "title": "Звук аптек всегда вкл., рингтоны 1 мин, Ватан 2, единый формат",
+      "branch": "factory/014-pharmacy-alerts-format",
+      "stage": "merged",
+      "round": 2,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "CHANGES",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        },
+        {
+          "round": 2,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-20T08:04:57Z"
     }
   ]
 }
