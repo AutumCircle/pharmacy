@@ -330,6 +330,38 @@ class PharmacyChangeNotificationTests(unittest.TestCase):
                 lambda_handler({**CHANGE_EVENT, 'event_key': key}, None)
         claim.assert_not_called()
         send_message.assert_not_called()
+    # --- job 014: «Ватан 2» «Нет в наличии» -------------------------------------------------------
+
+    def test_unavailable_both_line_for_vatan2(self):
+        event = {**CHANGE_EVENT, 'pharmacy_id': 2, 'changes': [
+            {'kind': 'unavailable_both', 'medicine_name': 'Нурофен <форте>', 'quantity': '2'}]}
+        for channel in ('owner_telegram', 'courier_telegram'):
+            with self.subTest(channel=channel):
+                text = format_pharmacy_change_message(event, default_policies()[channel])
+                self.assertIn('Заказ № 1910-041 · Ватан 2', text)
+                self.assertIn('«Нурофен &lt;форте&gt;» × 2 — нет в наличии в обеих аптеках', text)
+
+    def test_change_messages_never_carry_client_data(self):
+        private = {'customer_name': 'SECRET-NAME', 'phone': '+992917123456', 'address': 'SECRET-ADDRESS',
+                   'landmark': 'SECRET-LANDMARK', 'comment': 'SECRET-COMMENT', 'notes': 'SECRET-NOTES'}
+        changes = CHANGE_EVENT['changes'] + [
+            {'kind': 'unavailable_both', 'medicine_name': 'Аспирин', 'quantity': '1', **private}]
+        for pharmacy_id in (1, 2):
+            event = {**CHANGE_EVENT, **private, 'pharmacy_id': pharmacy_id,
+                     'changes': [{**change, **private} for change in changes]}
+            for channel in ('owner_telegram', 'courier_telegram'):
+                with self.subTest(pharmacy_id=pharmacy_id, channel=channel):
+                    everything = {**default_policies()[channel], **{key: True for key in default_policies()[channel]}}
+                    text = format_pharmacy_change_message(event, everything)
+                    for value in private.values():
+                        self.assertNotIn(value, text)
+                    self.assertNotIn('917123456', text)
+
+    def test_unknown_change_kind_is_skipped(self):
+        event = {**CHANGE_EVENT, 'changes': [{'kind': 'secret', 'medicine_name': 'X', 'quantity': '1'}]}
+        text = format_pharmacy_change_message(event, default_policies()['owner_telegram'])
+        self.assertNotIn('«X»', text)
+
 
 
 if __name__ == "__main__":

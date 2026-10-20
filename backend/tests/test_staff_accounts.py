@@ -835,6 +835,94 @@ class StaffTests(unittest.TestCase):
         self.assertFalse(any('UPDATE order_pharmacy_assembly' in sql for sql, _ in db.statements))
         self.assertEqual(db.parts[2], 'assembled')
 
+    # --- job 014: alarm in the queue and the owner's change notifications ----------------------------
+
+    def test_pharmacy_queue_carries_alarm_for_both_pharmacies(self):
+        from backend.v1.shared.order_notification_settings import FIELDS
+        for pharmacy_id in (1, 2):
+            with self.subTest(pharmacy_id=pharmacy_id):
+                result, _ = self._pharmacy_rows(pharmacy_id=pharmacy_id)
+                self.assertEqual(result['alarm'], {'ringtone': 'classic', 'duration_seconds': 60,
+                                                   'interval_seconds': 60})
+        saved = {'ringtone': 'bell', 'duration_seconds': 30, 'interval_seconds': 90}
+        all_off = {'pharmacy_web': {field: False for field in FIELDS}, 'pharmacy_alarm': saved}
+        for pharmacy_id in (1, 2):
+            with self.subTest(pharmacy_id=pharmacy_id, saved=True):
+                result, cursor = self._pharmacy_rows(pharmacy_id=pharmacy_id, policies=all_off)
+                self.assertEqual(result['alarm'], saved)
+                # Same two read-only statements as before: no new query for the alarm.
+                self.assertEqual(cursor.execute.call_count, 2)
+                self.assertNotIn('alarm', result['data'][0])
+
+    def _answer(self, pharmacy_id, payload, items):
+        from backend.v1.admin_api.lambda_function import answer_pharmacy_order_items
+        cursor = Mock()
+        cursor.fetchone.side_effect = [
+            {'id': 7, 'public_id': 'ord_' + 'a' * 32, 'order_reference': '2010-007', 'status': 'pending',
+             'created_by_staff_account_id': None, 'fulfillment_pharmacy_id': None,
+             'customer_name': 'PRIVATE', 'phone': '+992917123456', 'address': 'PRIVATE ADDRESS'},
+            {'selling_unit_price': Decimal('54'), 'line_total': Decimal('54.00')},
+        ]
+        cursor.fetchall.return_value = items
+
+        @contextmanager
+        def answer_transaction():
+            yield cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', answer_transaction):
+            return answer_pharmacy_order_items('ord_' + 'a' * 32, payload, pharmacy_id, 'req_' + 'd' * 32)
+
+    @staticmethod
+    def _item(item_id, pharmacy_id, answer=None):
+        return {'id': item_id, 'pharmacy_id': pharmacy_id, 'answer': answer, 'problem': None,
+                'medicine_name': 'Парацетамол', 'quantity': Decimal('2'), 'base_unit_price': Decimal('40.00'),
+                'selling_unit_price': Decimal('48')}
+
+    def _assert_change_notification(self, result, pharmacy_id, kind):
+        notification = result['_notification']
+        self.assertEqual(notification['notification_kind'], 'pharmacy_item_change')
+        self.assertEqual(notification['pharmacy_id'], pharmacy_id)
+        self.assertEqual(notification['event_key'], 'order:7:pharmacy-change:req_' + 'd' * 32)
+        self.assertEqual([change['kind'] for change in notification['changes']], [kind])
+        self.assertEqual(notification['changes'][0]['medicine_name'], 'Парацетамол')
+        text = json.dumps(notification, ensure_ascii=False)
+        for secret in ('PRIVATE', '917123456', 'customer_name', 'phone', 'address', 'landmark', 'comment'):
+            self.assertNotIn(secret, text)
+        return notification['changes'][0]
+
+    def test_owner_is_told_about_vatan1_price_change(self):
+        result = self._answer(1, {'answers': [{'order_item_id': 81, 'answer': 'available', 'base_unit_price': '45'}]},
+                              [self._item(81, 1)])
+        change = self._assert_change_notification(result, 1, 'price')
+        self.assertEqual((change['old_base_unit_price'], change['new_base_unit_price']), ('40.00', '45.00'))
+
+    def test_owner_is_told_about_vatan2_price_change(self):
+        result = self._answer(2, {'answers': [{'order_item_id': 82, 'answer': 'available', 'base_unit_price': '45'}]},
+                              [self._item(81, 1, 'available'), self._item(82, 2)])
+        change = self._assert_change_notification(result, 2, 'price')
+        self.assertEqual(change['new_selling_unit_price'], '54')
+
+    def test_owner_is_told_about_vatan1_routing(self):
+        result = self._answer(1, {'answers': [{'order_item_id': 81, 'answer': 'unavailable'}]},
+                              [self._item(81, 1), self._item(82, 1)])
+        self._assert_change_notification(result, 1, 'routed')
+
+    def test_owner_is_told_about_vatan2_unavailable_in_both(self):
+        result = self._answer(2, {'answers': [{'order_item_id': 82, 'answer': 'unavailable'}]},
+                              [self._item(81, 1, 'available'), self._item(82, 2)])
+        change = self._assert_change_notification(result, 2, 'unavailable_both')
+        self.assertEqual(change, {'kind': 'unavailable_both', 'medicine_name': 'Парацетамол', 'quantity': '2'})
+        # Repeating the same answer is a no-op and announces nothing.
+        again = self._answer(2, {'answers': [{'order_item_id': 82, 'answer': 'unavailable'}]},
+                             [self._item(81, 1, 'available'), self._item(82, 2, 'unavailable')])
+        self.assertNotIn('_notification', again)
+        # «Ватан 2» «В наличии» or «Цена отличается» is not a «нет в обеих» event.
+        for answer in ({'order_item_id': 82, 'answer': 'available'},
+                       {'order_item_id': 82, 'answer': 'price_differs', 'problem': 'дороже на 5'}):
+            with self.subTest(answer=answer):
+                plain = self._answer(2, {'answers': [answer]}, [self._item(81, 1, 'available'), self._item(82, 2)])
+                self.assertNotIn('_notification', plain)
+
 
 if __name__ == '__main__':
     unittest.main()

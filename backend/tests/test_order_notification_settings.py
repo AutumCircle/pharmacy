@@ -5,7 +5,11 @@ from unittest.mock import Mock, patch
 
 from backend.v1.admin_api.lambda_function import claim_order_notification, lambda_handler, update_order_notification_settings
 from backend.v1.shared.contract import ContractError
-from backend.v1.shared.order_notification_settings import default_policies, validate_update
+from backend.v1.shared.order_notification_settings import (
+    CHANNELS, default_pharmacy_alarm, default_policies, effective_settings, validate_update,
+)
+
+ALARM = {'ringtone': 'classic', 'duration_seconds': 60, 'interval_seconds': 60}
 
 
 class NotificationSettingsTests(unittest.TestCase):
@@ -31,6 +35,7 @@ class NotificationSettingsTests(unittest.TestCase):
         with self._transaction(cursor):
             result = update_order_notification_settings({
                 'courier_enabled': False, 'policies': default_policies(), 'revision': 1,
+                'pharmacy_alarm': dict(ALARM),
             }, 'admin:test', 'req')
         self.assertFalse(result['courier_enabled'])
         self.assertEqual(result['revision'], 2)
@@ -53,19 +58,20 @@ class NotificationSettingsTests(unittest.TestCase):
 
     def test_policy_is_allowlisted_and_order_number_cannot_be_hidden(self):
         policies = default_policies()
-        enabled, result, revision = validate_update({
-            'courier_enabled': False, 'policies': policies, 'revision': 1,
+        enabled, result, revision, alarm = validate_update({
+            'courier_enabled': False, 'policies': policies, 'revision': 1, 'pharmacy_alarm': dict(ALARM),
         })
         self.assertFalse(enabled)
         self.assertEqual(result, policies)
         self.assertEqual(revision, 1)
+        self.assertEqual(alarm, ALARM)
         policies['courier_telegram']['order_reference'] = False
         with self.assertRaises(ValueError):
-            validate_update({'courier_enabled': True, 'policies': policies, 'revision': 1})
+            validate_update({'courier_enabled': True, 'policies': policies, 'revision': 1, 'pharmacy_alarm': ALARM})
         policies['courier_telegram']['order_reference'] = True
         policies['courier_telegram']['secret'] = True
         with self.assertRaises(ValueError):
-            validate_update({'courier_enabled': True, 'policies': policies, 'revision': 1})
+            validate_update({'courier_enabled': True, 'policies': policies, 'revision': 1, 'pharmacy_alarm': ALARM})
 
     def test_disabled_courier_is_not_claimed(self):
         now = datetime.now(timezone.utc)
@@ -183,6 +189,127 @@ class NotificationSettingsTests(unittest.TestCase):
     def test_invalid_claim_does_not_query_database(self):
         with self.assertRaises(ContractError):
             claim_order_notification({'event_key': 'order:17:created', 'recipient': 'pharmacy_web'})
+
+    # --- job 014: pharmacy alarm (ringtone, duration, interval) ------------------------------------
+
+    def _payload(self, **alarm):
+        return {'courier_enabled': True, 'policies': default_policies(), 'revision': 3,
+                'pharmacy_alarm': {**ALARM, **alarm}}
+
+    def test_pharmacy_alarm_defaults_for_missing_rows_and_old_rows(self):
+        self.assertEqual(default_pharmacy_alarm(), ALARM)
+        self.assertEqual(effective_settings(None)['pharmacy_alarm'], ALARM)
+        self.assertEqual(effective_settings({'courier_enabled': True, 'policies': {}, 'revision': 4})['pharmacy_alarm'],
+                         ALARM)
+        for broken in ({'ringtone': 'siren', 'duration_seconds': 60, 'interval_seconds': 60},
+                       {'ringtone': 'bell', 'duration_seconds': 90, 'interval_seconds': 60},
+                       {'ringtone': 'bell', 'duration_seconds': True, 'interval_seconds': 60},
+                       {'ringtone': 'bell'}, 'classic', None):
+            with self.subTest(broken=broken):
+                row = {'courier_enabled': True, 'policies': {'pharmacy_alarm': broken}, 'revision': 4}
+                self.assertEqual(effective_settings(row)['pharmacy_alarm'], ALARM)
+
+    def test_pharmacy_alarm_round_trips_and_never_leaks_into_channels(self):
+        stored = {**default_policies(), 'pharmacy_alarm': {'ringtone': 'melody', 'duration_seconds': 30,
+                                                           'interval_seconds': 120},
+                  'unknown_channel': {'phone': True}}
+        stored['pharmacy_web'] = {**stored['pharmacy_web'], 'pharmacy_alarm': True, 'ringtone': 'bell'}
+        settings = effective_settings({'courier_enabled': True, 'policies': stored, 'revision': 5})
+        self.assertEqual(settings['pharmacy_alarm'], {'ringtone': 'melody', 'duration_seconds': 30,
+                                                      'interval_seconds': 120})
+        self.assertEqual(set(settings['policies']), set(CHANNELS))
+        for channel in CHANNELS:
+            self.assertEqual(settings['policies'][channel], default_policies()[channel])
+            self.assertNotIn('pharmacy_alarm', settings['policies'][channel])
+            self.assertNotIn('ringtone', settings['policies'][channel])
+
+    def test_pharmacy_alarm_accepts_every_ringtone_and_the_bounds(self):
+        for ringtone in ('classic', 'bell', 'pulse', 'melody'):
+            self.assertEqual(validate_update(self._payload(ringtone=ringtone))[3]['ringtone'], ringtone)
+        for duration, interval in ((5, 30), (30, 30), (120, 120), (120, 600), (60, 60)):
+            with self.subTest(duration=duration, interval=interval):
+                alarm = validate_update(self._payload(duration_seconds=duration, interval_seconds=interval))[3]
+                self.assertEqual((alarm['duration_seconds'], alarm['interval_seconds']), (duration, interval))
+
+    def test_pharmacy_alarm_rejects_bad_values(self):
+        bad = [
+            {'ringtone': 'siren'}, {'ringtone': ''}, {'ringtone': None}, {'ringtone': 1}, {'ringtone': 'Classic'},
+            {'duration_seconds': 4}, {'duration_seconds': 121}, {'duration_seconds': 60.0},
+            {'duration_seconds': '60'}, {'duration_seconds': True}, {'duration_seconds': None},
+            {'interval_seconds': 29}, {'interval_seconds': 601}, {'interval_seconds': 60.5},
+            {'interval_seconds': '60'}, {'interval_seconds': False},
+            {'duration_seconds': 61, 'interval_seconds': 60},
+            {'duration_seconds': 120, 'interval_seconds': 30},
+        ]
+        for change in bad:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                validate_update(self._payload(**change))
+        missing = self._payload()
+        del missing['pharmacy_alarm']['interval_seconds']
+        extra = self._payload(volume=1)
+        no_alarm = self._payload()
+        del no_alarm['pharmacy_alarm']
+        as_text = {**self._payload(), 'pharmacy_alarm': 'classic'}
+        for payload in (missing, extra, no_alarm, {**self._payload(), 'extra': 1}, as_text):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                validate_update(payload)
+
+    def test_update_stores_alarm_beside_unchanged_policies_and_audits_both(self):
+        import json
+        policies = default_policies()
+        alarm = {'ringtone': 'pulse', 'duration_seconds': 45, 'interval_seconds': 90}
+        cursor = Mock()
+        cursor.fetchone.side_effect = [
+            {'courier_enabled': True, 'policies': default_policies(), 'revision': 3},
+            {'courier_enabled': True, 'policies': {**policies, 'pharmacy_alarm': alarm}, 'revision': 4},
+        ]
+        with self._transaction(cursor):
+            result = update_order_notification_settings(
+                {'courier_enabled': True, 'policies': policies, 'revision': 3, 'pharmacy_alarm': alarm},
+                'admin:test', 'req')
+        self.assertEqual(result['pharmacy_alarm'], alarm)
+        self.assertEqual(result['policies'], default_policies())
+        update = next(call for call in cursor.execute.call_args_list
+                      if 'UPDATE order_notification_settings' in call.args[0])
+        stored = json.loads(update.args[1][1])
+        self.assertEqual(stored['pharmacy_alarm'], alarm)
+        self.assertEqual({key: value for key, value in stored.items() if key != 'pharmacy_alarm'}, policies)
+        audit = next(call for call in cursor.execute.call_args_list if 'admin_audit_log' in call.args[0])
+        details = json.loads(audit.args[1][5])
+        self.assertEqual(details['previous']['pharmacy_alarm'], ALARM)
+        self.assertEqual(details['current']['pharmacy_alarm'], alarm)
+        self.assertEqual(details['current']['policies'], policies)
+
+    def test_invalid_alarm_update_is_rejected_before_database(self):
+        cursor = Mock()
+        with self._transaction(cursor), self.assertRaises(ContractError) as raised:
+            update_order_notification_settings(self._payload(ringtone='siren'), 'admin:test', 'req')
+        self.assertEqual((raised.exception.code, raised.exception.http_status), ('VALIDATION_ERROR', 400))
+        cursor.execute.assert_not_called()
+
+    def test_settings_routes_require_admin(self):
+        import json
+        for method, body in (('GET', None), ('PATCH', self._payload())):
+            with self.subTest(method=method):
+                event = {'path': '/v1/admin/order-notification-settings', 'httpMethod': method, 'headers': {},
+                         'body': json.dumps(body or {})}
+                with patch('backend.v1.admin_api.lambda_function.transaction') as tx:
+                    response = lambda_handler(event, None)
+                self.assertIn(response['statusCode'], (401, 403))
+                tx.assert_not_called()
+
+    def test_admin_get_returns_pharmacy_alarm(self):
+        import json
+        import os
+        cursor = Mock()
+        cursor.fetchone.return_value = {'courier_enabled': True, 'policies': {}, 'revision': 1}
+        token = 'test-admin-service-' * 3
+        event = {'path': '/v1/admin/order-notification-settings', 'httpMethod': 'GET',
+                 'headers': {'Authorization': 'Bearer ' + token}}
+        with patch.dict(os.environ, {'ADMIN_API_BEARER_TOKEN': token}), self._transaction(cursor):
+            response = lambda_handler(event, None)
+        self.assertEqual(response['statusCode'], 200)
+        self.assertEqual(json.loads(response['body'])['data']['pharmacy_alarm'], ALARM)
 
 
 if __name__ == '__main__':
