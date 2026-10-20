@@ -97,6 +97,75 @@ class NotificationSettingsTests(unittest.TestCase):
             result = claim_order_notification({'event_key': 'order:17:created', 'recipient': 'courier_telegram'})
         self.assertFalse(result['claimed'])
 
+    # --- job 013: pharmacy change events ------------------------------------------------------
+
+    CHANGE_KEY = 'order:17:pharmacy-change:req_' + 'ab' * 16
+
+    def test_change_event_is_claimed_for_owner_and_courier(self):
+        now = datetime.now(timezone.utc)
+        for recipient in ('owner_telegram', 'courier_telegram'):
+            with self.subTest(recipient=recipient):
+                cursor = Mock()
+                cursor.fetchone.side_effect = [
+                    {'courier_enabled': True, 'courier_enabled_since': now - timedelta(days=1),
+                     'order_created_at': now, 'policies': {}, 'revision': 1},
+                    {'event_key': self.CHANGE_KEY},
+                ]
+                with self._transaction(cursor):
+                    result = claim_order_notification({'event_key': self.CHANGE_KEY, 'recipient': recipient})
+                self.assertTrue(result['claimed'])
+                self.assertEqual(result['fields'], default_policies()[recipient])
+                insert = cursor.execute.call_args_list[1]
+                self.assertIn('INSERT INTO order_notification_deliveries', insert.args[0])
+                self.assertEqual(insert.args[1], (self.CHANGE_KEY, recipient))
+                self.assertEqual(cursor.execute.call_args_list[0].args[1], (17,))
+
+    def test_change_event_respects_disabled_courier_and_duplicates(self):
+        now = datetime.now(timezone.utc)
+        cursor = Mock()
+        cursor.fetchone.return_value = {'courier_enabled': False, 'courier_enabled_since': now,
+            'order_created_at': now, 'policies': {}, 'revision': 1}
+        with self._transaction(cursor):
+            result = claim_order_notification({'event_key': self.CHANGE_KEY, 'recipient': 'courier_telegram'})
+        self.assertFalse(result['claimed'])
+        cursor = Mock()
+        cursor.fetchone.side_effect = [{'courier_enabled': True, 'courier_enabled_since': now - timedelta(days=1),
+                                        'order_created_at': now, 'policies': {}, 'revision': 1}, None]
+        with self._transaction(cursor):
+            second = claim_order_notification({'event_key': self.CHANGE_KEY, 'recipient': 'owner_telegram'})
+        self.assertEqual(second, {'claimed': False, 'fields': {}})
+
+    def test_change_event_rejects_pharmacy_recipient_and_malformed_keys(self):
+        bad = [
+            (self.CHANGE_KEY, 'pharmacy_telegram'),
+            (self.CHANGE_KEY, 'pharmacy_web'),
+            ('order:17:pharmacy-change:', 'owner_telegram'),
+            ('order:17:pharmacy-change:req_123', 'owner_telegram'),
+            ('order:17:pharmacy-change:req_' + 'AB' * 16, 'owner_telegram'),
+            ('order:17:pharmacy-change:req_' + 'ab' * 16 + 'x', 'owner_telegram'),
+            ('order:0:pharmacy-change:req_' + 'ab' * 16, 'owner_telegram'),
+            ('order:17:pharmacy-changed:req_' + 'ab' * 16, 'owner_telegram'),
+            ('order:17:created:pharmacy-change:req_' + 'ab' * 16, 'owner_telegram'),
+            ('order:17:pharmacy-change:req_' + 'ab' * 16 + '\n', 'owner_telegram'),
+        ]
+        for event_key, recipient in bad:
+            with self.subTest(event_key=event_key, recipient=recipient):
+                cursor = Mock()
+                with self._transaction(cursor), self.assertRaises(ContractError) as raised:
+                    claim_order_notification({'event_key': event_key, 'recipient': recipient})
+                self.assertEqual((raised.exception.code, raised.exception.http_status), ('VALIDATION_ERROR', 400))
+                cursor.execute.assert_not_called()
+
+    def test_created_event_still_accepts_pharmacy_recipient(self):
+        now = datetime.now(timezone.utc)
+        cursor = Mock()
+        cursor.fetchone.side_effect = [{'courier_enabled': True, 'courier_enabled_since': now,
+                                        'order_created_at': now, 'policies': {}, 'revision': 1},
+                                       {'event_key': 'order:17:created'}]
+        with self._transaction(cursor):
+            result = claim_order_notification({'event_key': 'order:17:created', 'recipient': 'pharmacy_telegram'})
+        self.assertTrue(result['claimed'])
+
     def test_duplicate_delivery_claim_is_rejected(self):
         now = datetime.now(timezone.utc)
         cursor = Mock()

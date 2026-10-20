@@ -402,45 +402,71 @@ class StaffTests(unittest.TestCase):
         })[0]['data'][0]
         self.assertEqual(mixed['waiting_since'], mixed['created_at'])
 
+    # --- job 013: alerts until «Сборка сделана» ------------------------------------------------
+
     def test_pharmacy_needs_attention_for_unreacted_order(self):
-        row = self._pharmacy_rows(extra={'reacted_count': 0, 'assembly_state': None})[0]['data'][0]
+        row = self._pharmacy_rows(extra={'assemblable_count': 1, 'assembly_state': None})[0]['data'][0]
         self.assertIs(row['needs_attention'], True)
         self.assertEqual(row['attention_since'], row['created_at'])
         self.assertEqual(row['attention_since'], '2026-10-10T08:30:00+00:00')
-        self.assertNotIn('reacted_count', row)
+        for key in ('reacted_count', 'assemblable_count', 'all_routed_here', 'routed_here_since', 'stage_assembled'):
+            self.assertNotIn(key, row)
 
-    def test_pharmacy_needs_attention_false_after_answer(self):
-        row = self._pharmacy_rows(extra={'reacted_count': 1, 'unanswered_count': 0})[0]['data'][0]
-        self.assertIs(row['needs_attention'], False)
-        self.assertIsNone(row['attention_since'])
+    def test_pharmacy_needs_attention_stays_after_answers(self):
+        row = self._pharmacy_rows(extra={'assemblable_count': 1, 'unanswered_count': 0})[0]['data'][0]
+        self.assertFalse(row['awaiting_response'])
+        self.assertIs(row['needs_attention'], True)
+        self.assertEqual(row['attention_since'], '2026-10-10T08:30:00+00:00')
+        # «Ватан 1» answered one item «Нет в наличии» (routed away) and still holds another one.
+        routed = self._pharmacy_rows(extra={'assemblable_count': 1, 'routed_away_count': 1})[0]['data'][0]
+        self.assertIs(routed['needs_attention'], True)
 
-    def test_pharmacy_needs_attention_false_after_answer_routed_away(self):
-        # «Ватан 1» answered «Нет в наличии»: the item left its assigned set but it still reacted.
-        row = self._pharmacy_rows(extra={'reacted_count': 0, 'routed_away_count': 1})[0]['data'][0]
-        self.assertIs(row['needs_attention'], False)
-        self.assertIsNone(row['attention_since'])
-
-    def test_pharmacy_needs_attention_false_with_assembly_mark(self):
-        for state in ('assembling', 'assembled'):
-            for status in ('pending', 'confirmed'):
-                row = self._pharmacy_rows(status=status, extra={'reacted_count': 0, 'assembly_state': state})[0]
-                row = row['data'][0]
-                self.assertIs(row['needs_attention'], False)
-                self.assertIsNone(row['attention_since'])
+    def test_pharmacy_needs_attention_stays_while_assembling_and_stops_at_assembled(self):
+        for status in ('pending', 'confirmed'):
+            with self.subTest(status=status):
+                assembling = self._pharmacy_rows(status=status, extra={
+                    'assemblable_count': 2, 'assembly_state': 'assembling'})[0]['data'][0]
+                self.assertIs(assembling['needs_attention'], True)
+                self.assertEqual(assembling['attention_since'], '2026-10-10T08:30:00+00:00')
+                assembled = self._pharmacy_rows(status=status, extra={
+                    'assemblable_count': 2, 'assembly_state': 'assembled'})[0]['data'][0]
+                self.assertIs(assembled['needs_attention'], False)
+                self.assertIsNone(assembled['attention_since'])
 
     def test_pharmacy_needs_attention_vatan2_routed_order_uses_routing_time(self):
         from datetime import datetime, timezone
         routed_at = datetime(2026, 10, 10, 9, 15, tzinfo=timezone.utc)
-        row = self._pharmacy_rows(pharmacy_id=2, extra={
-            'reacted_count': 0, 'unanswered_count': 1, 'unanswered_unrouted': False,
-            'unanswered_routed_since': routed_at})[0]['data'][0]
-        self.assertIs(row['needs_attention'], True)
-        self.assertEqual(row['attention_since'], '2026-10-10T09:15:00+00:00')
+        # Partly collected: the part is «Собирается» (synced from per-item «Собрано»), alerts continue.
+        partly = self._pharmacy_rows(pharmacy_id=2, extra={
+            'assemblable_count': 2, 'all_routed_here': True, 'routed_here_since': routed_at,
+            'assembly_state': 'assembling', 'unanswered_count': 0})[0]['data'][0]
+        self.assertIs(partly['needs_attention'], True)
+        self.assertEqual(partly['attention_since'], '2026-10-10T09:15:00+00:00')
+        # The last routed item «Собрано»: _sync_item_assembly marks the part «Собран».
+        done = self._pharmacy_rows(pharmacy_id=2, extra={
+            'assemblable_count': 2, 'all_routed_here': True, 'routed_here_since': routed_at,
+            'assembly_state': 'assembled'})[0]['data'][0]
+        self.assertIs(done['needs_attention'], False)
+        self.assertIsNone(done['attention_since'])
+        # An order that is «Ватан 2»'s own (not every item routed) keeps the creation time.
+        own = self._pharmacy_rows(pharmacy_id=2, extra={
+            'assemblable_count': 1, 'all_routed_here': False, 'routed_here_since': routed_at})[0]['data'][0]
+        self.assertEqual(own['attention_since'], own['created_at'])
 
-    def test_pharmacy_needs_attention_sql_counts_answers_and_collected_items(self):
+    def test_pharmacy_needs_attention_false_when_nothing_to_assemble(self):
+        # Every item of this pharmacy answered «Нет в наличии».
+        row = self._pharmacy_rows(pharmacy_id=2, extra={'assemblable_count': 0, 'unanswered_count': 0})[0]['data'][0]
+        self.assertIs(row['needs_attention'], False)
+        self.assertIsNone(row['attention_since'])
+
+    def test_pharmacy_needs_attention_sql_reads_assemblable_items_and_mark(self):
         _, cursor = self._pharmacy_rows()
         sql, args = cursor.execute.call_args_list[-2].args
-        self.assertIn('COUNT(*) FILTER (WHERE mine.answer IS NOT NULL OR col.order_item_id IS NOT NULL)', sql)
+        self.assertIn("COUNT(*) FILTER (WHERE mine.answer IS DISTINCT FROM 'unavailable') AS assemblable_count", sql)
+        self.assertIn('bool_and(oi.pharmacy_assigned_at IS NOT NULL) AS all_routed_here', sql)
+        self.assertIn('MIN(oi.pharmacy_assigned_at) AS routed_here_since', sql)
+        self.assertIn('asm.state AS assembly_state', sql)
+        self.assertIn('AS stage_assembled', sql)
         self.assertEqual(args, (1, 1, 1, 1, 1, 1, 1, 21))
         # Read-only: the queue issues exactly the list SELECT and the policy SELECT.
         self.assertEqual(cursor.execute.call_count, 2)
@@ -450,14 +476,25 @@ class StaffTests(unittest.TestCase):
     def test_pharmacy_needs_attention_survives_all_off_policy(self):
         from backend.v1.shared.order_notification_settings import FIELDS
         policies = {'pharmacy_web': {field: False for field in FIELDS}}
-        unreacted = self._pharmacy_rows(policies=policies, extra={'reacted_count': 0})[0]['data'][0]
-        self.assertIs(unreacted['needs_attention'], True)
-        self.assertEqual(unreacted['attention_since'], '2026-10-10T08:30:00+00:00')
-        self.assertNotIn('created_at', unreacted)
-        reacted = self._pharmacy_rows(policies=policies, extra={'reacted_count': 2})[0]['data'][0]
-        self.assertIs(reacted['needs_attention'], False)
-        self.assertIn('attention_since', reacted)
-        self.assertIsNone(reacted['attention_since'])
+        waiting = self._pharmacy_rows(policies=policies, extra={'assemblable_count': 1})[0]['data'][0]
+        self.assertIs(waiting['needs_attention'], True)
+        self.assertEqual(waiting['attention_since'], '2026-10-10T08:30:00+00:00')
+        self.assertNotIn('created_at', waiting)
+        self.assertNotIn('status', waiting)
+        self.assertNotIn('stage', waiting)
+        done = self._pharmacy_rows(policies=policies, extra={'assemblable_count': 1,
+                                                             'assembly_state': 'assembled'})[0]['data'][0]
+        self.assertIs(done['needs_attention'], False)
+        self.assertIn('attention_since', done)
+        self.assertIsNone(done['attention_since'])
+
+    def test_pharmacy_queue_stage_follows_status_field(self):
+        assembled = self._pharmacy_rows(extra={'stage_assembled': True})[0]['data'][0]
+        self.assertEqual((assembled['status'], assembled['stage']), ('pending', 'assembled'))
+        waiting = self._pharmacy_rows(extra={'stage_assembled': False})[0]['data'][0]
+        self.assertEqual(waiting['stage'], 'assembling')
+        confirmed = self._pharmacy_rows(status='confirmed')[0]['data'][0]
+        self.assertEqual(confirmed['stage'], 'confirmed')
 
     def test_pharmacy_price_fields_hidden_when_policy_disables_them(self):
         from backend.v1.shared.order_notification_settings import default_policies

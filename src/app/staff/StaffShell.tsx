@@ -62,7 +62,7 @@ export default function StaffShell({ children, role, accountId }: {
       </header>
       <main className="staff-main">{children}</main>
       <NewOrderAlerts load={loadWebsiteOrders} enabled={role === 'courier'} />
-      <PharmacyOrderAlerts enabled={role === 'pharmacy'} intensive={accountId === 1} />
+      <PharmacyOrderAlerts enabled={role === 'pharmacy'} pharmacyId={accountId} />
     </div>
   );
 }

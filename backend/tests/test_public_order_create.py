@@ -53,6 +53,9 @@ class PublicOrderCreateTests(unittest.TestCase):
         self.assertEqual(response["order_total"], 460)
         self.assertEqual(cursor.saved_response["items"][0]["line_total"], 460)
         self.assertEqual(notification["order_total"], "460")
+        # Job 013: a new order starts at «Собирается»; the status itself is unchanged.
+        self.assertEqual((response["status"], response["stage"]), ("pending", "assembling"))
+        self.assertEqual(cursor.saved_response["stage"], "assembling")
 
 
 if __name__ == "__main__":

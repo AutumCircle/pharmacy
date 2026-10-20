@@ -1,10 +1,21 @@
 import type { OrderStatus } from '@/lib/api-v1/types';
+import { orderStage, orderStageLabel } from '@/lib/order-stage';
 
 export const ORIGIN_COLORS = { website: '#c4161c', courier: '#1d5f9a', pharmacy: '#b7791f' } as const;
 
+/** Bare status labels (history, transitions). Job 013: pending is «Собирается», confirmed «Подтверждён». */
 export const statusLabels: Record<OrderStatus, string> = {
-  pending: 'Новый', confirmed: 'Собирается', delivering: 'В пути', delivered: 'Доставлен', cancelled: 'Отменён',
+  pending: 'Собирается', confirmed: 'Подтверждён', delivering: 'В пути', delivered: 'Доставлен', cancelled: 'Отменён',
 };
+
+/** Chip text and classes of an order: the Lambda's `stage` («Собран» is pending + all pharmacies assembled). */
+export function stageChip(order: { status: OrderStatus; stage?: unknown }): { label: string; className: string } {
+  const assembled = orderStage(order) === 'assembled';
+  return {
+    label: orderStageLabel(order),
+    className: `ao-status ao-status-${order.status}${assembled ? ' ao-stage-assembled' : ''}`,
+  };
+}
 
 export function money(value: number | string | null | undefined, digits = 0): string {
   const amount = Number(value ?? 0);

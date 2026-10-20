@@ -15,7 +15,8 @@ import {
 import { money, parsePrice, priceInput, quantityLabel } from '../../format';
 import MedicinePicker, { invalidLine, lineTotal, type PickerLine } from '../MedicinePicker';
 import QuantityStepper from '../QuantityStepper';
-import { nextStep, statusFlow, statusLabels } from '../status';
+import { nextStep, stagePill } from '../status';
+import { ORDER_STAGE_LABELS, TRACKING_STEPS, trackingStepIndex, type OrderStage } from '@/lib/order-stage';
 
 type Item = CourierOrder['medicines'][number];
 
@@ -40,12 +41,13 @@ function localPhone(phone: string) {
   return digits.length === 12 && digits.startsWith('992') ? digits.slice(3) : digits.slice(-9);
 }
 
-function Progress({ status }: { status: CourierOrderStatus }) {
+/** Job 013: the same five stages as the client and the admin, from the Lambda's `stage`. */
+function Progress({ status, stage }: { status: CourierOrderStatus; stage?: OrderStage }) {
   if (status === 'cancelled') return <p className="c-cancelled-banner">Заказ отменён</p>;
-  const current = statusFlow.indexOf(status);
+  const current = trackingStepIndex({ status, stage });
   return <ol className="c-progress" aria-label="Этапы заказа">
-    {statusFlow.map((step, index) => <li key={step} className={index < current ? 'done' : index === current ? 'current' : ''}
-      aria-current={index === current ? 'step' : undefined}><span aria-hidden="true" />{statusLabels[step]}</li>)}
+    {TRACKING_STEPS.map((step, index) => <li key={step} className={index < current ? 'done' : index === current ? 'current' : ''}
+      aria-current={index === current ? 'step' : undefined}><span aria-hidden="true" />{ORDER_STAGE_LABELS[step]}</li>)}
   </ol>;
 }
 
@@ -370,6 +372,7 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
   const leaveWarning = order.status === 'confirmed' ? assemblyWarning(order) : null;
   const confirmBlocked = confirmBlockedReason(order);
   const barNote = confirmBlocked ?? leaveWarning;
+  const pill = stagePill(order);
 
   async function changeStatus(next: CourierOrderStatus, cancelReason?: string) {
     setBusy(true); setError('');
@@ -391,9 +394,9 @@ export default function CourierOrderDetail({ order }: { order: CourierOrder }) {
     <header className="c-detail-head">
       <div><h1>№ {order.order_reference || order.order_id.slice(-6)}</h1>
         <p className="c-muted">{formatOrderDateTime(order.created_at)} · Аптека {order.pharmacy_id ?? 1} · {order.own_order ? 'ваш заказ' : 'с сайта'}</p></div>
-      <span className={`c-pill c-pill-${order.status}`}>{statusLabels[order.status]}</span>
+      <span className={pill.className}>{pill.label}</span>
     </header>
-    <Progress status={order.status} />
+    <Progress status={order.status} stage={order.stage} />
     <ChecklistSection key={`${order.status}:${(order.checklist_steps ?? []).join(',')}:${order.pharmacy_answers_complete ? 1 : 0}`}
       order={order} base={base}
       statusBusy={busy} onStatus={(next) => changeStatus(next)} onConflict={refresh} />

@@ -28,7 +28,7 @@ export const CHECKLIST_STEPS: readonly ChecklistStep[] = [
   { step: 2, title: 'Передать список лекарств нужной аптеке', hint: 'Перешлите аптеке список товаров из заказа.' },
   { step: 3, title: 'Получить подтверждение наличия и цены', hint: 'Отмечается сам, когда аптеки ответят по каждому товару.',
     pharmacy: { doneWhen: ['confirmed', 'delivering', 'delivered'] } },
-  { step: 4, title: 'Позвонить клиенту, сообщить итоговые суммы и согласовать оплату и время доставки', hint: 'Статус станет «Собирается».',
+  { step: 4, title: 'Позвонить клиенту, сообщить итоговые суммы и согласовать оплату и время доставки', hint: 'Статус станет «Подтверждён».',
     status: { from: 'pending', to: 'confirmed', action: 'Согласовано', doneWhen: ['confirmed', 'delivering', 'delivered'] } },
   { step: 5, title: 'Забрать собранный заказ и выехать после подтверждения оплаты', hint: 'Статус станет «В пути».',
     status: { from: 'confirmed', to: 'delivering', action: 'Выехал', doneWhen: ['delivering', 'delivered'] } },

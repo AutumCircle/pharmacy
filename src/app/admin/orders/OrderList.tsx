@@ -9,14 +9,7 @@ import OrderDeleteButton from './OrderDeleteButton';
 import type { AdminOrderSummary } from '@/lib/api-v1/admin-types';
 import type { OrderStatus } from '@/lib/api-v1/types';
 import { formatOrderSource } from '@/lib/collections';
-
-const labels: Record<OrderStatus, string> = {
-  pending: 'Новый',
-  confirmed: 'Собирается',
-  delivering: 'В пути',
-  delivered: 'Доставлен',
-  cancelled: 'Отменён',
-};
+import { stageChip, statusLabels as labels } from './ui';
 
 const transitions: Record<OrderStatus, OrderStatus[]> = {
   pending: ['confirmed', 'cancelled'],
@@ -48,7 +41,8 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
       setMessage(result.error || 'Не удалось изменить статус');
     } else {
       setOrderRows((current) => current.map((item) => (
-        item.order_id === order.order_id ? { ...item, status: next } : item
+        // The new stage comes with the refresh; until then the status fallback labels the chip.
+        item.order_id === order.order_id ? { ...item, status: next, stage: undefined } : item
       )));
       router.refresh();
     }
@@ -60,6 +54,7 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
       {message && <p className="ao-alert" role="alert">{message}</p>}
       {orders.length === 0 ? <div className="ao-empty-card">Заказов не найдено</div> : <ul className="ao-work-list">
         {orders.map((order) => {
+          const chip = stageChip(order);
           const from = order.created_by_staff_account_id === null ? { key: 'website', label: 'Сайт' }
             : order.created_by_staff_account_id === 3 ? { key: 'courier', label: 'Курьер' }
               : { key: 'pharmacy', label: `Аптека ${order.created_by_staff_account_id}` };
@@ -67,7 +62,7 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
             <Link href={`/admin/orders/${encodeURIComponent(order.order_id)}`} className="ao-work-main">
               <span className="ao-work-top">
                 <strong>№ {order.order_reference || order.order_id.slice(-6)}</strong>
-                <span className={`ao-status ao-status-${order.status}`}>{labels[order.status]}</span>
+                <span className={chip.className}>{chip.label}</span>
               </span>
               <span className="ao-work-who">{order.customer_name || 'Имя не указано'} · {order.phone}</span>
               <span className="ao-work-where">{order.address}</span>

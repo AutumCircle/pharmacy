@@ -1,5 +1,6 @@
 import { parseOrderTime } from './order-time.ts';
-import { crossPharmacyMark } from './pharmacy-answers.ts';
+import { orderStageLabel } from './order-stage.ts';
+import { crossPharmacyMark, pharmacyAnswerChip, routedAwayMark } from './pharmacy-answers.ts';
 import { nextAssemblyAction } from './pharmacy-assembly.ts';
 
 export type WaitingLevel = 'normal' | 'warning' | 'urgent';
@@ -36,6 +37,7 @@ export type PharmacyOrderInput = {
   order_id: string;
   order_reference?: string | null;
   status?: string;
+  stage?: string;
   created_at?: string;
   waiting_since?: string;
   awaiting_response?: boolean;
@@ -63,10 +65,40 @@ export type PharmacyOrderInput = {
   created_by_staff_account_id?: number | string | null;
 };
 
+type Chip = { text: string; tone: string };
+
+/**
+ * Job 013: one row of the pharmacy medicines table. `own` rows are this pharmacy's items (with the row
+ * controls while the order is pending); `routed` rows are items «Ватан 1» answered «Нет в наличии» that
+ * now sit at «Ватан 2» — read-only, with an orange «Ватан 2» or red «Нет в наличии в обеих аптеках» chip.
+ */
+export type PharmacyTableRow = {
+  key: string;
+  kind: 'own' | 'routed';
+  orderItemId: number | null;
+  name: string;
+  quantity: Money | null;
+  unitPrice: Money | null;
+  lineTotal: Money | null;
+  clientLineTotal: Money | null;
+  myAnswer: ItemAnswer | null;
+  myProblem: string | null;
+  routedHere: boolean;
+  collected: boolean;
+  /** Answer-column chip; null on an old Lambda response without answers. */
+  chip: Chip | null;
+  /** «В наличии» / «Нет в наличии» / «Изменить цену» are shown on this row. */
+  canAct: boolean;
+  /** Small hint under the name of a routed row («Ждёт ответа Ватан 2» while «Ватан 2» has not answered). */
+  hint: string | null;
+};
+
 export type PharmacyOrderView = {
   reference: string;
   createdAt: string | null;
   status: 'pending' | 'confirmed' | null;
+  /** Job 013: chip text of the order («Собирается» / «Собран» / «Подтверждён»); null when status is hidden. */
+  stageLabel: string | null;
   waitingSince: string | null;
   source: string | null;
   customerName: string | null;
@@ -87,10 +119,13 @@ export type PharmacyOrderView = {
   hasAnswers: boolean;
   /** Answer controls are shown: answer fields present and the order is still «Новый». */
   canAnswer: boolean;
-  /** Items this pharmacy routed to «Ватан 2» («Передано в Ватан 2: N поз.»). */
+  /** Items this pharmacy routed to «Ватан 2». */
   routedAwayCount: number;
-  /** Rework 1: items this pharmacy sent to «Ватан 2», with «Ватан 2»'s result (colour + text). */
-  routedAway: Array<{ name: string; quantity: Money | null; text: string; tone: string }>;
+  /** Job 013: own items and items routed to «Ватан 2» in one table, in order_item_id order; null when the
+   * items are hidden by the policy. */
+  rows: PharmacyTableRow[] | null;
+  /** The table has an answer column (answers present or routed rows to mark). */
+  answerColumn: boolean;
   /** Show «Начать сборку» / «Сборка сделана» (hidden when every own item came routed: those are per item). */
   partControls: boolean;
   /** Job 011: this pharmacy's mark (null = «Ждёт сборки» or an old Lambda). */
@@ -135,6 +170,47 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
   const assemblyState: AssemblyMark | null = order.assembly_state === 'assembling' || order.assembly_state === 'assembled'
     ? order.assembly_state : null;
   const assemblyAvailable = order.assembly_available === true;
+  const canAnswer = hasAnswers && status === 'pending';
+  const ownRows: PharmacyTableRow[] = (medicines ?? []).map((item, index) => {
+    const myAnswer = hasAnswers ? itemAnswer(item.my_answer) : null;
+    const routedHere = hasAnswers && item.routed_here === true;
+    const crossMark = hasAnswers ? crossPharmacyMark(routedHere, myAnswer) : null;
+    return {
+      key: `own-${hasAnswers ? item.order_item_id : `i${index}`}`,
+      kind: 'own',
+      orderItemId: hasAnswers ? item.order_item_id ?? null : null,
+      name: item.medicine_name,
+      quantity: item.quantity ?? null,
+      unitPrice: showPrices ? amount(item.base_unit_price) : null,
+      lineTotal: showPrices ? amount(item.base_line_total) : null,
+      clientLineTotal: showClientPrices ? amount(item.line_total) : null,
+      myAnswer,
+      myProblem: hasAnswers ? text(item.my_problem) : null,
+      routedHere,
+      collected: hasAnswers && item.collected === true,
+      chip: hasAnswers ? crossMark ?? pharmacyAnswerChip(myAnswer) : null,
+      // «Ватан 2» keeps its per-item controls for items routed here (PharmacyRoutedItems).
+      canAct: canAnswer && !routedHere,
+      hint: null,
+    };
+  });
+  const routedRows: PharmacyTableRow[] = medicines && Array.isArray(order.routed_away)
+    ? order.routed_away.filter((entry) => entry && typeof entry.medicine_name === 'string').map((entry, index) => {
+      const id = typeof entry.order_item_id === 'number' && Number.isSafeInteger(entry.order_item_id)
+        && entry.order_item_id > 0 ? entry.order_item_id : null;
+      return {
+        key: `routed-${id ?? `i${index}`}`, kind: 'routed', orderItemId: id, name: entry.medicine_name,
+        quantity: entry.quantity ?? null, unitPrice: null, lineTotal: null, clientLineTotal: null,
+        myAnswer: 'unavailable', myProblem: null, routedHere: false, collected: false,
+        chip: routedAwayMark(itemAnswer(entry.answer)), canAct: false,
+        hint: itemAnswer(entry.answer) === null ? 'Ждёт ответа Ватан 2' : null,
+      };
+    }) : [];
+  const rows = medicines ? [...ownRows, ...routedRows]
+    .map((row, position) => ({ row, position }))
+    .sort((a, b) => (a.row.orderItemId ?? Number.MAX_SAFE_INTEGER) - (b.row.orderItemId ?? Number.MAX_SAFE_INTEGER)
+      || a.position - b.position)
+    .map(({ row }) => row) : null;
   let creator: string | null = null;
   if ('created_by_staff_account_id' in order) {
     const id = order.created_by_staff_account_id;
@@ -144,6 +220,7 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
     reference: order.order_reference || order.order_id,
     createdAt: order.created_at || null,
     status,
+    stageLabel: status ? orderStageLabel({ status, stage: order.stage }) : null,
     waitingSince,
     source: text(order.source),
     customerName: text(order.customer_name),
@@ -165,15 +242,10 @@ export function pharmacyOrderView(order: PharmacyOrderInput): PharmacyOrderView 
       crossMark: hasAnswers ? crossPharmacyMark(item.routed_here === true, itemAnswer(item.my_answer)) : null,
     })),
     hasAnswers,
-    canAnswer: hasAnswers && status === 'pending',
+    canAnswer,
     routedAwayCount: typeof order.routed_away_count === 'number' && order.routed_away_count > 0 ? order.routed_away_count : 0,
-    routedAway: Array.isArray(order.routed_away) ? order.routed_away.map((entry) => {
-      const answer = itemAnswer(entry.answer);
-      const mark = crossPharmacyMark(true, answer)
-        ?? (answer === 'price_differs' ? { text: 'В аптеке 2: цена отличается', tone: 'warn' }
-          : { text: 'Ждём ответ Ватан 2', tone: 'wait' });
-      return { name: entry.medicine_name, quantity: entry.quantity ?? null, text: mark.text, tone: mark.tone };
-    }) : [],
+    rows,
+    answerColumn: hasAnswers || routedRows.length > 0,
     partControls: assemblyAvailable
       && !(hasAnswers && !!medicines && medicines.length > 0 && medicines.every((item) => item.routed_here === true)),
     assemblyState,

@@ -98,6 +98,14 @@ database credentials или Telegram token. Next.js вызывает API Gateway
 3. Next.js receives a safe notification payload and calls the protected internal notifier route.
 4. Telegram notifier sends three messages: owner, pharmacy assembly and delivery.
 5. Failure of the Telegram call is logged but must not erase an already-created order.
+6. Job 013: when a pharmacy changes an item price or «Ватан 1» passes an item to «Ватан 2», the admin
+   Lambda adds a `_notification` (`notification_kind: "pharmacy_item_change"`, no client data) to the
+   `pharmacy-answers` response. The Next.js route strips it and calls the same notifier route; the
+   notifier claims `order:{id}:pharmacy-change:{request_id}` for the owner and the courier only (never
+   the pharmacy) and sends one short message to each. A notifier failure is only logged.
+7. Job 013: the customer, courier and admin see one derived stage — «Собирается» → «Собран» →
+   «Подтверждён» → «В пути» → «Доставлен» — computed in Lambda (`backend/v1/shared/order_stage.py`)
+   from `orders.status` and the pharmacies' «Сборка сделана» marks; there is no stage column.
 
 Telegram notifier variables are configured only in AWS, never in Git:
 

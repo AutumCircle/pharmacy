@@ -5,6 +5,8 @@
  * intentionally absent from public types.
  */
 
+import type { OrderStage } from '../order-stage';
+
 export type Currency = 'TJS';
 export type OrderStatus = 'pending' | 'confirmed' | 'delivering' | 'delivered' | 'cancelled';
 export type PaymentMethod = 'cash_on_delivery';
@@ -200,6 +202,8 @@ export interface PublicOrder {
   order_id: string;
   order_reference: string;
   status: OrderStatus;
+  /** Job 013: customer stage derived in Lambda (absent on older Lambdas: fall back to `status`). */
+  stage?: OrderStage;
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   currency: Currency;

@@ -729,6 +729,37 @@ class CourierOrderTests(unittest.TestCase):
         self.assertEqual(old['assembly'], [])
         self.assertIs(old['assembly_complete'], True)  # nothing to assemble
 
+    # --- job 013: stage on courier rows ------------------------------------------------------
+
+    def test_courier_rows_carry_the_shared_stage(self):
+        done = [{'pharmacy_id': 1, 'state': 'assembled', 'started_at': None, 'assembled_at': None}]
+        waiting = [{'pharmacy_id': 1, 'state': 'assembled', 'started_at': None, 'assembled_at': None},
+                   {'pharmacy_id': 2, 'state': 'waiting', 'started_at': None, 'assembled_at': None}]
+        cases = [
+            (dict(status='pending', website_order=True, assembly=done), 'assembled'),
+            (dict(status='pending', website_order=True, assembly=waiting), 'assembling'),
+            (dict(status='pending', website_order=True, assembly=[]), 'assembling'),
+            (dict(status='pending', website_order=False, own_order=True, assembly=[]), 'assembling'),
+            (dict(status='confirmed', website_order=True, assembly=waiting), 'confirmed'),
+            (dict(status='delivering', website_order=True, assembly=done), 'delivering'),
+            (dict(status='delivered', website_order=False, assembly=[]), 'delivered'),
+        ]
+        for extra, stage in cases:
+            with self.subTest(extra=extra):
+                result, _ = self._courier_row(**extra)
+                self.assertEqual(result['stage'], stage)
+                self.assertEqual(result['status'], extra['status'])
+
+    def test_courier_list_rows_have_stage_without_extra_queries(self):
+        cursor = Mock()
+        cursor.fetchall.return_value = [{'id': 7, 'public_id': 'ord_' + 'a' * 32, 'medicines': [], 'status': 'pending',
+            'website_order': True, 'created_at': datetime(2026, 10, 2, tzinfo=timezone.utc), 'checklist_steps': [],
+            'assembly': [{'pharmacy_id': 1, 'state': 'assembled', 'started_at': None, 'assembled_at': None}]}]
+        with self._tx(cursor):
+            result = list_courier_orders({})
+        self.assertEqual(result['data'][0]['stage'], 'assembled')
+        self.assertEqual(cursor.execute.call_count, 1)
+
     def test_item_price_requires_a_price(self):
         with self.assertRaises(ContractError):
             update_order_item_price('ord_' + 'a' * 32, {'order_item_id': 3}, 'admin', 'req')

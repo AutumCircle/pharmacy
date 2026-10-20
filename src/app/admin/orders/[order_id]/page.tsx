@@ -10,8 +10,9 @@ import OrderDeliveryEditor from './OrderDeliveryEditor';
 import OrderCustomerEditor from './OrderCustomerEditor';
 import OrderItems from './OrderItems';
 import OrderAddItems from './OrderAddItems';
+import OrderFulfillment from './OrderFulfillment';
 import OrderDeleteButton from '../OrderDeleteButton';
-import { money, origin, statusLabels } from '../ui';
+import { money, origin, stageChip, statusLabels } from '../ui';
 import '../orders-ui.css';
 
 const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Звонок' } as const;
@@ -35,13 +36,14 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
   const baseTotal = order.items.reduce((sum, item) => sum + Number(item.base_unit_price || 0) * Number(item.quantity), 0);
   const delivery = Number(order.delivery_courier_amount || 0) + Number(order.delivery_owner_amount || 0);
   const transition = formatOrderSource(order);
+  const chip = stageChip(order);
 
   return <div className="od">
     <Link href="/admin/orders" className="od-back">← Все заказы</Link>
     <header className="od-header">
       <div>
         <div className="od-title"><h1>№ {order.order_reference || order.order_id}</h1>
-          <span className={`ao-status ao-status-${order.status}`}>{statusLabels[order.status]}</span></div>
+          <span className={chip.className}>{chip.label}</span></div>
         <p className="od-meta">
           <span className={`ao-origin ao-origin-${from.key}`}>{from.label}</span>
           {order.created_by_staff_account_id === 3 && order.created_by_staff_username && <span>{order.created_by_staff_username}</span>}
@@ -81,7 +83,10 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
         </section>
       </div>
       <aside className="od-side">
-        <OrderStatusControl key={order.status} orderId={order.order_id} currentStatus={order.status} />
+        <OrderStatusControl key={`${order.status}-${order.stage ?? ''}`} orderId={order.order_id}
+          currentStatus={order.status} stage={order.stage} />
+        {order.fulfillment && <OrderFulfillment fulfillment={order.fulfillment} status={order.status}
+          itemNames={Object.fromEntries(order.items.map((item) => [item.order_item_id, item.medicine_name]))} />}
         <OrderCustomerEditor key={`${order.edit_revision}`} orderId={order.order_id} revision={order.edit_revision}
           customerName={order.customer_name || ''} phone={order.phone || ''} address={order.address || ''}
           landmark={order.landmark} comment={order.notes} />

@@ -32,6 +32,7 @@ from backend.v1.shared.marketing import (
 )
 from backend.v1.shared.responses import ResponseEncoder, error_response, request_id, success, success_document
 from backend.v1.shared.order_time import order_time_iso
+from backend.v1.shared.order_stage import assembled_sql, order_stage
 from backend.v1.shared.search_ranking import did_you_mean, query_variants, rank_candidates, retrieval_terms
 
 
@@ -377,8 +378,8 @@ def resolve_medicines(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _order_response(order: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
+def _order_response(order: dict[str, Any], items: list[dict[str, Any]], stage: str | None = None) -> dict[str, Any]:
+    response = {
         "order_id": order["public_id"],
         "order_reference": order["order_reference"],
         "status": order["status"],
@@ -390,6 +391,10 @@ def _order_response(order: dict[str, Any], items: list[dict[str, Any]]) -> dict[
         "order_total": int(order["order_total"]),
         "created_at": order_time_iso(order["created_at"]),
     }
+    if stage is not None:
+        # Job 013: customer stage, derived in Lambda (shared.order_stage); `status` stays unchanged.
+        response["stage"] = stage
+    return response
 
 
 def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[str, Any], int, dict[str, Any] | None]:
@@ -527,7 +532,7 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             """,
             (order["id"],),
         )
-        response = _order_response(order, response_items)
+        response = _order_response(order, response_items, "assembling")
         cur.execute(
             """
             UPDATE order_idempotency
@@ -673,11 +678,12 @@ def track_orders(payload: dict[str, Any]) -> dict[str, Any]:
     phone = normalize_phone(payload["phone"])
     with transaction() as cur:
         cur.execute(
-            """
-            SELECT id, public_id, order_reference, status, items_subtotal, order_total, created_at
-            FROM orders
-            WHERE phone_normalized = %s AND public_id IS NOT NULL AND deleted_at IS NULL
-            ORDER BY created_at DESC, id DESC
+            f"""
+            SELECT o.id, o.public_id, o.order_reference, o.status, o.items_subtotal, o.order_total, o.created_at,
+                   {assembled_sql("o")} AS stage_assembled
+            FROM orders o
+            WHERE o.phone_normalized = %s AND o.public_id IS NOT NULL AND o.deleted_at IS NULL
+            ORDER BY o.created_at DESC, o.id DESC
             LIMIT 20
             """,
             (phone,),
@@ -700,7 +706,9 @@ def track_orders(payload: dict[str, Any]) -> dict[str, Any]:
                 "selling_unit_price": item["selling_unit_price"], "quantity": item["quantity"],
                 "line_total": item["line_total"],
             })
-    return {"data": [_order_response(order, items_by_order.get(order["id"], [])) for order in orders]}
+    return {"data": [_order_response(order, items_by_order.get(order["id"], []),
+                                     order_stage(order["status"], order.get("stage_assembled")))
+                     for order in orders]}
 
 
 def get_site_settings() -> dict[str, Any]:

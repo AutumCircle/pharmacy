@@ -1,8 +1,13 @@
 import { parseOrderTime } from './order-time.ts';
 
-/** Existing interval for pharmacy 2. Pharmacy 1 uses a more persistent alarm. */
+/** Reminder interval for «Ватан 2» (three minutes) and for «Ватан 1» (every minute), as the owner set them. */
 export const REMIND_MS = 180_000;
 export const PHARMACY_ONE_REMIND_MS = 60_000;
+
+/** Reminder interval of a pharmacy account: 60 s for «Ватан 1», 180 s for «Ватан 2». */
+export function remindIntervalMs(pharmacyId: number | null | undefined): number {
+  return pharmacyId === 1 ? PHARMACY_ONE_REMIND_MS : REMIND_MS;
+}
 
 /** Poll interval of the pharmacy queue while the staff page is open. */
 export const POLL_MS = 30_000;
@@ -12,7 +17,8 @@ export const PHARMACY_SOUND_KEY = 'vatan-pharmacy-sound';
 
 /**
  * The only keys the alerts read. `needs_attention` and `attention_since` are computed by the Lambda
- * and are not policy-gated; the client never derives reaction from item data.
+ * and are not policy-gated; the client never derives them from item data. Job 013: an order needs
+ * attention until this pharmacy presses «Сборка сделана» (answers and «Начать сборку» do not stop it).
  */
 export type AlertQueueOrder = {
   order_id: string;
@@ -47,7 +53,7 @@ export function dueAlerts(
   return { due, lastAlerted: next };
 }
 
-/** Number of orders in the list that need this pharmacy's reaction. */
+/** Number of orders in the list that still wait for this pharmacy's «Сборка сделана». */
 export function attentionCount(orders: readonly AlertQueueOrder[]): number {
   return orders.filter((order) => order.needs_attention === true).length;
 }
@@ -70,9 +76,14 @@ export function alertText(order: AlertQueueOrder, now: number = Date.now()): { t
   const reference = typeof order.order_reference === 'string' && order.order_reference.trim()
     ? order.order_reference.trim() : String(order.order_id ?? '').slice(-6);
   return {
-    title: `Новый заказ № ${reference}`,
-    body: `Ожидает ответа ${attentionMinutes(order, now)} мин`,
+    title: `Заказ № ${reference}`,
+    body: `Ждёт сборки ${attentionMinutes(order, now)} мин`,
   };
+}
+
+/** Banner at the top of the pharmacy queue (null when no order waits). */
+export function attentionBannerText(count: number): string | null {
+  return count > 0 ? `Заказов ждут «Сборка сделана»: ${count}` : null;
 }
 
 /** Title prefix «(N) » for N orders that need attention; strips an earlier prefix. */

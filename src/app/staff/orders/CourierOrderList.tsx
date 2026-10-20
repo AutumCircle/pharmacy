@@ -5,7 +5,7 @@ import { formatOrderDateTime } from '@/lib/order-time';
 import { answersProgressText } from '@/lib/pharmacy-answers';
 import { courierAssemblySummary } from '@/lib/pharmacy-assembly';
 import { money } from '../format';
-import { statusLabels } from './status';
+import { stagePill } from './status';
 
 export default function CourierOrderList({ orders }: { orders: CourierOrder[] }) {
   if (orders.length === 0) return <div className="c-empty"><strong>Заказов нет</strong><span>Новые заказы появятся здесь.</span></div>;
@@ -15,11 +15,12 @@ export default function CourierOrderList({ orders }: { orders: CourierOrder[] })
     // Rework 1: assembly happens while «Новый», so the marks line shows for pending and confirmed orders.
     const assembly = order.status === 'pending' || order.status === 'confirmed' ? courierAssemblySummary(order) : null;
     const assembled = assembly !== null && order.assembly_complete === true;
+    const pill = stagePill(order);
     return <li key={order.order_id}>
       <Link className={`c-row c-status-${order.status}`} href={`/staff/orders/${order.order_id}`}>
         <span className="c-row-top">
           <strong>№ {order.order_reference || order.order_id.slice(-6)}</strong>
-          <span className={`c-pill c-pill-${order.status}`}>{statusLabels[order.status]}</span>
+          <span className={pill.className}>{pill.label}</span>
         </span>
         <span className="c-row-who">{order.customer_name || 'Без имени'} · {order.phone}</span>
         <span className="c-row-where">{order.address}</span>

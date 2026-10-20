@@ -45,6 +45,7 @@ from backend.v1.shared.order_notification_settings import (
 )
 from backend.v1.shared.order_notification_messages import format_configured_message
 from backend.v1.shared.order_time import absolute_order_time, order_time_dushanbe, order_time_iso
+from backend.v1.shared.order_stage import assembled_sql, assembly_complete, order_stage
 
 
 DEFAULT_LIMIT = 20
@@ -514,12 +515,19 @@ def update_order_notification_settings(payload: dict[str, Any], actor_id: str, c
     return saved
 
 
+# Job 013: a pharmacy's price change / routing to «Ватан 2» is announced to the owner and the courier only.
+_CHANGE_EVENT_RECIPIENTS = ("owner_telegram", "courier_telegram")
+
+
 def claim_order_notification(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict) or set(payload) != {"event_key", "recipient"}:
         raise ContractError("VALIDATION_ERROR", "Неверное событие уведомления")
     event_key, recipient = payload["event_key"], payload["recipient"]
-    match = re.fullmatch(r"order:([1-9][0-9]*):created", event_key) if isinstance(event_key, str) else None
+    match = (re.fullmatch(r"order:([1-9][0-9]*):(created|pharmacy-change:req_[0-9a-f]{32})", event_key)
+             if isinstance(event_key, str) else None)
     if not match or recipient not in NOTIFICATION_CHANNELS[:3]:
+        raise ContractError("VALIDATION_ERROR", "Неверное событие уведомления")
+    if match.group(2) != "created" and recipient not in _CHANGE_EVENT_RECIPIENTS:
         raise ContractError("VALIDATION_ERROR", "Неверное событие уведомления")
     with transaction() as cur:
         cur.execute("""SELECT s.courier_enabled, s.courier_enabled_since, s.policies,
@@ -1296,6 +1304,9 @@ def _courier_order_row(row: dict[str, Any]) -> dict[str, Any]:
     # orders or all items unavailable). Not tied to «confirmed»: «Согласовано» waits for it.
     row["assembly_complete"] = (row.get("status") != "cancelled"
                                 and all(entry["state"] == "assembled" for entry in row["assembly"]))
+    # Job 013: shared stage rule (shared.order_stage); «Собран» needs at least one assembly pharmacy.
+    row["stage"] = order_stage(row.get("status"), assembly_complete(
+        row.get("website_order"), [entry["state"] for entry in row["assembly"]]))
     return row
 
 
@@ -1603,8 +1614,10 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                        COALESCE(routed.routed_away_count, 0) AS routed_away_count,
                        COALESCE(routed.routed_away, '[]'::json) AS routed_away,
                        COALESCE(items.assemblable_count, 0) AS assemblable_count,
-                       COALESCE(items.reacted_count, 0) AS reacted_count,
-                       asm.state AS assembly_state
+                       COALESCE(items.all_routed_here, false) AS all_routed_here,
+                       items.routed_here_since,
+                       asm.state AS assembly_state,
+                       {assembled_sql("o")} AS stage_assembled
                 FROM orders o
                 LEFT JOIN LATERAL (
                     SELECT json_agg(json_build_object('order_item_id', oi.id, 'medicine_name', oi.medicine_name,
@@ -1621,8 +1634,8 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
                             AS unanswered_unrouted,
                         MIN(oi.pharmacy_assigned_at) FILTER (WHERE mine.answer IS NULL) AS unanswered_routed_since,
                         COUNT(*) FILTER (WHERE mine.answer IS DISTINCT FROM 'unavailable') AS assemblable_count,
-                        COUNT(*) FILTER (WHERE mine.answer IS NOT NULL OR col.order_item_id IS NOT NULL)
-                            AS reacted_count
+                        bool_and(oi.pharmacy_assigned_at IS NOT NULL) AS all_routed_here,
+                        MIN(oi.pharmacy_assigned_at) AS routed_here_since
                     FROM order_items oi
                     LEFT JOIN order_item_pharmacy_answers mine
                            ON mine.order_item_id = oi.id AND mine.pharmacy_id = %s
@@ -1680,18 +1693,20 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         row["assembly_state"] = row.get("assembly_state") if row.get("assembly_state") in ASSEMBLY_STATES else None
         # Rework 1: assembly starts while the order is still «Новый» (and stays possible once confirmed).
         row["assembly_available"] = row["status"] in ASSEMBLY_ORDER_STATUSES and assemblable > 0
-        # Job 012 reminders, ungated and client-free. The pharmacy has reacted once it has any assembly mark,
-        # answered or collected any of its assigned items, or answered an item that has since been routed
-        # away (an «Нет в наличии» from «Ватан 1» moves the item out of its assigned set). With no reaction
-        # every assigned item is unanswered, so the unanswered aggregates cover all of them: the clock starts
-        # at the earliest routing time when every assigned item was routed here («Ватан 2»), else at creation.
-        reacted = (int(row.pop("reacted_count", 0) or 0) > 0 or row["routed_away_count"] > 0
-                   or row["assembly_state"] is not None)
-        row["needs_attention"] = not reacted
+        # Job 013 reminders (replace job 012's "first reaction"), ungated and client-free: the order is in
+        # this queue (live website order, pending/confirmed), this pharmacy has something to assemble and its
+        # part is not «Собран» yet. Answers, «Начать сборку» and routing do not stop them; «Сборка сделана»
+        # (or, for «Ватан 2», the last per-item «Собрано») does. The clock starts at creation, or at the
+        # earliest routing time when every item of this pharmacy was routed here.
+        all_routed_here = bool(row.pop("all_routed_here", False))
+        routed_here_since = row.pop("routed_here_since", None)
+        row["needs_attention"] = (row["status"] in ASSEMBLY_ORDER_STATUSES and assemblable > 0
+                                  and row["assembly_state"] != "assembled")
         row["attention_since"] = None
         if row["needs_attention"]:
-            row["attention_since"] = (order_time_iso(routed_since) if not unrouted and routed_since is not None
-                                      else row["created_at"])
+            row["attention_since"] = (order_time_iso(routed_here_since)
+                                      if all_routed_here and routed_here_since is not None else row["created_at"])
+        row["stage"] = order_stage(row["status"], row.pop("stage_assembled", False))
         row["profit"] = (row["order_total"] or Decimal("0")) - row["base_total"]
         if policy["source"]:
             utm_source = row.pop("utm_source")
@@ -1708,6 +1723,8 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
         for field, key in fields.items():
             if not policy[field]:
                 row.pop(key, None)
+        if not policy["status"]:
+            row.pop("stage", None)  # the stage goes with the policy-gated status field
         # Items moved to another pharmacy, with that pharmacy's answer (no client data). Shown with the
         # owner's colours: available there = «В аптеке 2», unavailable there = «Нет в наличии в обеих аптеках».
         routed_away = row.pop("routed_away", None)
@@ -1806,8 +1823,11 @@ def answer_pharmacy_order_items(
 
     pharmacy_id comes from the HMAC staff session only. «Нет в наличии» from «Ватан 1» routes that item
     to «Ватан 2» in the same transaction; «Ватан 2» «Нет в наличии» is final; «Цена отличается» never
-    routes. orders.status and order_status_history are never touched. Repeating the same request is a
-    no-op (no writes, no audit) and returns the same projection.
+    routes. Either pharmacy may send its own (base) price with «В наличии» for its own item (job 013; was
+    «Ватан 2» only); client prices and totals are recomputed in SQL. orders.status and
+    order_status_history are never touched. Repeating the same request is a no-op (no writes, no audit)
+    and returns the same projection. A request that routes an item or changes a price also returns
+    `_notification` (owner/courier Telegram, no client data); the Next.js route strips it.
     """
     if pharmacy_id not in (1, 2):
         raise ContractError("FORBIDDEN", "Доступ только для аптеки", http_status=403)
@@ -1815,13 +1835,16 @@ def answer_pharmacy_order_items(
     lookup, lookup_values = _order_lookup(order_id)
     actor = f"staff:{pharmacy_id}"
     with transaction() as cur:
-        cur.execute(f"""SELECT id, status, created_by_staff_account_id, fulfillment_pharmacy_id
+        cur.execute(f"""SELECT id, public_id, order_reference, status, created_by_staff_account_id,
+                               fulfillment_pharmacy_id
                         FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
         order = cur.fetchone()
         if not order or order["created_by_staff_account_id"] is not None:
             raise ContractError("ORDER_NOT_FOUND", "Заказ не найден", http_status=404)
         cur.execute(f"""SELECT oi.id, {_ITEM_PHARMACY_SQL} AS pharmacy_id, mine.answer, mine.problem,
-                               COALESCE(oi.base_unit_price, oi.price) AS base_unit_price
+                               COALESCE(oi.base_unit_price, oi.price) AS base_unit_price,
+                               COALESCE(oi.selling_unit_price, oi.price) AS selling_unit_price,
+                               oi.medicine_name, oi.quantity
                         FROM order_items oi
                         JOIN orders o ON o.id = oi.order_id
                         LEFT JOIN order_item_pharmacy_answers mine
@@ -1842,8 +1865,6 @@ def answer_pharmacy_order_items(
             if not item:
                 raise ContractError("ORDER_ITEM_NOT_FOUND", "Позиция не найдена в заказе", http_status=404)
             new_base = entry.get("base_unit_price")
-            if new_base is not None and pharmacy_id != 2:
-                raise ContractError("FORBIDDEN", "Цену при сборке меняет только «Ватан 2»", http_status=403)
             current_base = item.get("base_unit_price")
             price_change = new_base is not None and (current_base is None or Decimal(str(current_base)) != new_base)
             same = (item["answer"] == entry["answer"] and item["problem"] == entry["problem"]
@@ -1885,8 +1906,10 @@ def answer_pharmacy_order_items(
                                         "items": [{"order_item_id": entry["order_item_id"], "answer": entry["answer"]}
                                                   for entry in changes],
                                         "routed_to_pharmacy_2": routed})
+        repriced: dict[int, dict[str, Any]] = {}
         if price_changes:
-            _reprice_items_from_base(cur, order["id"], order_id, pharmacy_id, price_changes, current_request_id)
+            repriced = {entry["order_item_id"]: entry for entry in _reprice_items_from_base(
+                cur, order["id"], order_id, pharmacy_id, price_changes, current_request_id)}
         if changes or price_changes:
             _sync_item_assembly(cur, order["id"], pharmacy_id)
         for entry in changes:
@@ -1896,20 +1919,64 @@ def answer_pharmacy_order_items(
                 item["pharmacy_id"] = 2
     mine = [item for item in items.values() if int(item["pharmacy_id"]) == pharmacy_id]
     away = [item for item in items.values() if int(item["pharmacy_id"]) != pharmacy_id and item["answer"]]
-    return {
+    result: dict[str, Any] = {
         "order_id": order_id,
         "items": [{"order_item_id": int(item["id"]), "my_answer": item["answer"], "my_problem": item["problem"]}
                   for item in sorted(mine, key=lambda value: int(value["id"]))],
         "routed_away_count": len(away),
         "awaiting_response": any(item["answer"] is None for item in mine),
     }
+    notification = _pharmacy_change_notification(order, order_id, pharmacy_id, items, routed, repriced,
+                                                 current_request_id)
+    if notification:
+        result["_notification"] = notification
+    return result
+
+
+def _decimal_text(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
+def _pharmacy_change_notification(
+    order: Any, order_id: str, pharmacy_id: int, items: dict[int, dict[str, Any]], routed: list[int],
+    repriced: dict[int, dict[str, Any]], current_request_id: str,
+) -> dict[str, Any] | None:
+    """Job 013 owner/courier Telegram payload for a price change or a routing to «Ватан 2».
+
+    Only the reference, the pharmacy and the changed items (name, quantity, prices); never the client
+    name, phone, address, landmark or comment. None when nothing was routed or repriced."""
+    changes: list[dict[str, Any]] = []
+    for item_id in sorted(set(routed) | set(repriced)):
+        item = items.get(item_id) or {}
+        base = {"medicine_name": item.get("medicine_name"), "quantity": _decimal_text(item.get("quantity"))}
+        if item_id in routed:
+            changes.append({"kind": "routed", **base})
+        if item_id in repriced:
+            change = repriced[item_id]
+            changes.append({"kind": "price", **base,
+                            "old_base_unit_price": change["previous_base_unit_price"],
+                            "new_base_unit_price": change["new_base_unit_price"],
+                            "old_selling_unit_price": _decimal_text(item.get("selling_unit_price")),
+                            "new_selling_unit_price": change["new_selling_unit_price"]})
+    if not changes:
+        return None
+    return {
+        "notification_kind": "pharmacy_item_change",
+        "admin_order_id": int(order["id"]),
+        "order_id": order.get("public_id") or order_id,
+        "order_reference": order.get("order_reference"),
+        "pharmacy_id": pharmacy_id,
+        "event_key": f"order:{int(order['id'])}:pharmacy-change:{current_request_id}",
+        "changes": changes,
+    }
 
 
 def _reprice_items_from_base(
     cur: Any, order_db_id: int, order_id: str, pharmacy_id: int, changes: list[dict[str, Any]],
     current_request_id: str,
-) -> None:
-    """«Ватан 2» set its own (base) price for an item while answering «В наличии» (rework 1).
+) -> list[dict[str, Any]]:
+    """A pharmacy set its own (base) price for an item while answering «В наличии» (rework 1: «Ватан 2»;
+    job 013: «Ватан 1» too, through this same path). Returns the audited changes.
 
     The pharmacy's price is an input only. The client price is recomputed in SQL with the stored
     pricing rule (vatan_selling_unit_price, as at checkout), then the line and the order totals are
@@ -1942,6 +2009,7 @@ def _reprice_items_from_base(
     _write_admin_audit(cur, actor_id=f"staff:{pharmacy_id}", action="pharmacy.order.item_price_changed",
                        resource_type="order", resource_id=order_id, request=current_request_id,
                        details={"pharmacy_id": pharmacy_id, "items": audited})
+    return audited
 
 
 def _sync_item_assembly(cur: Any, order_db_id: int, pharmacy_id: int) -> None:
@@ -2408,7 +2476,8 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
                    o.delivery_courier_amount, o.delivery_owner_amount,
                    o.delivery_courier_amount + o.delivery_owner_amount AS delivery_fee,
                    o.source_collection, o.utm_source, o.utm_medium, o.utm_campaign, o.utm_content,
-                   sa.username AS created_by_staff_username
+                   sa.username AS created_by_staff_username,
+                   {assembled_sql("o")} AS stage_assembled
             FROM orders o
             LEFT JOIN staff_accounts sa ON sa.account_id = o.created_by_staff_account_id
             {where}
@@ -2428,6 +2497,7 @@ def list_orders(query: dict[str, Any]) -> dict[str, Any]:
         row["order_id"] = row.pop("public_id") or f"legacy_{row['id']}"
         row.pop("id")
         row["created_at"] = order_time_iso(row["created_at"])
+        row["stage"] = order_stage(row["status"], row.pop("stage_assembled", False))
     return {"data": rows, "page": {"next_cursor": next_cursor, "has_more": has_more}}
 
 
@@ -2936,13 +3006,46 @@ def get_order(order_id: str) -> dict[str, Any]:
             (internal_id,),
         )
         history = [dict(row) for row in cur.fetchall()]
+        fulfillment_row = None
+        if order["created_by_staff_account_id"] is None:
+            # Job 013: one more read, the courier projection of this website order (checklist, answers,
+            # assembly marks). Staff-created orders have no pharmacy answers or marks.
+            cur.execute(f"{_COURIER_ORDER_SELECT} WHERE o.id = %s", (internal_id,))
+            fulfillment_row = cur.fetchone()
     result = dict(order)
     result["order_id"] = result.pop("public_id") or f"legacy_{result['id']}"
     result.pop("id")
     result["items"] = items
     result["status_history"] = history
     result["created_at"] = order_time_iso(result["created_at"])
+    result["fulfillment"] = _admin_fulfillment(fulfillment_row) if fulfillment_row else None
+    result["stage"] = (result["fulfillment"]["stage"] if result["fulfillment"]
+                       else order_stage(result["status"], False))
     return result
+
+
+def _admin_fulfillment(row: Any) -> dict[str, Any]:
+    """Read-only courier/pharmacy progress for the admin order card (job 013): the courier checklist,
+    each pharmacy's answers and assembly marks, and the pharmacy-confirmed sum. No client data."""
+    projected = _courier_order_row(dict(row))
+    medicines = projected.get("medicines")
+    if isinstance(medicines, str):
+        medicines = json.loads(medicines)
+    return {
+        "stage": projected["stage"],
+        "checklist_steps": projected["checklist_steps"],
+        "assembly": projected["assembly"],
+        "assembly_complete": projected["assembly_complete"],
+        "pharmacy_answers_complete": projected["pharmacy_answers_complete"],
+        "confirmed_total": projected["confirmed_total"],
+        "unavailable_count": projected["unavailable_count"],
+        "answered_count": projected["answered_count"],
+        "item_count": projected["item_count"],
+        "items": [{"order_item_id": int(item["order_item_id"]), "medicine_name": item.get("medicine_name"),
+                   "pharmacy_id": int(item["pharmacy_id"]) if item.get("pharmacy_id") is not None else None,
+                   "answers": item.get("answers") or []}
+                  for item in (medicines or []) if isinstance(item, dict)],
+    }
 
 
 def _admin_edit_text(value: Any, field: str, minimum: int, maximum: int, *, nullable: bool = False) -> str | None:
@@ -4829,6 +4932,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 r"/v1/staff/orders/(ord_[0-9a-f]{32}|legacy_[1-9][0-9]*)/pharmacy-answers", staff_path)
             if staff_method == "POST" and answers_match:
                 account = staff_accounts.session_account(event, pharmacy=True)
+                # The result may carry `_notification` (job 013); the Next.js route strips it before the browser.
                 return success(answer_pharmacy_order_items(answers_match.group(1), _body(event),
                     account["account_id"], current_request_id), request=current_request_id)
             collect_match = re.fullmatch(
