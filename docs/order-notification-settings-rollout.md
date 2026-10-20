@@ -28,6 +28,17 @@ version until the server-side gates are active.
    verify the pharmacy web response follows the saved policy. Do not mutate
    production orders for verification.
 
+Job 014 (pharmacy alarm): no migration. The admin settings payload gains a
+required `pharmacy_alarm` object `{ringtone, duration_seconds, interval_seconds}`
+(`classic|bell|pulse|melody`, 5–120 s, 30–600 s, duration ≤ interval), stored
+under the reserved key `pharmacy_alarm` of the existing `policies` JSONB. A row
+without the key reads as classic / 60 s / 60 s. The pharmacy queue returns it as
+top-level `alarm`. Deploy the Admin Lambda and the notifier (`unavailable_both`
+line) before Vercel; the old settings page cannot save against the new Lambda
+until Vercel is updated (missing `pharmacy_alarm` → `VALIDATION_ERROR`).
+Rollback: an old Admin Lambda saving the settings rewrites `policies` without
+`pharmacy_alarm`, so the pharmacies fall back to the defaults — acceptable.
+
 Default field policy: owner sees all listed fields; courier sees contact,
 address, items, quantities and client total, but not base cost or profit;
 pharmacy Telegram sees reference, items, quantities, comment and base total;
