@@ -21,12 +21,13 @@ function safeDateTime(value: string): string | null {
  * `pharmacy_web` policy lets the Lambda return (see pharmacyOrderView): client name/phone/address/landmark,
  * client totals, profit and creator appear only when turned ON in the admin notification settings.
  * The medicines table (PharmacyItemRow) holds every item of this pharmacy — including the items «Ватан 1»
- * routed to «Ватан 2» — with the compact «В наличии» / «Нет в наличии» next to the sum, the tap-to-edit
- * price and, for routed items, «Собрано». At «Ватан 1» items sent to «Ватан 2» stay in the table,
- * read-only, marked «Ватан 2» (orange) or «Нет в наличии в обеих аптеках» (red). The status chip shows the
- * stage («Собирается» / «Собран» / «Подтверждён»). With an old Lambda response (no order_item_id) no answer
- * column or controls are rendered. «Начать сборку» / «Сборка сделана» (PharmacyAssemblyButtons) stay in
- * the footer while this pharmacy has something to assemble. `actions` overrides the footer.
+ * routed to «Ватан 2» — with «Нет в наличии» next to the sum and the tap-to-edit price (job 015: nothing
+ * else; not marked = available). At «Ватан 1» items sent to «Ватан 2» stay in the table, read-only, marked
+ * «Ватан 2» (orange) or «Нет в наличии в обеих аптеках» (red). The status chip shows the stage
+ * («Собирается» / «Собран» / «Подтверждён»). With an old Lambda response (no order_item_id) no answer
+ * column or controls are rendered. Under the table one «Собран» (PharmacyAssemblyButtons) for both
+ * pharmacies while this pharmacy has something to assemble; after it only the «Собран» chip remains and
+ * the rows are read-only. `actions` overrides the footer.
  */
 export default function PharmacyOrderCard({ order, now, actions, pharmacyId }: {
   order: PharmacyPreparationOrder; now: number; actions?: ReactNode; pharmacyId?: number;

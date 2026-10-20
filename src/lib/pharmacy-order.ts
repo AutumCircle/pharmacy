@@ -74,8 +74,9 @@ type Chip = { text: string; tone: string };
  * controls while the order is pending); `routed` rows are items «Ватан 1» answered «Нет в наличии» that
  * now sit at «Ватан 2» — read-only, with an orange «Ватан 2» or red «Нет в наличии в обеих аптеках» chip.
  * Job 014: «Ватан 1» and «Ватан 2» use the same rows; items routed to «Ватан 2» are own rows there (no
- * separate list), with the compact «В наличии» / «Нет в наличии» next to the sum, the tap-to-edit price
- * and «Собрано».
+ * separate list). Job 015: an own row has exactly two controls, «Нет в наличии» next to the sum and the
+ * tap-to-edit price; there is no «В наличии» or «Собрано» (not marked = available, one «Собран» below the
+ * table). After this pharmacy's «Собран» no row has controls.
  */
 export type PharmacyTableRow = {
   key: string;
@@ -92,11 +93,11 @@ export type PharmacyTableRow = {
   collected: boolean;
   /** Answer-column chip; null on an old Lambda response without answers. */
   chip: Chip | null;
-  /** Compact «В наличии» / «Нет в наличии» next to the sum (own row of a pending order, not collected). */
+  /** «Нет в наличии» next to the sum (own row of a pending order, not collected, part not «Собран»). */
   canAct: boolean;
   /** The price can be tapped to edit it: canAct, the price is shown by the policy, not «Нет в наличии». */
   canEditPrice: boolean;
-  /** «Собрано» for an item routed here and answered «В наличии» (rework 1, «Ватан 2»). */
+  /** Always false since job 015 (the per-item «Собрано» was replaced by the one «Собран»). */
   canCollect: boolean;
   /** Small hint under the name of a routed row («Ждёт ответа Ватан 2» while «Ватан 2» has not answered). */
   hint: string | null;
@@ -139,11 +140,12 @@ export type PharmacyOrderView = {
   actionColumn: boolean;
   /** Job 014: the inline «Нет в наличии» confirmation of this pharmacy. */
   unavailableConfirm: string;
-  /** Show «Начать сборку» / «Сборка сделана» (hidden when every own item came routed: those are per item). */
+  /** Job 015: the footer shows this pharmacy's chip and, until «Собран», the one «Собран» button (both
+   * pharmacies, also a «Ватан 2» whose every item was routed to it); false when the Lambda does not offer it. */
   partControls: boolean;
   /** Job 011: this pharmacy's mark (null = «Ждёт сборки» or an old Lambda). */
   assemblyState: AssemblyMark | null;
-  /** Job 011: «Начать сборку» / «Собран» controls are shown; false when the field is absent. */
+  /** Job 011: the Lambda offers assembly to this pharmacy; false when the field is absent. */
   assemblyAvailable: boolean;
   /** Next assembly action, null when there is none (see nextAssemblyAction). */
   assemblyAction: { state: AssemblyMark; label: string } | null;
@@ -184,14 +186,16 @@ export function pharmacyOrderView(order: PharmacyOrderInput, pharmacyId?: number
     ? order.assembly_state : null;
   const assemblyAvailable = order.assembly_available === true;
   const canAnswer = hasAnswers && status === 'pending';
+  // Job 015: after «Собран» the part is read-only (the Lambda answers 409 too).
+  const partOpen = assemblyState !== 'assembled';
   const ownRows: PharmacyTableRow[] = (medicines ?? []).map((item, index) => {
     const myAnswer = hasAnswers ? itemAnswer(item.my_answer) : null;
     const routedHere = hasAnswers && item.routed_here === true;
     const crossMark = hasAnswers ? crossPharmacyMark(routedHere, myAnswer) : null;
     const collected = hasAnswers && item.collected === true;
     const unitPrice = showPrices ? amount(item.base_unit_price) : null;
-    // Same controls for both pharmacies (job 014); a collected item is final.
-    const canAct = canAnswer && !collected;
+    // Same controls for both pharmacies (job 014); a collected item and a «Собран» part are final.
+    const canAct = canAnswer && !collected && partOpen;
     // «Нет в наличии» at «Ватан 2» means the item is missing in both pharmacies.
     const bothMissing = pharmacyId === 2 && myAnswer === 'unavailable'
       ? { text: BOTH_PHARMACIES_MISSING, tone: 'bad' } : null;
@@ -211,7 +215,7 @@ export function pharmacyOrderView(order: PharmacyOrderInput, pharmacyId?: number
       chip: hasAnswers ? crossMark ?? bothMissing ?? pharmacyAnswerChip(myAnswer) : null,
       canAct,
       canEditPrice: canAct && unitPrice !== null && myAnswer !== 'unavailable',
-      canCollect: routedHere && myAnswer === 'available' && !collected,
+      canCollect: false,
       hint: null,
     };
   });
@@ -267,10 +271,9 @@ export function pharmacyOrderView(order: PharmacyOrderInput, pharmacyId?: number
     routedAwayCount: typeof order.routed_away_count === 'number' && order.routed_away_count > 0 ? order.routed_away_count : 0,
     rows,
     answerColumn: hasAnswers || routedRows.length > 0,
-    actionColumn: ownRows.some((row) => row.canAct || row.canCollect),
+    actionColumn: ownRows.some((row) => row.canAct),
     unavailableConfirm: unavailableConfirmText(pharmacyId),
-    partControls: assemblyAvailable
-      && !(hasAnswers && !!medicines && medicines.length > 0 && medicines.every((item) => item.routed_here === true)),
+    partControls: assemblyAvailable,
     assemblyState,
     assemblyAvailable,
     assemblyAction: nextAssemblyAction({ assembly_available: assemblyAvailable, assembly_state: assemblyState }),

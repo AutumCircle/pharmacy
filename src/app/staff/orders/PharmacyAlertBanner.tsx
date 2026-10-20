@@ -6,7 +6,7 @@ import { getAttentionCount, getServerAttentionCount, subscribeAttentionCount } f
 import { attentionBannerText } from '@/lib/pharmacy-alerts';
 
 /**
- * «Заказов ждут «Сборка сделана»: N» at the top of the pharmacy queue (job 013). Starts from the server-rendered
+ * «Заказов ждут «Собран»: N» at the top of the pharmacy queue (job 013). Starts from the server-rendered
  * count and follows the live count of PharmacyOrderAlerts (30 s poll) after that.
  */
 export default function PharmacyAlertBanner({ initialCount }: { initialCount: number }) {

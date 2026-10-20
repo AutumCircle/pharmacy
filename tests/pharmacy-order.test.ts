@@ -147,10 +147,10 @@ test('pharmacyOrderView exposes assembly_state and assembly_available (job 011)'
   const waiting = pharmacyOrderView({ ...base, assembly_state: null, assembly_available: true });
   assert.equal(waiting.assemblyAvailable, true);
   assert.equal(waiting.assemblyState, null);
-  assert.deepEqual(waiting.assemblyAction, { state: 'assembling', label: 'Начать сборку' });
+  assert.deepEqual(waiting.assemblyAction, { state: 'assembled', label: 'Собран' });
   const assembling = pharmacyOrderView({ ...base, assembly_state: 'assembling', assembly_available: true });
   assert.equal(assembling.assemblyState, 'assembling');
-  assert.deepEqual(assembling.assemblyAction, { state: 'assembled', label: 'Сборка сделана' });
+  assert.deepEqual(assembling.assemblyAction, { state: 'assembled', label: 'Собран' });
   const assembled = pharmacyOrderView({ ...base, assembly_state: 'assembled', assembly_available: true });
   assert.equal(assembled.assemblyState, 'assembled');
   assert.equal(assembled.assemblyAction, null);
@@ -183,7 +183,7 @@ test('pharmacyOrderView: routed items, owner colours and part controls (rework 1
     [true, true, 'В аптеке 2'], [true, false, 'Нет в наличии в обеих аптеках'], [true, false, null]]);
   assert.equal(two.medicines?.[0].crossMark?.tone, 'orange');
   assert.equal(two.medicines?.[1].crossMark?.tone, 'bad');
-  assert.equal(two.partControls, false, 'only routed items: per-item controls instead of the part buttons');
+  assert.equal(two.partControls, true, 'job 015: one «Собран» also for an all-routed «Ватан 2»');
 
   const one = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', assembly_available: true,
     medicines: [{ order_item_id: 81, medicine_name: 'A', my_answer: 'available' }],
@@ -289,7 +289,7 @@ test('job 014: the same row view for «Ватан 1» and «Ватан 2»', () 
   assert.equal(two.actionColumn, true);
 });
 
-test('job 014: «Ватан 2» routed items are table rows with compact controls, price edit and «Собрано»', () => {
+test('job 015: «Ватан 2» routed items are table rows with «Нет в наличии» and price edit, no «Собрано»', () => {
   const view = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', assembly_available: true,
     medicines: [
       { order_item_id: 82, medicine_name: 'B', quantity: 1, base_unit_price: '20.00', base_line_total: '20.00',
@@ -303,14 +303,16 @@ test('job 014: «Ватан 2» routed items are table rows with compact control
     ] }, 2);
   assert.deepEqual(view.rows?.map((row) => [row.orderItemId, row.canAct, row.canEditPrice, row.canCollect, row.chip?.text]), [
     [82, true, true, false, 'Ждёт ответа'],
-    [83, true, true, true, 'В аптеке 2'],
-    // Collected: final, no controls.
+    [83, true, true, false, 'В аптеке 2'],
+    // Collected earlier (old per-item «Собрано»): final, no controls, the chip stays.
     [84, false, false, false, 'В аптеке 2'],
-    // «Нет в наличии»: no price editor; the buttons stay to change the answer back.
+    // «Нет в наличии»: no price editor; the (disabled, selected) «Нет в наличии» stays.
     [85, true, false, false, 'Нет в наличии в обеих аптеках'],
   ]);
   assert.equal(view.rows?.find((row) => row.orderItemId === 85)?.chip?.tone, 'bad');
-  assert.equal(view.partControls, false, '«Сборка сделана» comes from the per-item «Собрано»');
+  assert.equal(view.rows?.find((row) => row.orderItemId === 84)?.collected, true);
+  assert.equal(view.partControls, true, 'one «Собран» under the table, also when every item came routed');
+  assert.deepEqual(view.assemblyAction, { state: 'assembled', label: 'Собран' });
 });
 
 test('job 014: «Нет в наличии» at «Ватан 2» is «нет в обеих аптеках» and both pharmacies confirm it', () => {
@@ -332,14 +334,75 @@ test('job 014: no price editor when the policy hides prices, no answer controls 
     { order_item_id: 82, medicine_name: 'B', quantity: 1, base_unit_price: '1.00', base_line_total: '1.00', my_answer: 'available',
       routed_here: true }] }, 2);
   assert.deepEqual(confirmed.rows?.map((row) => [row.canAct, row.canEditPrice, row.canCollect]),
-    [[false, false, false], [false, false, true]]);
-  assert.equal(confirmed.actionColumn, true);
+    [[false, false, false], [false, false, false]]);
+  assert.equal(confirmed.actionColumn, false);
   // Routed-away rows at «Ватан 1» stay read-only.
   const routedAway = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines: [],
     routed_away: [{ order_item_id: 82, medicine_name: 'B', pharmacy_id: 2, answer: null }] }, 1);
   assert.deepEqual(routedAway.rows?.map((row) => [row.kind, row.canAct, row.canEditPrice, row.canCollect]),
     [['routed', false, false, false]]);
   assert.equal(routedAway.actionColumn, false);
+});
+
+// --- job 015: «Нет в наличии» + price per row, one «Собран» ------------------------------------------
+
+test('job 015: both pharmacies get the same two row controls and no «Собрано»', () => {
+  const medicines = [
+    { order_item_id: 81, medicine_name: 'A', quantity: 1, base_unit_price: '10.00', base_line_total: '10.00', my_answer: null },
+    { order_item_id: 82, medicine_name: 'B', quantity: 2, base_unit_price: '5.00', base_line_total: '10.00',
+      my_answer: 'available', routed_here: true },
+  ];
+  const rows = [1, 2].map((id) => pharmacyOrderView({ order_id: 'ord_x', status: 'pending', assembly_available: true,
+    assembly_state: null, medicines }, id));
+  for (const view of rows) {
+    assert.deepEqual(view.rows?.map((row) => [row.canAct, row.canEditPrice, row.canCollect]),
+      [[true, true, false], [true, true, false]]);
+    assert.equal(view.actionColumn, true);
+    assert.equal(view.partControls, true);
+    assert.deepEqual(view.assemblyAction, { state: 'assembled', label: 'Собран' });
+  }
+  // Price hidden by the policy: only «Нет в наличии».
+  const hidden = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', medicines: [
+    { order_item_id: 81, medicine_name: 'A', quantity: 1, my_answer: null }] }, 2);
+  assert.deepEqual(hidden.rows?.map((row) => [row.canAct, row.canEditPrice]), [[true, false]]);
+});
+
+test('job 015: after «Собран» no row has controls; the chip stays', () => {
+  for (const id of [1, 2]) {
+    const view = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', assembly_available: true,
+      assembly_state: 'assembled', medicines: [
+        { order_item_id: 81, medicine_name: 'A', quantity: 1, base_unit_price: '10.00', base_line_total: '10.00',
+          my_answer: 'available' },
+        { order_item_id: 82, medicine_name: 'B', quantity: 1, base_unit_price: '10.00', base_line_total: '10.00',
+          my_answer: 'unavailable' }],
+      routed_away: [{ order_item_id: 83, medicine_name: 'C', pharmacy_id: 2, answer: null }] }, id);
+    assert.ok(view.rows?.every((row) => !row.canAct && !row.canEditPrice && !row.canCollect));
+    assert.equal(view.actionColumn, false);
+    assert.equal(view.assemblyAction, null);
+    assert.equal(view.partControls, true, 'the footer still shows the «Собран» chip');
+    assert.equal(view.rows?.find((row) => row.kind === 'routed')?.chip?.text, 'Ватан 2');
+  }
+  // Reopened «Ватан 2» (job 014): «Собирается» -> controls and «Собран» again.
+  const reopened = pharmacyOrderView({ order_id: 'ord_x', status: 'pending', assembly_available: true,
+    assembly_state: 'assembling', medicines: [
+      { order_item_id: 81, medicine_name: 'A', my_answer: null, routed_here: true }] }, 2);
+  assert.deepEqual(reopened.rows?.map((row) => row.canAct), [true]);
+  assert.deepEqual(reopened.assemblyAction, { state: 'assembled', label: 'Собран' });
+});
+
+test('job 015: the pharmacy panel has no «В наличии», «Собрано», «Начать сборку» or «Сборка сделана» control', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const names = ['PharmacyItemRow.tsx', 'PharmacyAssemblyButtons.tsx', 'PharmacyOrderCard.tsx', 'PharmacyAlertBanner.tsx'];
+  const files = await Promise.all(names.map((name) =>
+    readFile(new URL(`../src/app/staff/orders/${name}`, import.meta.url), 'utf8')));
+  const source = files.join('\n');
+  assert.doesNotMatch(source, /ROW_ACTION_LABELS\.(available|collect)/);
+  assert.doesNotMatch(source, /Начать сборку|Сборка сделана/);
+  assert.doesNotMatch(source, /assembly\/items/);
+  // The one «Собран» posts {state: 'assembled'} to the existing assembly route.
+  const buttons = files[1];
+  assert.match(buttons, /\/api\/staff\/orders\/\$\{encodeURIComponent\(orderId\)\}\/assembly`/);
+  assert.match(buttons, /validateAssemblyRequest\(\{ state: target \}\)/);
 });
 
 test('job 014 round 2: row controls are at least 44 px on phones and touch screens', async () => {

@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { ROW_ACTION_LABELS, rowActionRequest, type RowAction } from '@/lib/pharmacy-answers';
-import { validateItemCollectRequest } from '@/lib/pharmacy-assembly';
 import type { PharmacyTableRow } from '@/lib/pharmacy-order';
 import { money, quantityLabel } from '../format';
 import { usePharmacyItemPost } from './usePharmacyItemPost';
@@ -10,13 +9,14 @@ import { usePharmacyItemPost } from './usePharmacyItemPost';
 export type PharmacyTableColumns = { prices: boolean; client: boolean; answer: boolean; actions: boolean };
 
 /**
- * Job 014: one row of the pharmacy medicines table, the same for «Ватан 1» and «Ватан 2».
- * Own rows of a «Новый» order carry small «В наличии» / «Нет в наличии» buttons right next to the line sum
- * («Нет в наличии» asks once inline: «Ватан 1» passes the item to «Ватан 2», at «Ватан 2» it is missing in
- * both pharmacies). Tapping the price turns it into an input: Enter or «✓» saves the pharmacy (base) price
- * as «В наличии», Esc or «×» cancels. Items routed to «Ватан 2» also get «Собрано». Routed-away rows of
- * «Ватан 1» are read-only. The browser sends only the item id, the answer and the price; the Lambda
- * recomputes client prices and totals.
+ * Job 014/015: one row of the pharmacy medicines table, the same for «Ватан 1» and «Ватан 2».
+ * Own rows of a «Новый» order have exactly two controls: a small «Нет в наличии» right next to the line sum
+ * (asks once inline: «Ватан 1» passes the item to «Ватан 2», at «Ватан 2» it is missing in both pharmacies)
+ * and the price — tapping it turns it into an input: Enter or «✓» saves the pharmacy (base) price, Esc or
+ * «×» cancels. There is no «В наличии» and no per-item «Собрано»: what is not marked counts as available
+ * and one «Собран» sits under the table. After «Собран» and on routed-away rows of «Ватан 1» the row is
+ * read-only. The browser sends only the item id, the answer and the price; the Lambda recomputes client
+ * prices and totals.
  */
 export default function PharmacyItemRow({ orderId, row, columns, confirmText }: {
   orderId: string; row: PharmacyTableRow; columns: PharmacyTableColumns; confirmText: string;
@@ -63,13 +63,6 @@ export default function PharmacyItemRow({ orderId, row, columns, confirmText }: 
     if (event.key === 'Escape') { event.preventDefault(); closePrice(); }
   }
 
-  function collect() {
-    if (id === null) return;
-    const checked = validateItemCollectRequest({ order_item_id: id });
-    if (!checked.ok) { setError(checked.error); return; }
-    void post('assembly/items', checked.value, id);
-  }
-
   const priceCell = row.canEditPrice && id !== null
     ? price !== null
       ? <form className="pa-price-inline" onSubmit={savePrice}>
@@ -96,17 +89,10 @@ export default function PharmacyItemRow({ orderId, row, columns, confirmText }: 
       <button type="button" className="pa-mini" disabled={isBusy}
         onClick={closeConfirm}>{ROW_ACTION_LABELS.cancel}</button>
     </div>
-    : (row.canAct || row.canCollect) && <div className="pa-mini-group" role="group" aria-label={`Ответ: ${row.name}`}>
-      {row.canAct && <>
-        <button type="button" className={`pa-mini pa-mini-ok${row.myAnswer === 'available' ? ' selected' : ''}`}
-          aria-pressed={row.myAnswer === 'available'} disabled={isBusy || row.myAnswer === 'available'}
-          onClick={() => void send('available')}>{ROW_ACTION_LABELS.available}</button>
-        <button type="button" className={`pa-mini pa-mini-bad${row.myAnswer === 'unavailable' ? ' selected' : ''}`}
-          aria-pressed={row.myAnswer === 'unavailable'} disabled={isBusy || row.myAnswer === 'unavailable'}
-          onClick={() => { setError(''); setPrice(null); setConfirming(true); }}>{ROW_ACTION_LABELS.unavailable}</button>
-      </>}
-      {row.canCollect && <button type="button" className="pa-mini pa-mini-ok" disabled={isBusy}
-        onClick={collect}>{isBusy ? '…' : ROW_ACTION_LABELS.collect}</button>}
+    : row.canAct && <div className="pa-mini-group" role="group" aria-label={`Наличие: ${row.name}`}>
+      <button type="button" className={`pa-mini pa-mini-bad${row.myAnswer === 'unavailable' ? ' selected' : ''}`}
+        aria-pressed={row.myAnswer === 'unavailable'} disabled={isBusy || row.myAnswer === 'unavailable'}
+        onClick={() => { setError(''); setPrice(null); setConfirming(true); }}>{ROW_ACTION_LABELS.unavailable}</button>
     </div>;
 
   return <tr ref={rowRef} className={routed ? `pa-row-routed pa-item-tone-${row.chip?.tone ?? 'orange'}` : undefined} aria-busy={isBusy}>

@@ -123,9 +123,9 @@ export function alertText(order: AlertQueueOrder, now: number = Date.now()): { t
   };
 }
 
-/** Banner at the top of the pharmacy queue (null when no order waits). */
+/** Banner at the top of the pharmacy queue (null when no order waits). Job 015: names the one «Собран» button. */
 export function attentionBannerText(count: number): string | null {
-  return count > 0 ? `Заказов ждут «Сборка сделана»: ${count}` : null;
+  return count > 0 ? `Заказов ждут «Собран»: ${count}` : null;
 }
 
 /** Title prefix «(N) » for N orders that need attention; strips an earlier prefix. */

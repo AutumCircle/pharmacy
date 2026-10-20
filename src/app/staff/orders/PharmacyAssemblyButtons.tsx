@@ -6,9 +6,11 @@ import type { PharmacyAssemblyState } from '@/lib/api-v1/staff-types';
 import { assemblyChip, nextAssemblyAction, validateAssemblyRequest } from '@/lib/pharmacy-assembly';
 
 /**
- * «Начать сборку» -> «Собран» on a confirmed order card (job 011). Shows this pharmacy's current mark
- * chip and the next action. The browser sends only the target state; Lambda takes the pharmacy id from
- * the session and decides whether the mark is allowed. After success or a 409 the card is refreshed.
+ * Job 015: the one «Собран» button under the pharmacy table, the same for «Ватан 1» and «Ватан 2», with this
+ * pharmacy's chip. One tap, no extra confirmation: everything not marked «Нет в наличии» counts as available.
+ * After «Собран» only the chip («Собран») remains and the rows are read-only. The browser sends only
+ * {state: 'assembled'}; Lambda takes the pharmacy id from the session and decides whether the mark is
+ * allowed. After success or a 404/409 the card is refreshed.
  */
 export default function PharmacyAssemblyButtons({ orderId, state }: {
   orderId: string; state: PharmacyAssemblyState | null;
@@ -49,7 +51,7 @@ export default function PharmacyAssemblyButtons({ orderId, state }: {
 
   return <div className="pa-actions pa-assembly">
     <span className="pa-assembly-mark">Сборка: <span className={`pa-chip pa-tone-${chip.tone}`}>{chip.text}</span></span>
-    {action && <button type="button" className={`pa-btn ${action.state === 'assembled' ? 'pa-btn-ok' : 'pa-btn-start'}`}
+    {action && <button type="button" className="pa-btn pa-btn-ok pa-btn-assembled"
       disabled={busy} onClick={() => void submit(action.state)}>
       {busy ? 'Сохраняем…' : action.label}</button>}
     {error && <p className="pa-error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}

@@ -158,10 +158,9 @@ test('answersProgressText shows N of M only for new Lambda responses', () => {
 });
 
 test('job 013: row actions build the existing pharmacy-answers payload', () => {
-  assert.deepEqual(ROW_ACTION_LABELS, { available: 'В наличии', unavailable: 'Нет в наличии', price: 'Изменить цену',
-    save: 'Сохранить', cancel: 'Отмена', collect: 'Собрано', confirm: 'Да' });
-  assert.deepEqual(rowActionRequest(81, 'available'),
-    { ok: true, value: { answers: [{ order_item_id: 81, answer: 'available' }] } });
+  // Job 015: no «В наличии» and no «Собрано» row control.
+  assert.deepEqual(ROW_ACTION_LABELS, { unavailable: 'Нет в наличии', price: 'Изменить цену',
+    save: 'Сохранить', cancel: 'Отмена', confirm: 'Да' });
   assert.deepEqual(rowActionRequest(81, 'unavailable'),
     { ok: true, value: { answers: [{ order_item_id: 81, answer: 'unavailable' }] } });
   assert.deepEqual(rowActionRequest(81, 'price', '45,5', '40.00'),
@@ -177,8 +176,8 @@ test('job 013: row actions build the existing pharmacy-answers payload', () => {
     const result = rowActionRequest(81, 'price', bad, '40.00');
     assert.equal(result.ok, false, bad);
   }
-  assert.equal(rowActionRequest(0, 'available').ok, false);
-  assert.equal(rowActionRequest(1.5, 'available').ok, false);
+  assert.equal(rowActionRequest(0, 'unavailable').ok, false);
+  assert.equal(rowActionRequest(1.5, 'price', '', null).ok, false);
   // The UI no longer offers «Цена отличается», but the contract still accepts it.
   assert.equal(validatePharmacyAnswersRequest({ answers: [{ order_item_id: 81, answer: 'price_differs',
     problem: 'дороже на 5' }] }).ok, true);
@@ -207,6 +206,24 @@ test('job 013: the route strips _notification and survives a notifier failure', 
   await sendChangeNotificationSafely(notification, async () => { throw new Error('notifier down'); },
     (error) => errors.push(error));
   assert.equal(errors.length, 1);
+});
+
+test('job 015: splitChangeNotification strips the «Заказ собран» payload; the assembly route sends it in after()', async () => {
+  const notification = { notification_kind: 'pharmacy_order_assembled', admin_order_id: 9,
+    event_key: 'order:9:assembled:req_' + 'a'.repeat(32), parts: [], missing: [], client_total: '10.00' };
+  const mark = { order_id: 'ord_x', pharmacy_id: 1, state: 'assembled', started_at: null, assembled_at: null,
+    _notification: notification };
+  const split = splitChangeNotification(mark);
+  assert.equal('_notification' in split.data, false);
+  assert.deepEqual(split.data, { order_id: 'ord_x', pharmacy_id: 1, state: 'assembled', started_at: null, assembled_at: null });
+  assert.deepEqual(split.notification, notification);
+  const { readFile } = await import('node:fs/promises');
+  const route = await readFile(new URL('../src/app/api/staff/orders/[order_id]/assembly/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /import \{ NextResponse, after \} from 'next\/server'/);
+  assert.match(route, /splitChangeNotification\(response\.data\)/);
+  assert.match(route, /after\(\(\) => sendChangeNotificationSafely\(notification, sendOrderNotification,/);
+  assert.match(route, /NextResponse\.json\(\{ \.\.\.response, data \}/);
+  assert.doesNotMatch(route, /NextResponse\.json\(response[,)]/);
 });
 
 test('job 014: tapping the price posts «В наличии» with the base price through pharmacy-answers', () => {
