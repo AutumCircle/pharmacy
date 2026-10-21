@@ -1,6 +1,6 @@
 import type { CursorPage, OrderStatus, PaymentMethod, PaymentStatus } from './types';
 import type { OrderStage } from '../order-stage';
-import type { CourierAssemblyMark, PharmacyItemAnswer } from './staff-types';
+import type { CourierAssemblyMark, OrderTimelineEvent, PharmacyItemAnswer } from './staff-types';
 import type { HomepageBanner } from './types';
 import type { PharmacyAlarmSettings } from '../pharmacy-alarm';
 
@@ -295,6 +295,9 @@ export type AdminOrderDetail = AdminOrderSummary & {
   status_history: AdminStatusHistory[];
   /** Job 013: null for staff-created orders; absent on older Lambdas (block hidden). */
   fulfillment?: AdminOrderFulfillment | null;
+  /** Job 016: full order history, oldest first (newest 200); absent on older Lambdas. */
+  timeline?: OrderTimelineEvent[];
+  timeline_truncated?: boolean;
 };
 
 export type CatalogSyncSummary = {

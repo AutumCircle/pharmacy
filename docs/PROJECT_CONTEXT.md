@@ -124,6 +124,10 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    (`notification_kind: "pharmacy_order_assembled"`, event key `order:{id}:assembled:{request_id}`, no client
    data) to the `assembly` response; Next.js sends it in `after()` and the notifier tells the owner and the courier
    (never the pharmacy) where the order lies: «лежит в Ватан 1 / Ватан 2» or «В Ватан 1: … / В Ватан 2: …».
+10. Job 016: order history («История») without a new table — the admin Lambda builds `timeline` from
+   `orders.created_at`, `order_status_history` and `admin_audit_log` (`backend/v1/shared/order_timeline.py`, whitelisted
+   keys only, newest 200) for `GET /v1/admin/orders/{id}` and a filtered short one for the courier's
+   `GET /v1/staff/orders/{id}`; Russian text in `src/lib/order-timeline.ts`. Needs the admin Lambda redeployed.
 
 Telegram notifier variables are configured only in AWS, never in Git:
 

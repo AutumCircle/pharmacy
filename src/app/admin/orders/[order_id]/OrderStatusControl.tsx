@@ -35,7 +35,7 @@ export default function OrderStatusControl({ orderId, currentStatus, stage }: {
     setPending(false);
   }
 
-  return <section className="od-card od-o1">
+  return <section className="od-card od-o4">
     <div className="od-card-head"><h2>Статус</h2><span className={chip.className}>{chip.label}</span></div>
     {currentStatus === 'cancelled' ? <p className="od-muted">Заказ отменён.</p>
       : <ol className="od-progress">{TRACKING_STEPS.map((step, position) => <li key={step}

@@ -25,12 +25,13 @@ export default function OrderCustomerEditor({ orderId, revision, customerName, p
   }
 
   if (!editing) {
-    return <section className="od-card od-o2">
+    return <section className="od-card od-o1">
       <div className="od-card-head"><h2>Клиент</h2>
         <button type="button" className="od-link" onClick={() => { setValues(initial); setError(''); setEditing(true); }}>Изменить</button></div>
       <div className="od-customer">
-        <div><strong>{customerName || 'Имя не указано'}</strong><span>{phone}</span></div>
-        <a className="od-call" href={`tel:${phone}`}>Позвонить</a>
+        <div><strong>{customerName || 'Имя не указано'}</strong>
+          {phone ? <a className="od-phone-link" href={`tel:${phone}`}>{phone}</a> : <span>Телефон не указан</span>}</div>
+        {phone && <a className="od-call" href={`tel:${phone}`}>Позвонить</a>}
       </div>
       <dl className="od-facts">
         <div><dt>Адрес</dt><dd>{address}</dd></div>
@@ -40,7 +41,7 @@ export default function OrderCustomerEditor({ orderId, revision, customerName, p
     </section>;
   }
 
-  return <section className="od-card od-form od-o2">
+  return <section className="od-card od-form od-o1">
     <div className="od-card-head"><h2>Данные клиента</h2></div>
     <label>Имя<input value={values.customer_name} maxLength={120} onChange={(e) => set('customer_name', e.target.value)} disabled={busy} /></label>
     <label>Телефон<div className="od-phone"><b>+992</b><input inputMode="numeric" maxLength={9} value={values.phone}

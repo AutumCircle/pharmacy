@@ -116,6 +116,36 @@ export type CourierAssemblyMark = {
   assembled_at: string | null;
 };
 
+/** Job 016: one event of an order's history, built in Lambda from order_status_history and
+ * admin_audit_log with whitelisted keys only (no raw audit details). Russian text: src/lib/order-timeline.ts. */
+export type OrderTimelineActor = 'customer' | 'admin' | 'courier' | 'pharmacy' | 'system';
+
+export type OrderTimelineChange = { field: string; previous: string | null; current: string | null };
+
+export type OrderTimelineEvent = {
+  at: string;
+  kind: string;
+  actor: OrderTimelineActor;
+  pharmacy_id?: number;
+  order_item_id?: number;
+  medicine_name?: string;
+  from_status?: CourierOrderStatus;
+  to_status?: CourierOrderStatus;
+  answer?: PharmacyAnswer;
+  /** Pharmacy (base) price before/after a pharmacy price change. */
+  previous_price?: string;
+  new_price?: string;
+  /** Client price recomputed after a pharmacy price change. */
+  client_price?: string;
+  step?: number;
+  done?: boolean;
+  reason?: string;
+  state?: PharmacyAssemblyState;
+  count?: number;
+  /** Admin only: changed fields (client data, item quantity/prices, delivery split). */
+  fields?: OrderTimelineChange[];
+};
+
 export type CourierOrder = {
   order_id: string;
   order_reference: string | null;
@@ -158,6 +188,9 @@ export type CourierOrder = {
   assembly?: CourierAssemblyMark[];
   /** Confirmed and every listed pharmacy marked «Собран». */
   assembly_complete?: boolean;
+  /** Job 016: short history, only on GET /v1/staff/orders/{id}; absent on older Lambdas and in the list. */
+  timeline?: OrderTimelineEvent[];
+  timeline_truncated?: boolean;
 };
 
 export type CourierOrderList = {

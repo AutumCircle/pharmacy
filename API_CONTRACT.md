@@ -451,6 +451,28 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
   pharmacy_id, answers}]}`. Данных клиента в блоке нет. Карточка `/admin/orders/[id]` показывает 7 шагов
   чек-листа курьера, «Ватан N: собран / собирается / ждёт сборки», аптеку и ответ по каждой позиции и
   «Подтверждённая сумма» / «Сумма ещё не подтверждена аптекой»; кнопок нет. Без поля (старый Lambda) блок скрыт.
+- **История заказа (задача 016).** `GET /v1/admin/orders/{order_id}` дополнительно возвращает `timeline` —
+  хронологию заказа (старые → новые, не больше 200 последних событий) и `timeline_truncated` (`true`, если событий
+  больше). Новой таблицы и миграции нет: события собираются из `orders.created_at`, `order_status_history`
+  и `admin_audit_log` (`resource_type='order'` по публичному id заказа или `legacy_N`; `resource_type='order_item'`
+  по текущим позициям; удалённые позиции — по `details.order_id` / `details.order_reference` / `details.reference`
+  только среди строк `order_item` с `created_at >= orders.created_at`). Два дополнительных параметризованных
+  запроса с `LIMIT 201`, сортировка по времени, затем id. Модуль `backend/v1/shared/order_timeline.py` отдаёт
+  только ключи из белого списка, сырой `details` в ответ не попадает:
+  `{at, kind, actor, pharmacy_id?, order_item_id?, medicine_name?, from_status?, to_status?, answer?,
+  previous_price?, new_price?, client_price?, step?, done?, reason?, state?, count?, fields?}`, где
+  `actor` — `customer | admin | courier | pharmacy | system` (`staff:1/2` → аптека с `pharmacy_id`, `staff:3` →
+  курьер, имена администраторов не передаются), `fields` — `[{field, previous, current}]` (данные клиента, количество,
+  цены позиции, доставка). `kind`: `created`, `status_changed`, `pharmacy_answer`, `pharmacy_routed`,
+  `pharmacy_price_changed`, `item_collected`, `assembly_marked`, `assembly_reopened`, `checklist_updated`,
+  `customer_updated`, `item_updated`, `item_removed`, `items_added`, `delivery_fee_updated`, `deleted`; неизвестное
+  действие аудита → `other` без деталей («Изменение заказа»). Строка истории `NULL → статус` и аудит
+  `staff.order.created` сливаются с событием `created`; аудит `courier.order.status_changed` не дублирует строку
+  `order_status_history` той же транзакции. Русский текст строит Next.js (`src/lib/order-timeline.ts`).
+  Карточка `/admin/orders/[id]`: справа сначала «Клиент», затем «Курьер и аптеки» (чек-лист и сборка), статус,
+  доставка, удаление; слева таблица товаров (аптека, «передано из Ватан 1», количество, цена клиенту, сумма,
+  ответ аптеки, последнее изменение из истории), под ней «Сумма заказа» и «Подтверждено аптеками», затем «История».
+  Без `timeline` (старый Lambda) «История» показывает `status_history`.
 
 `PATCH /v1/admin/orders/{order_id}/status` request:
 
@@ -511,6 +533,18 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
 - **Этап заказа (задача 013).** `GET /v1/staff/orders` и `GET /v1/staff/orders/{order_id}` курьера возвращают
   `stage` (правило §7, считается из уже выбранных `assembly`). Курьер видит те же пять этапов, что клиент и
   администратор; кнопка `pending → confirmed` называется «Согласовано», шаг 4 чек-листа — «Статус станет «Подтверждён»».
+- **Короткая история для курьера (задача 016).** Только `GET /v1/staff/orders/{order_id}` (курьер) дополнительно
+  возвращает `timeline` и `timeline_truncated` (тот же формат событий, два запроса с `LIMIT 201`: строки
+  `order_status_history` и аудит заказа только с действиями `pharmacy.order.items_answered`,
+  `pharmacy.order.item_price_changed`, `pharmacy.order.item_collected`, `pharmacy.order.assembly_marked`,
+  `pharmacy.order.assembly_reopened`, `courier.order.checklist_updated`). `courier_view` оставляет только
+  `created`, `status_changed` (причина — только у отмены), ответы аптек и передачу в «Ватан 2», изменение цены
+  аптекой, отметки сборки и шаги чек-листа; без `fields`, значений данных клиента, доли владельца, цен из правок
+  администратора, удаления и имён администраторов (`actor: "admin"`). `GET /v1/staff/orders` (список) и маршруты
+  аптек не меняются; аптеки историю не получают. Экран курьера: шапка → «Клиент» (телефон-ссылка, кнопка
+  «Позвонить» ≥ 44 px) → товары по группам «Забрать в Ватан 1» / «Забрать в Ватан 2» / «Нет в наличии» с
+  отметкой сборки и подтверждённой суммой → чек-лист → «Мне за доставку» → «История» (`<details>`, свёрнута) →
+  закреплённая панель действий.
 - `GET /v1/staff/order-medicines` также возвращает `selling_unit_price` (цена с наценкой).
 - `GET /v1/staff/earnings`: в каждом дне `daily[]` есть `courier_orders_count` (создал курьер) и `website_orders_count` (заказы с сайта), помимо `orders_count` и `amount`.
 - Все новые маршруты покрыты существующим `ANY /v1/staff/{proxy+}`, менять API Gateway не нужно.

@@ -42,7 +42,7 @@ export default function OrderDeliveryEditor({ orderId, courierAmount, ownerAmoun
   };
   const change = (action: () => void) => { setSaved(false); action(); };
 
-  return <form onSubmit={submit} className="od-card od-delivery od-o4">
+  return <form onSubmit={submit} className="od-card od-delivery od-o6">
     <div className="od-card-head"><h2>Доставка</h2></div>
     <label className="od-field"><span>Сумма доставки</span>
       <span className="mp-money"><input inputMode="decimal" value={fee} placeholder="0"

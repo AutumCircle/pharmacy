@@ -34,10 +34,11 @@ def courier_row(status='pending', assembly=None):
 
 
 class AdminOrderFulfillmentTests(unittest.TestCase):
-    def _get(self, order, fulfillment=None):
+    def _get(self, order, fulfillment=None, items=None, history=None, audit=None, removed=None):
         cursor = Mock()
         cursor.fetchone.side_effect = [order, fulfillment]
-        cursor.fetchall.side_effect = [[], []]
+        # items, status history, then (job 016) the order/current-item audit rows and removed-item rows.
+        cursor.fetchall.side_effect = [items or [], history or [], audit or [], removed or []]
 
         @contextmanager
         def fake_transaction():
@@ -48,7 +49,7 @@ class AdminOrderFulfillmentTests(unittest.TestCase):
 
     def test_website_order_gets_read_only_fulfillment_with_one_extra_query(self):
         result, cursor = self._get(order_row(), courier_row())
-        self.assertEqual(cursor.execute.call_count, 4)
+        self.assertEqual(cursor.execute.call_count, 6)
         extra = cursor.execute.call_args_list[3]
         self.assertIn('order_courier_checklist', extra.args[0])
         self.assertIn('WHERE o.id = %s', extra.args[0])
@@ -81,9 +82,55 @@ class AdminOrderFulfillmentTests(unittest.TestCase):
                 result, cursor = self._get(order_row(created_by=creator))
                 self.assertIsNone(result['fulfillment'])
                 self.assertEqual(result['stage'], 'assembling')
-                self.assertEqual(cursor.execute.call_count, 3)
+                self.assertEqual(cursor.execute.call_count, 5)
         delivered, _ = self._get(order_row(created_by=3, status='delivered'))
         self.assertEqual(delivered['stage'], 'delivered')
+
+    def test_get_order_returns_timeline_with_parameterized_bounded_audit_reads(self):
+        items = [{'order_item_id': 81, 'medicine_id': 1, 'medicine_name': 'A', 'base_unit_price': Decimal('8'),
+                  'selling_unit_price': Decimal('10'), 'quantity': 1, 'line_total': Decimal('10')}]
+        history = [{'id': 1, 'from_status': None, 'to_status': 'pending', 'actor_type': 'customer',
+                    'actor_id': None, 'reason': None, 'created_at': CREATED}]
+        audit = [{'id': 5, 'actor_id': 'staff:2', 'action': 'pharmacy.order.item_price_changed',
+                  'resource_type': 'order', 'resource_id': ORDER_ID, 'created_at': CREATED.replace(minute=5),
+                  'details': {'pharmacy_id': 2, 'secret': 'x', 'items': [
+                      {'order_item_id': 81, 'previous_base_unit_price': '25.00', 'new_base_unit_price': '28.00'}]}},
+                 {'id': 6, 'actor_id': 'admin', 'action': 'order.customer_updated', 'resource_type': 'order',
+                  'resource_id': ORDER_ID, 'created_at': CREATED.replace(minute=7),
+                  'details': {'previous': {'phone': '+992900000001'}, 'current': {'phone': '+992900000002'}}}]
+        removed = [{'id': 4, 'actor_id': 'admin', 'action': 'order.item_removed', 'resource_type': 'order_item',
+                    'resource_id': '79', 'created_at': CREATED.replace(minute=3),
+                    'details': {'order_reference': '1910-009', 'medicine_name': 'Старое'}}]
+        result, cursor = self._get(order_row(), courier_row(), items=items, history=history, audit=audit,
+                                   removed=removed)
+        self.assertEqual([event['kind'] for event in result['timeline']],
+                         ['created', 'item_removed', 'pharmacy_price_changed', 'customer_updated'])
+        self.assertIs(result['timeline_truncated'], False)
+        self.assertEqual(result['timeline'][2]['medicine_name'], 'A')
+        self.assertEqual(result['timeline'][3]['fields'][0]['previous'], '+992900000001')
+        self.assertNotIn('id', result['status_history'][0])
+        for event in result['timeline']:
+            self.assertNotIn('details', event)
+            self.assertNotIn('secret', event)
+        current_sql, current_args = cursor.execute.call_args_list[4].args
+        removed_sql, removed_args = cursor.execute.call_args_list[5].args
+        for sql in (current_sql, removed_sql):
+            self.assertIn('FROM admin_audit_log', sql)
+            self.assertIn('LIMIT %s', sql)
+            self.assertNotIn(ORDER_ID, sql)
+            self.assertNotIn('1910-009', sql)
+        self.assertEqual(current_args, (ORDER_ID, ['81'], 201))
+        self.assertIn("details->>'order_reference' = %s", removed_sql)
+        self.assertIn('created_at >= %s', removed_sql)
+        self.assertEqual(removed_args, (CREATED, ['81'], ORDER_ID, '1910-009', '1910-009', 201))
+
+    def test_timeline_truncated_when_a_read_hits_the_limit(self):
+        many = [{'id': index, 'actor_id': 'staff:3', 'action': 'courier.order.checklist_updated',
+                 'resource_type': 'order', 'resource_id': ORDER_ID, 'created_at': CREATED,
+                 'details': {'step': 1, 'done': True}} for index in range(201)]
+        result, _ = self._get(order_row(created_by=3), audit=many)
+        self.assertIs(result['timeline_truncated'], True)
+        self.assertEqual(len(result['timeline']), 200)
 
     def test_list_orders_has_stage_from_the_same_query(self):
         cursor = Mock()

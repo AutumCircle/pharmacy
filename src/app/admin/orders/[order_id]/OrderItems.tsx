@@ -15,7 +15,9 @@ function confirmChange(status: OrderStatus) {
   return true;
 }
 
-function ItemRow({ orderId, item, status }: { orderId: string; item: AdminOrderItem; status: OrderStatus }) {
+function ItemRow({ orderId, item, status, meta }: {
+  orderId: string; item: AdminOrderItem; status: OrderStatus; meta?: OrderItemMeta;
+}) {
   const router = useRouter();
   const initialQuantity = Number(item.quantity);
   const [open, setOpen] = useState(false);
@@ -54,17 +56,24 @@ function ItemRow({ orderId, item, status }: { orderId: string; item: AdminOrderI
 
   const profit = (Number(item.selling_unit_price ?? 0) - Number(item.base_unit_price ?? 0)) * Number(item.quantity);
   if (!open) {
-    return <li><button type="button" className="od-item" onClick={() => setOpen(true)} aria-label={`Изменить ${item.medicine_name}`}>
-      <span className="od-item-name"><strong>{item.medicine_name}</strong>
-        <small>{item.medicine_id ? `ID ${item.medicine_id}` : 'не из каталога'} · аптека {money(item.base_unit_price, 2)}</small></span>
-      <span className="od-item-qty">{Number(item.quantity).toLocaleString('ru-RU')} × {money(item.selling_unit_price, 2)}</span>
-      <span className="od-item-sum"><b>{money(item.line_total, 2)}</b>
-        <small className={profit >= 0 ? 'od-profit' : 'od-loss'}>{profit >= 0 ? '+' : ''}{money(profit, 2)}</small></span>
-      <span className="od-item-edit" aria-hidden="true">✎</span>
-    </button></li>;
+    return <tr className="od-row" onClick={() => setOpen(true)}>
+      <td className="od-td-name"><strong>{item.medicine_name}</strong>
+        <small>{item.medicine_id ? `ID ${item.medicine_id}` : 'не из каталога'} · аптека {money(item.base_unit_price, 2)}</small>
+        {meta?.change && <small className="od-change">{meta.change.text} · <time dateTime={meta.change.at}>{meta.change.time}</time></small>}</td>
+      <td className="od-td-pharmacy">{meta && <span className="od-pharmacy-name">{meta.pharmacy}</span>}
+        {meta?.pharmacyNote && <small>{meta.pharmacyNote}</small>}
+        {meta?.answer && <span className={`od-ff-chip od-ff-tone-${meta.answer.tone}`}>{meta.answer.text}</span>}</td>
+      <td className="od-td-num od-td-qty">{Number(item.quantity).toLocaleString('ru-RU')}
+        <span className="od-td-x"> × {money(item.selling_unit_price, 2)}</span></td>
+      <td className="od-td-num od-td-price">{money(item.selling_unit_price, 2)}</td>
+      <td className="od-td-num od-td-sum"><b>{money(item.line_total, 2)}</b>
+        <small className={profit >= 0 ? 'od-profit' : 'od-loss'}>{profit >= 0 ? '+' : ''}{money(profit, 2)}</small></td>
+      <td className="od-td-edit"><button type="button" className="od-item-edit" aria-label={`Изменить ${item.medicine_name}`}
+        onClick={(event) => { event.stopPropagation(); setOpen(true); }}>✎</button></td>
+    </tr>;
   }
   const lineTotal = (Number(parsePrice(selling) ?? 0) * quantity);
-  return <li className="od-item-editor">
+  return <tr className="od-row-editor"><td colSpan={6}><div className="od-item-editor">
     <strong>{item.medicine_name}</strong>
     <div className="od-item-fields">
       <label><span>Количество</span><QuantityStepper value={quantity} onChange={setQuantity} disabled={busy} /></label>
@@ -80,13 +89,30 @@ function ItemRow({ orderId, item, status }: { orderId: string; item: AdminOrderI
       <button type="button" className="ao-btn ao-btn-ghost" disabled={busy} onClick={() => setOpen(false)}>Отмена</button>
       <button type="button" className="ao-btn ao-btn-danger od-push" disabled={busy} onClick={() => void remove()}>Удалить</button>
     </div>
-  </li>;
+  </div></td></tr>;
 }
 
-export default function OrderItems({ orderId, items, status }: { orderId: string; items: AdminOrderItem[]; status: OrderStatus }) {
+/** Job 016: what the items table shows next to an item, computed on the server from `fulfillment`
+ * and `timeline` (both optional: staff-created orders and older Lambdas show plain rows). */
+export type OrderItemMeta = {
+  pharmacy: string;
+  pharmacyNote: string | null;
+  answer: { text: string; tone: string } | null;
+  change: { text: string; at: string; time: string } | null;
+};
+
+export default function OrderItems({ orderId, items, status, meta }: {
+  orderId: string; items: AdminOrderItem[]; status: OrderStatus; meta?: Record<number, OrderItemMeta>;
+}) {
   if (items.length === 0) return <p className="od-empty">Товаров пока нет — добавьте их ниже.</p>;
-  return <ul className="od-items">
-    {items.map((item) => <ItemRow key={`${item.order_item_id}-${item.quantity}-${item.selling_unit_price}-${item.base_unit_price}`}
-      orderId={orderId} item={item} status={status} />)}
-  </ul>;
+  return <div className="od-table-wrap"><table className="od-table">
+    <caption className="sr-only">Товары заказа</caption>
+    <thead><tr><th scope="col">Товар</th><th scope="col">Аптека и ответ</th><th scope="col" className="od-td-num">Кол-во</th>
+      <th scope="col" className="od-td-num">Цена клиенту</th><th scope="col" className="od-td-num">Сумма</th>
+      <th scope="col"><span className="sr-only">Изменить</span></th></tr></thead>
+    <tbody>
+      {items.map((item) => <ItemRow key={`${item.order_item_id}-${item.quantity}-${item.selling_unit_price}-${item.base_unit_price}`}
+        orderId={orderId} item={item} status={status} meta={meta?.[item.order_item_id]} />)}
+    </tbody>
+  </table></div>;
 }
