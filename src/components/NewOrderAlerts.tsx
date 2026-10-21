@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { requestLiveRefresh } from '@/components/LiveRefresh';
 
 export type AlertOrder = { id: string; title: string; detail: string; href: string };
 
@@ -78,6 +79,7 @@ export default function NewOrderAlerts({ load, enabled = true }: { load: () => P
       const arrived = orders.filter((order) => !known.current!.has(order.id));
       known.current = ids;
       if (!arrived.length) return;
+      requestLiveRefresh();
       setFresh((current) => [...arrived, ...current].slice(0, 4));
       if (readSoundPreference() && audio.current) {
         try { await audio.current.resume(); chime(audio.current); } catch { /* blocked until the next tap */ }

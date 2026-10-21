@@ -128,6 +128,12 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    `orders.created_at`, `order_status_history` and `admin_audit_log` (`backend/v1/shared/order_timeline.py`, whitelisted
    keys only, newest 200) for `GET /v1/admin/orders/{id}` and a filtered short one for the courier's
    `GET /v1/staff/orders/{id}`; Russian text in `src/lib/order-timeline.ts`. Needs the admin Lambda redeployed.
+11. Live screens without F5: `src/components/LiveRefresh.tsx` re-renders the server page (`router.refresh()`)
+   every 5 s on the pharmacy queue, courier list/detail, admin work list and admin order detail, and every
+   15 s on the admin overview/finance (`src/lib/live-refresh.ts`). It pauses in a hidden tab (refreshes at once
+   on return or when the network comes back), skips while a refresh is running or focus is in a text field, and
+   refreshes at once when `PharmacyOrderAlerts` / `NewOrderAlerts` find a new order. Polling only: same
+   Next.js -> API Gateway -> Lambda path, no WebSocket or new AWS resources.
 12. Courier orders by day and status (`/staff/orders`, role `courier`): day chips «Все дни» / «Сегодня» / «Вчера»
    plus a date picker, and status tabs Все / Новые / Собираются / В пути / Доставлены / Не доставлены / Отменённые.
    The URL keeps `?date=YYYY-MM-DD&status=…`, so live refresh and «Показать ещё» stay on the same view. The admin

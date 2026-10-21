@@ -12,6 +12,7 @@ import CourierOrderList from './CourierOrderList';
 import PharmacyOrderCard from './PharmacyOrderCard';
 import PharmacyAlertBanner from './PharmacyAlertBanner';
 import NotificationPermission from './NotificationPermission';
+import LiveRefresh from '@/components/LiveRefresh';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,7 @@ export default async function CourierOrdersPage({ searchParams }: {
     const response = await listPharmacyPreparationOrders(token, { cursor, limit: 20 });
     const now = requestTime();
     return <section className="courier-orders-page">
+      <LiveRefresh />
       <div className="staff-title-row"><div><h1>Заказы на сборку</h1>
         <p>Аптека {account.account_id} · заказы с сайта, ожидающие подготовки</p></div>
         <Link className="courier-new-order" href="/staff/orders">Обновить</Link>
@@ -65,6 +67,7 @@ export default async function CourierOrdersPage({ searchParams }: {
   const days = [{ value: undefined, label: 'Все дни' }, { value: today, label: 'Сегодня' }, { value: yesterday, label: 'Вчера' }];
 
   return <section className="c-page">
+    <LiveRefresh />
     <div className="c-page-head"><h1>Заказы</h1></div>
     <CourierDayChart daily={daily} selected={day} status={status} period={period} />
     <div className="c-days">
