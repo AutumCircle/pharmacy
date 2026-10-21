@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-20T08:04:57Z",
+  "updated": "2026-10-21T06:15:31Z",
   "jobs": [
     {
       "id": "001-courier-delivery-checklist",
@@ -446,6 +446,62 @@
       "reworks": 0,
       "note": "approved by human",
       "updated": "2026-10-20T08:04:57Z"
+    },
+    {
+      "id": "015-pharmacy-collect-panel",
+      "title": "Панель сборки аптеки: «Нет в наличии» + «Собран»",
+      "branch": "factory/015-pharmacy-collect-panel",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-21T06:10:41Z"
+    },
+    {
+      "id": "016-order-view-history",
+      "title": "Экран заказа админ/курьер + история заказа",
+      "branch": "factory/016-order-view-history",
+      "stage": "merged",
+      "round": 1,
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "round": 1,
+          "reviews": {
+            "security": "PASS",
+            "ux": "PASS",
+            "ui": "PASS",
+            "code": "PASS"
+          }
+        }
+      ],
+      "decision": "ESCALATE",
+      "reworks": 0,
+      "note": "approved by human",
+      "updated": "2026-10-21T06:15:31Z"
     }
   ]
 }
