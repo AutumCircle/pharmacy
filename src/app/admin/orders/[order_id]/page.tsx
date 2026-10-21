@@ -13,6 +13,7 @@ import OrderAddItems from './OrderAddItems';
 import OrderFulfillment from './OrderFulfillment';
 import OrderTimeline from './OrderTimeline';
 import OrderDeleteButton from '../OrderDeleteButton';
+import LiveRefresh from '@/components/LiveRefresh';
 import { money, origin, stageChip } from '../ui';
 import type { AdminOrderDetail } from '@/lib/api-v1/admin-types';
 import { allItemsUnavailable, courierItemAnswerLabel, courierItemAnswerTone } from '@/lib/pharmacy-answers';
@@ -71,6 +72,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
   const chip = stageChip(order);
 
   return <div className="od">
+    <LiveRefresh />
     <Link href="/admin/orders" className="od-back">← Все заказы</Link>
     <header className="od-header">
       <div>

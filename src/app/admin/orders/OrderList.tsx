@@ -24,6 +24,9 @@ const sourceLabels = { instagram: 'Instagram', whatsapp: 'WhatsApp', phone: 'Ð¢Ð
 export default function OrderList({ initialOrders }: { initialOrders: AdminOrderSummary[] }) {
   const router = useRouter();
   const [orderRows, setOrderRows] = useState(initialOrders);
+  const [rowsFor, setRowsFor] = useState(initialOrders);
+  // A live refresh brings new rows from the server: they replace the local (optimistic) copy.
+  if (rowsFor !== initialOrders) { setRowsFor(initialOrders); setOrderRows(initialOrders); }
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const orders = orderRows;

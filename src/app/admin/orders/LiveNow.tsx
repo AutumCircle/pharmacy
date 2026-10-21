@@ -1,20 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { OrdersInsights } from '@/lib/api-v1/admin-types';
 import { minutesAgo, money, origin } from './ui';
 
 export default function LiveNow({ live, renderedAt }: { live: OrdersInsights['live']; renderedAt: number }) {
-  const router = useRouter();
   const [now, setNow] = useState(renderedAt);
+  const [renderedFor, setRenderedFor] = useState(renderedAt);
+  // The page re-renders through LiveRefresh; take the new request time with the new data.
+  if (renderedFor !== renderedAt) { setRenderedFor(renderedAt); setNow(renderedAt); }
 
   useEffect(() => {
-    const refresh = window.setInterval(() => { router.refresh(); setNow(Date.now()); }, 30_000);
     const tick = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => { window.clearInterval(refresh); window.clearInterval(tick); };
-  }, [router]);
+    return () => window.clearInterval(tick);
+  }, []);
 
   const waiting = live.pending;
   return <section className={waiting ? 'ao-live ao-live-alert' : 'ao-live'} aria-live="polite">

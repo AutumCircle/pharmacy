@@ -3,6 +3,7 @@ import { requireStaffSession } from '@/lib/staff-auth';
 import { getCourierOrder } from '@/lib/api-v1/staff-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import CourierOrderDetail from './CourierOrderDetail';
+import LiveRefresh from '@/components/LiveRefresh';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,5 +16,5 @@ export default async function CourierOrderPage({ params }: { params: Promise<{ o
     if (error instanceof ApiV1Error && error.status === 404) notFound();
     throw error;
   });
-  return <CourierOrderDetail key={order_id} order={response.data} />;
+  return <><LiveRefresh /><CourierOrderDetail key={order_id} order={response.data} /></>;
 }

@@ -11,6 +11,7 @@ import {
   titleWithCount, type AlertQueueOrder, type PharmacyAlarmConfig,
 } from '@/lib/pharmacy-alerts';
 import { setAttentionCount } from '@/lib/pharmacy-alert-store';
+import { requestLiveRefresh } from '@/components/LiveRefresh';
 
 type Toast = { id: string; title: string; body: string };
 
@@ -145,6 +146,8 @@ export default function PharmacyOrderAlerts({ enabled }: { enabled: boolean }) {
             .map((toast) => ({ id: toast.id, ...alertText(attention.get(toast.id)!, now) })),
         ]);
         if (!result.due.length) return;
+        // The order list on screen shows the order together with the alert.
+        requestLiveRefresh();
         setAnnouncement(result.due.map((id) => alertText(attention.get(id)!, now).title).join('. '));
         const context = audio.current;
         if (context && context.state !== 'running') void context.resume().catch(() => undefined);

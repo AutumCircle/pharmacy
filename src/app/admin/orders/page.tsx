@@ -7,6 +7,8 @@ import { requireAdminSession } from '@/lib/admin-auth';
 import type { OrderStatus } from '@/lib/api-v1/types';
 import OrderList from './OrderList';
 import LiveNow from './LiveNow';
+import LiveRefresh from '@/components/LiveRefresh';
+import { LIVE_REFRESH_OVERVIEW_MS } from '@/lib/live-refresh';
 import FinanceView from './FinanceView';
 import { ClientsCard, DailyChart, DayPanel, DrillPanel, KpiGrid, PeakHours, TopMedicines } from './OverviewSections';
 import { parseDrillMetric, type DrillMetric } from './insights-metrics';
@@ -91,6 +93,7 @@ export default async function AdminOrdersPage({ searchParams }: {
     const drillHref = (metric: DrillMetric, cursor?: string) =>
       `${href({ view: 'overview', days, date, drill: metric, drill_cursor: cursor })}#drill`;
     return <div className="ao">
+      <LiveRefresh intervalMs={LIVE_REFRESH_OVERVIEW_MS} />
       <Header view={view} days={days} drill={drill} />
       <LiveNow live={insights.data.live} renderedAt={requestTime()} />
       <KpiGrid insights={insights.data} hrefFor={(metric) => drillHref(metric)} active={drill} />
@@ -113,7 +116,7 @@ export default async function AdminOrdersPage({ searchParams }: {
 
   if (view === 'finance') {
     const insights = await getAdminOrdersInsights(days);
-    return <div className="ao"><Header view={view} days={days} /><FinanceView insights={insights.data} /></div>;
+    return <div className="ao"><LiveRefresh intervalMs={LIVE_REFRESH_OVERVIEW_MS} /><Header view={view} days={days} /><FinanceView insights={insights.data} /></div>;
   }
 
   const status = params.status === 'all' ? undefined
@@ -130,6 +133,7 @@ export default async function AdminOrdersPage({ searchParams }: {
   const filterHref = (value: string) => href({ view: 'work', status: value, q, created_from: createdFrom, created_to: createdTo });
 
   return <div className="ao">
+    <LiveRefresh />
     <Header view={view} days={days} />
     <section className="ao-card ao-filters">
       <nav className="ao-status-tabs" aria-label="Статус заказов">
