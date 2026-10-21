@@ -252,7 +252,8 @@ class PharmacyAnswerTests(unittest.TestCase):
         self.assertEqual(repeat, {key: value for key, value in first.items() if key != '_notification'})
         self._assert_no_writes(cursor)
         self.assertFalse(any('admin_audit_log' in sql for sql in self._statements(cursor)))
-        self.assertEqual(cursor.execute.call_count, 2)
+        # Order lock, items, and (job 015) this pharmacy's assembly mark.
+        self.assertEqual(cursor.execute.call_count, 3)
 
     def test_changed_problem_text_is_a_change(self):
         _, cursor = self._run({'answers': [{'order_item_id': 82, 'answer': 'price_differs', 'problem': 'дороже на 7'}]},
@@ -322,6 +323,64 @@ class PharmacyAnswerTests(unittest.TestCase):
                                  items=[{**item(81, 1, 'available'), 'base_unit_price': Decimal('10.00')}])
         self.assertNotIn('_notification', same)
         self._assert_no_writes(cursor)
+
+    # --- job 015: read-only after «Собран» -----------------------------------------------------
+
+    def _run_with_part(self, payload, pharmacy_id, items, part_state):
+        cursor = Mock()
+        cursor.fetchone.return_value = dict(WEBSITE_ORDER)
+        part = [] if part_state is None else [{'state': part_state}]
+        cursor.fetchall.side_effect = [[dict(row) for row in items], part]
+
+        @contextmanager
+        def fake_transaction():
+            yield cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', fake_transaction):
+            result = answer_pharmacy_order_items(ORDER_ID, payload, pharmacy_id, 'req_test')
+        return result, cursor
+
+    def test_answers_after_assembled_are_409_without_writes(self):
+        for pharmacy_id, payload in (
+                (1, {'answers': [{'order_item_id': 81, 'answer': 'unavailable'}]}),
+                (1, {'answers': [{'order_item_id': 81, 'answer': 'available', 'base_unit_price': '12'}]}),
+                (2, {'answers': [{'order_item_id': 81, 'answer': 'unavailable'}]})):
+            with self.subTest(pharmacy_id=pharmacy_id, payload=payload):
+                with self.assertRaises(ContractError) as raised:
+                    self._run_with_part(payload, pharmacy_id, [item(81, pharmacy_id), item(82, pharmacy_id)],
+                                        'assembled')
+                exception = raised.exception
+                self.assertEqual((exception.code, exception.http_status), ('ASSEMBLY_STATE_CONFLICT', 409))
+                self.assertEqual(str(exception), 'Заказ уже отмечен «Собран»')
+        # No writes: check the statements of one failing run.
+        cursor = Mock()
+        cursor.fetchone.return_value = dict(WEBSITE_ORDER)
+        cursor.fetchall.side_effect = [[item(81), item(82)], [{'state': 'assembled'}]]
+
+        @contextmanager
+        def fake_transaction():
+            yield cursor
+
+        with patch('backend.v1.admin_api.lambda_function.transaction', fake_transaction),                 self.assertRaises(ContractError):
+            answer_pharmacy_order_items(ORDER_ID, {'answers': [{'order_item_id': 81, 'answer': 'unavailable'}]},
+                                        1, 'req_test')
+        self._assert_no_writes(cursor)
+        self.assertEqual(cursor.execute.call_count, 3)
+        first, _, third = cursor.execute.call_args_list
+        self.assertIn('FOR UPDATE', first.args[0])
+        self.assertIn('FROM order_pharmacy_assembly', third.args[0])
+        self.assertEqual(third.args[1], (7, 1))
+
+    def test_answers_work_again_after_reopen_of_pharmacy_two(self):
+        # Job 014 reopen sets «Ватан 2» back to «Собирается»; its answers are accepted again.
+        for state in ('assembling', None):
+            with self.subTest(state=state):
+                result, cursor = self._run_with_part({'answers': [{'order_item_id': 81, 'answer': 'unavailable'}]},
+                                                     2, [item(81, 2), item(82, 2)], state)
+                self.assertEqual(result['items'][0], {'order_item_id': 81, 'my_answer': 'unavailable',
+                                                      'my_problem': None})
+                self.assertTrue(any('INSERT INTO order_item_pharmacy_answers' in sql
+                                    for sql in self._statements(cursor)))
 
     # --- handler wiring ---------------------------------------------------------------------
 

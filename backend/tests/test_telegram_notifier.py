@@ -9,6 +9,7 @@ from backend.v1.telegram_notifier.lambda_function import (
     format_courier_assembly_message,
     format_delivery_message,
     format_owner_message,
+    format_order_assembled_message,
     format_pharmacy_change_message,
     format_pharmacy_message,
     lambda_handler,
@@ -362,6 +363,109 @@ class PharmacyChangeNotificationTests(unittest.TestCase):
         text = format_pharmacy_change_message(event, default_policies()['owner_telegram'])
         self.assertNotIn('«X»', text)
 
+
+
+ASSEMBLED_KEY = 'order:41:assembled:req_' + 'ef' * 16
+ASSEMBLED_EVENT = {
+    'notification_kind': 'pharmacy_order_assembled', 'admin_order_id': 41, 'order_id': 'ord_' + 'b' * 32,
+    'order_reference': '1910-041', 'pharmacy_id': 1, 'event_key': ASSEMBLED_KEY,
+    'parts': [{'pharmacy_id': 1, 'items': [{'medicine_name': 'Парацетамол', 'quantity': '2'}]}],
+    'missing': [], 'client_total': '96.5',
+}
+
+
+class OrderAssembledNotificationTests(unittest.TestCase):
+    def test_single_pharmacy_texts(self):
+        fields = default_policies()['courier_telegram']
+        one = format_order_assembled_message(ASSEMBLED_EVENT, fields)
+        self.assertIn('✅ <b>Заказ № 1910-041 собран, лежит в Ватан 1</b>', one)
+        two = format_order_assembled_message({**ASSEMBLED_EVENT, 'pharmacy_id': 2, 'parts': [
+            {'pharmacy_id': 2, 'items': [{'medicine_name': 'Нурофен', 'quantity': '1'}]}]}, fields)
+        self.assertIn('Заказ № 1910-041 собран, лежит в Ватан 2', two)
+        self.assertNotIn('Нет в наличии', two)
+
+    def test_split_lists_and_missing_line(self):
+        event = {**ASSEMBLED_EVENT, 'parts': [
+            {'pharmacy_id': 1, 'items': [{'medicine_name': 'A <b>', 'quantity': '1'},
+                                         {'medicine_name': 'B', 'quantity': '2'}]},
+            {'pharmacy_id': 2, 'items': [{'medicine_name': 'C', 'quantity': '0.5'}]}],
+            'missing': [{'medicine_name': 'D', 'quantity': '1'}]}
+        text = format_order_assembled_message(event, default_policies()['owner_telegram'])
+        lines = text.split('\n')
+        self.assertEqual(lines[0], '✅ <b>Заказ № 1910-041 собран</b>')
+        self.assertIn('В Ватан 1: «A &lt;b&gt;» × 1, «B» × 2', lines)
+        self.assertIn('В Ватан 2: «C» × 0.5', lines)
+        self.assertIn('Нет в наличии: «D» × 1', lines)
+        single = format_order_assembled_message({**ASSEMBLED_EVENT, 'missing': [{'medicine_name': 'D', 'quantity': '1'}]},
+                                                default_policies()['courier_telegram'])
+        self.assertIn('лежит в Ватан 1', single)
+        self.assertIn('Нет в наличии: «D» × 1', single)
+
+    def test_sum_line_follows_client_total_policy(self):
+        on = {**default_policies()['courier_telegram'], 'client_total': True}
+        off = {**default_policies()['courier_telegram'], 'client_total': False}
+        self.assertIn('Сумма: 96.50 с.', format_order_assembled_message(ASSEMBLED_EVENT, on))
+        self.assertNotIn('Сумма', format_order_assembled_message(ASSEMBLED_EVENT, off))
+        self.assertNotIn('Сумма', format_order_assembled_message({**ASSEMBLED_EVENT, 'client_total': None}, on))
+
+    def test_never_carries_client_data(self):
+        private = {'customer_name': 'SECRET-NAME', 'phone': '+992917123456', 'address': 'SECRET-ADDRESS',
+                   'landmark': 'SECRET-LANDMARK', 'comment': 'SECRET-COMMENT', 'notes': 'SECRET-NOTES'}
+        event = {**ASSEMBLED_EVENT, **private}
+        for channel in ('owner_telegram', 'courier_telegram'):
+            with self.subTest(channel=channel):
+                everything = {key: True for key in default_policies()[channel]}
+                text = format_order_assembled_message(event, everything)
+                for value in private.values():
+                    self.assertNotIn(value, text)
+                self.assertNotIn('917123456', text)
+
+    @patch('backend.v1.telegram_notifier.lambda_function._claim_delivery')
+    @patch('backend.v1.telegram_notifier.lambda_function._send_message')
+    def test_owner_and_courier_only_with_courier_button(self, send_message, claim):
+        claim.side_effect = lambda key, channel: {'claimed': True, 'fields': default_policies()[channel]}
+        event = {'requestContext': {'requestId': 'test'}, 'body': json.dumps(ASSEMBLED_EVENT)}
+        with patch.dict('os.environ', CHANGE_ENV, clear=True):
+            response = lambda_handler(event, None)
+        self.assertEqual(json.loads(response['body'])['data']['messages_sent'], 2)
+        self.assertEqual([call.args for call in claim.call_args_list],
+                         [(ASSEMBLED_KEY, 'owner_telegram'), (ASSEMBLED_KEY, 'courier_telegram')])
+        self.assertEqual([call.args[:2] for call in send_message.call_args_list],
+                         [('token', 'owner'), ('delivery-token', 'courier')])
+        owner, courier = send_message.call_args_list
+        self.assertTrue(owner.kwargs['include_admin_link'])
+        self.assertIsNone(owner.kwargs.get('buttons'))
+        self.assertFalse(courier.kwargs['include_admin_link'])
+        self.assertEqual(courier.kwargs['buttons'], [
+            {'text': '📦 Открыть заказ', 'url': 'https://vatan.example/staff/orders/ord_' + 'b' * 32}])
+        for call in send_message.call_args_list:
+            self.assertIn('собран, лежит в Ватан 1', call.args[2])
+
+    @patch('backend.v1.telegram_notifier.lambda_function._claim_delivery')
+    @patch('backend.v1.telegram_notifier.lambda_function._send_message')
+    def test_unclaimed_recipient_sends_nothing(self, send_message, claim):
+        claim.side_effect = lambda key, channel: {'claimed': channel == 'owner_telegram',
+                                                  'fields': default_policies()[channel]}
+        with patch.dict('os.environ', CHANGE_ENV, clear=True):
+            result = lambda_handler(dict(ASSEMBLED_EVENT), None)
+        self.assertEqual(result['messages_sent'], 1)
+        self.assertEqual(send_message.call_args.args[1], 'owner')
+        claim.side_effect = lambda key, channel: {'claimed': False, 'fields': {}}
+        send_message.reset_mock()
+        with patch.dict('os.environ', CHANGE_ENV, clear=True):
+            self.assertEqual(lambda_handler(dict(ASSEMBLED_EVENT), None)['messages_sent'], 0)
+        send_message.assert_not_called()
+
+    @patch('backend.v1.telegram_notifier.lambda_function._claim_delivery')
+    @patch('backend.v1.telegram_notifier.lambda_function._send_message')
+    def test_event_key_must_match_the_order_and_kind(self, send_message, claim):
+        for key in ('order:42:assembled:req_' + 'ef' * 16, 'order:41:pharmacy-change:req_' + 'ef' * 16,
+                    'order:41:created', 'order:41:assembled:req_x', None):
+            with self.subTest(key=key), patch.dict('os.environ', CHANGE_ENV, clear=True), \
+                    self.assertRaises(RuntimeError):
+                lambda_handler({**ASSEMBLED_EVENT, 'event_key': key}, None)
+        claim.assert_not_called()
+        send_message.assert_not_called()
 
 
 if __name__ == "__main__":

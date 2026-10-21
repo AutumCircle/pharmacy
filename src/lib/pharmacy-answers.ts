@@ -119,15 +119,14 @@ export function validatePharmacyAnswersRequest(body: unknown): AnswersValidation
 /**
  * Row controls of the pharmacy medicines table («Цена отличается» is no longer offered). Job 014: the
  * same compact controls for «Ватан 1» and «Ватан 2» next to the line sum; the price itself is tapped to
- * edit it (`price` / `save` / `cancel` are the accessible names of that inline editor).
+ * edit it (`price` / `save` / `cancel` are the accessible names of that inline editor). Job 015: no
+ * «В наличии» and no per-item «Собрано» — everything not marked «Нет в наличии» counts as available.
  */
 export const ROW_ACTION_LABELS = {
-  available: 'В наличии',
   unavailable: 'Нет в наличии',
   price: 'Изменить цену',
   save: 'Сохранить',
   cancel: 'Отмена',
-  collect: 'Собрано',
   confirm: 'Да',
 } as const;
 
@@ -139,13 +138,13 @@ export function unavailableConfirmText(pharmacyId: number | null | undefined): s
   return pharmacyId === 2 ? 'Нет в обеих аптеках?' : 'Передать в Ватан 2?';
 }
 
-export type RowAction = 'available' | 'unavailable' | 'price';
+export type RowAction = 'unavailable' | 'price';
 
 /**
  * The `pharmacy-answers` request of one row control. «Изменить цену» → «Сохранить» sends «В наличии»
- * with the pharmacy (base) price; an empty field or the current price sends plain «В наличии» (same
- * rule as «Ватан 2»'s routed items, also when the policy hides the price). Lambda re-validates
- * everything and recomputes client prices and totals.
+ * with the pharmacy (base) price; an empty field or the current price sends plain «В наличии» (job 015:
+ * the only way the panel still sends «available»). Lambda re-validates everything and recomputes client
+ * prices and totals.
  */
 export function rowActionRequest(orderItemId: number, action: RowAction, price?: string,
   currentPrice?: number | string | null): AnswersValidation {

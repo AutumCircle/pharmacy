@@ -32,17 +32,19 @@ test('labels are Russian', () => {
   assert.deepEqual(assemblyChip('assembled'), { text: 'Собран', tone: 'ok' });
 });
 
-test('nextAssemblyAction for every state', () => {
+test('nextAssemblyAction is the one «Собран» until the part is «Собран» (job 015)', () => {
   assert.deepEqual(nextAssemblyAction({ assembly_available: true, assembly_state: null }),
-    { state: 'assembling', label: 'Начать сборку' });
-  assert.deepEqual(nextAssemblyAction({ assembly_available: true }), { state: 'assembling', label: 'Начать сборку' });
+    { state: 'assembled', label: 'Собран' });
+  assert.deepEqual(nextAssemblyAction({ assembly_available: true }), { state: 'assembled', label: 'Собран' });
+  // «Собирается» (old clients, job 014 reopen) still ends with the same «Собран».
   assert.deepEqual(nextAssemblyAction({ assembly_available: true, assembly_state: 'assembling' }),
-    { state: 'assembled', label: 'Сборка сделана' });
+    { state: 'assembled', label: 'Собран' });
   assert.equal(nextAssemblyAction({ assembly_available: true, assembly_state: 'assembled' }), null);
   // Not offered by Lambda (pending order, nothing to assemble) or an old Lambda without the field.
   assert.equal(nextAssemblyAction({ assembly_available: false, assembly_state: null }), null);
   assert.equal(nextAssemblyAction({ assembly_available: false, assembly_state: 'assembling' }), null);
   assert.equal(nextAssemblyAction({}), null);
+  assert.equal(nextAssemblyAction({ assembly_state: null }), null);
 });
 
 test('courierAssemblyLines: one line per pharmacy, sorted by pharmacy id', () => {

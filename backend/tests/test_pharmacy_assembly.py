@@ -1,12 +1,16 @@
-"""Job 011: pharmacy assembly marks «Начать сборку» / «Собран» per (order, pharmacy)."""
+"""Job 011: pharmacy assembly marks per (order, pharmacy); job 015: one «Собран» (none -> assembled) and the
+«Заказ собран» owner/courier notification payload."""
 import json
 import os
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
-from backend.v1.admin_api.lambda_function import lambda_handler, mark_pharmacy_assembly, validate_assembly_request
+from backend.v1.admin_api.lambda_function import (
+    _ORDER_ASSEMBLY_PARTS_SQL, lambda_handler, mark_pharmacy_assembly, validate_assembly_request,
+)
 from backend.v1.shared import staff_accounts as staff
 from backend.v1.shared.contract import ContractError
 
@@ -25,9 +29,15 @@ def mark(state):
 
 
 class PharmacyAssemblyTests(unittest.TestCase):
-    def _run(self, state, pharmacy_id=1, order=None, item_counts=None, current=None, saved=None, answered=()):
+    def _run(self, state, pharmacy_id=1, order=None, item_counts=None, current=None, saved=None, answered=(),
+             parts=None, items=None):
         cursor = self.last_cursor = Mock()
-        cursor.fetchall.return_value = [{'order_item_id': item_id} for item_id in answered]
+        answered_rows = [{'order_item_id': item_id} for item_id in answered]
+        if parts is None:
+            cursor.fetchall.return_value = answered_rows
+        else:
+            pending = (order or CONFIRMED)['status'] == 'pending'
+            cursor.fetchall.side_effect = ([answered_rows] if pending else []) + [parts, items or []]
         sequence = [dict(CONFIRMED) if order is None else order,
                     counts() if item_counts is None else item_counts,
                     current,
@@ -149,11 +159,108 @@ class PharmacyAssemblyTests(unittest.TestCase):
         self.assertEqual(exception.http_status, 409)
         self.assertEqual(str(exception), 'Нечего собирать')
 
-    def test_skip_and_backward_transitions_are_409(self):
-        for current, target in ((None, 'assembled'), ('assembled', 'assembling')):
-            with self.subTest(current=current, target=target):
-                exception = self._error(target, current=mark(current) if current else None)
-                self.assertEqual((exception.code, exception.http_status), ('ASSEMBLY_STATE_CONFLICT', 409))
+    def test_backward_transition_is_409(self):
+        exception = self._error('assembling', current=mark('assembled'))
+        self.assertEqual((exception.code, exception.http_status), ('ASSEMBLY_STATE_CONFLICT', 409))
+        self.assertEqual(str(exception), 'Заказ уже отмечен «Собран»')
+
+    # --- job 015: one «Собран» -------------------------------------------------------------
+
+    def test_none_to_assembled_on_pending_order_answers_remaining_and_audits_once(self):
+        result, cursor = self._run('assembled', order={**CONFIRMED, 'status': 'pending'}, answered=(82, 81))
+        upserts = [call for call in cursor.execute.call_args_list
+                   if 'INSERT INTO order_pharmacy_assembly' in call.args[0]]
+        self.assertEqual(len(upserts), 1)
+        self.assertEqual(upserts[0].args[1], (9, 1, 'assembled', 'assembled', 'staff:1'))
+        auto = next(call for call in cursor.execute.call_args_list
+                    if 'INSERT INTO order_item_pharmacy_answers' in call.args[0])
+        self.assertIn("SELECT oi.id, %s, 'available', %s", auto.args[0])
+        self.assertIn('mine.answer IS NULL', auto.args[0])
+        self.assertEqual(auto.args[1], (1, 'staff:1', 1, 9, 1))
+        audits = [call for call in cursor.execute.call_args_list if 'admin_audit_log' in call.args[0]]
+        self.assertEqual(len(audits), 1)
+        self.assertEqual(audits[0].args[1][1], 'pharmacy.order.assembly_marked')
+        self.assertEqual(json.loads(audits[0].args[1][5]), {'pharmacy_id': 1, 'from_state': None,
+                                                           'to_state': 'assembled', 'answered_available': [81, 82]})
+        self.assertEqual(result['state'], 'assembled')
+        self._assert_never_touches_status(cursor)
+
+    def test_none_to_assembled_works_for_both_pharmacies(self):
+        for pharmacy_id in (1, 2):
+            with self.subTest(pharmacy_id=pharmacy_id):
+                result, cursor = self._run('assembled', pharmacy_id=pharmacy_id,
+                                           order={**CONFIRMED, 'status': 'pending'})
+                upsert = next(call for call in cursor.execute.call_args_list
+                              if 'INSERT INTO order_pharmacy_assembly' in call.args[0])
+                self.assertEqual(upsert.args[1][1], pharmacy_id)
+                self.assertEqual(result['pharmacy_id'], pharmacy_id)
+
+    def test_repeat_assembled_is_a_no_op_without_notification(self):
+        result, cursor = self._run('assembled', order={**CONFIRMED, 'status': 'pending'}, current=mark('assembled'))
+        self._assert_no_writes(cursor)
+        self.assertNotIn('_notification', result)
+        self.assertEqual(cursor.execute.call_count, 3)
+
+    PENDING = {**CONFIRMED, 'status': 'pending', 'public_id': ORDER_ID, 'order_reference': '2010-009',
+               'order_total': Decimal('96.50')}
+
+    @staticmethod
+    def _item(item_id, pharmacy_id, name, quantity='1', answer='available'):
+        return {'id': item_id, 'pharmacy_id': pharmacy_id, 'medicine_name': name,
+                'quantity': Decimal(quantity), 'answer': answer}
+
+    def test_single_pharmacy_completion_returns_one_part(self):
+        result, cursor = self._run('assembled', order=dict(self.PENDING),
+                                   parts=[{'pharmacy_id': 1, 'state': 'assembled'}],
+                                   items=[self._item(81, 1, 'Парацетамол', '2'), self._item(82, 1, 'Нурофен')])
+        self.assertEqual(result['_notification'], {
+            'notification_kind': 'pharmacy_order_assembled', 'admin_order_id': 9, 'order_id': ORDER_ID,
+            'order_reference': '2010-009', 'pharmacy_id': 1, 'event_key': 'order:9:assembled:req_test',
+            'parts': [{'pharmacy_id': 1, 'items': [{'medicine_name': 'Парацетамол', 'quantity': '2'},
+                                                   {'medicine_name': 'Нурофен', 'quantity': '1'}]}],
+            'missing': [], 'client_total': '96.50'})
+        parts_call = next(call for call in cursor.execute.call_args_list
+                          if call.args[0] == _ORDER_ASSEMBLY_PARTS_SQL)
+        self.assertEqual(parts_call.args[1], (9, 9))
+        self._assert_never_touches_status(cursor)
+
+    def test_split_completion_lists_both_pharmacies_and_missing(self):
+        result, _ = self._run('assembled', pharmacy_id=2, order=dict(self.PENDING),
+                              parts=[{'pharmacy_id': 1, 'state': 'assembled'},
+                                     {'pharmacy_id': 2, 'state': 'assembled'}],
+                              items=[self._item(81, 1, 'A'), self._item(82, 2, 'C'),
+                                     self._item(83, 1, 'B', '2'), self._item(84, 2, 'D', '1', 'unavailable')])
+        notification = result['_notification']
+        self.assertEqual(notification['pharmacy_id'], 2)
+        self.assertEqual(notification['parts'], [
+            {'pharmacy_id': 1, 'items': [{'medicine_name': 'A', 'quantity': '1'},
+                                         {'medicine_name': 'B', 'quantity': '2'}]},
+            {'pharmacy_id': 2, 'items': [{'medicine_name': 'C', 'quantity': '1'}]}])
+        self.assertEqual(notification['missing'], [{'medicine_name': 'D', 'quantity': '1'}])
+
+    def test_first_of_two_pharmacies_gets_no_notification(self):
+        for waiting in (None, 'assembling'):
+            with self.subTest(waiting=waiting):
+                result, cursor = self._run('assembled', order=dict(self.PENDING),
+                                           parts=[{'pharmacy_id': 1, 'state': 'assembled'},
+                                                  {'pharmacy_id': 2, 'state': waiting}])
+                self.assertNotIn('_notification', result)
+                self.assertFalse(any('oi.medicine_name' in sql for sql in self._statements(cursor)))
+
+    def test_assembling_target_never_checks_completion(self):
+        result, cursor = self._run('assembling', order=dict(self.PENDING))
+        self.assertNotIn('_notification', result)
+        self.assertFalse(any(sql == _ORDER_ASSEMBLY_PARTS_SQL for sql in self._statements(cursor)))
+
+    def test_notification_has_no_client_data(self):
+        order = {**self.PENDING, 'customer_name': 'SECRET', 'phone': '+992917123456', 'address': 'SECRET-ADDR',
+                 'landmark': 'SECRET-LM', 'notes': 'SECRET-NOTE'}
+        result, _ = self._run('assembled', order=order, parts=[{'pharmacy_id': 1, 'state': 'assembled'}],
+                              items=[{**self._item(81, 1, 'A'), 'customer_name': 'SECRET'}])
+        text = json.dumps(result['_notification'], ensure_ascii=False)
+        for key in ('customer_name', 'phone', 'address', 'landmark', 'notes', 'comment'):
+            self.assertNotIn(f'"{key}"', text)
+        self.assertNotIn('SECRET', text)
 
     def test_order_row_is_locked_and_items_read_with_effective_assignment(self):
         _, cursor = self._run('assembling')
@@ -255,10 +362,12 @@ class PharmacyAssemblyHandlerTests(unittest.TestCase):
     def test_courier_session_is_forbidden(self):
         courier = self.account(3)
         self.cursor.fetchone.return_value = courier
-        with patch('backend.v1.admin_api.lambda_function.mark_pharmacy_assembly') as marker:
-            response = lambda_handler(self.event(courier, {'state': 'assembling'}), None)
-        self.assertEqual(response['statusCode'], 403)
-        marker.assert_not_called()
+        for state in ('assembling', 'assembled'):
+            with self.subTest(state=state), \
+                    patch('backend.v1.admin_api.lambda_function.mark_pharmacy_assembly') as marker:
+                response = lambda_handler(self.event(courier, {'state': state}), None)
+                self.assertEqual(response['statusCode'], 403)
+                marker.assert_not_called()
 
     def test_handler_passes_session_pharmacy_id(self):
         pharmacy_two = self.account(2)
