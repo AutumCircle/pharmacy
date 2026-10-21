@@ -7,8 +7,10 @@ import { courierAssemblySummary } from '@/lib/pharmacy-assembly';
 import { money } from '../format';
 import { stagePill } from './status';
 
-export default function CourierOrderList({ orders }: { orders: CourierOrder[] }) {
-  if (orders.length === 0) return <div className="c-empty"><strong>Заказов нет</strong><span>Новые заказы появятся здесь.</span></div>;
+export default function CourierOrderList({ orders, emptyText = 'Новые заказы появятся здесь.' }: {
+  orders: CourierOrder[]; emptyText?: string;
+}) {
+  if (orders.length === 0) return <div className="c-empty"><strong>Заказов нет</strong><span>{emptyText}</span></div>;
   return <ul className="c-list">{orders.map((order) => {
     const progress = checklistProgress(order);
     const answers = order.website_order && order.status === 'pending' ? answersProgressText(order) : null;

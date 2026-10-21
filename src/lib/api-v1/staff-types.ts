@@ -47,6 +47,12 @@ export type StaffOrderCreated = {
 
 export type CourierOrderStatus = 'pending' | 'confirmed' | 'delivering' | 'delivered' | 'cancelled';
 
+/** Courier list status filter: one status or `undelivered` (pending, confirmed or delivering). */
+export type CourierOrderFilter = CourierOrderStatus | 'undelivered';
+
+/** Counts for the selected Asia/Dushanbe day; `total` excludes cancelled orders. */
+export type CourierDaySummary = { total: number; delivered: number; undelivered: number; cancelled: number };
+
 /** A pharmacist's answer about one order item (job 010). */
 export type PharmacyAnswer = 'available' | 'unavailable' | 'price_differs';
 
@@ -196,6 +202,9 @@ export type CourierOrder = {
 export type CourierOrderList = {
   data: CourierOrder[];
   page: { next_cursor: string | null; has_more: boolean };
+  /** Only with the `date` filter (absent on older Lambdas). */
+  date?: string;
+  summary?: CourierDaySummary;
   request_id: string;
 };
 

@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { CourierEarnings, CourierOrder, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyAnswersRequest, PharmacyAnswersResult, PharmacyAssemblyRequest, PharmacyAssemblyResult, PharmacyItemCollectRequest, PharmacyItemCollectResult, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
+import type { CourierEarnings, CourierOrder, CourierOrderFilter, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyAnswersRequest, PharmacyAnswersResult, PharmacyAssemblyRequest, PharmacyAssemblyResult, PharmacyItemCollectRequest, PharmacyItemCollectResult, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
@@ -78,9 +78,12 @@ export function searchStaffOrderMedicines(token: string, query: string) {
   return request<AdminNumberedListResponse<StaffOrderMedicine>>(`order-medicines?${params}`, { token });
 }
 
-export function listCourierOrders(token: string, values: { status?: CourierOrderStatus; cursor?: string; limit?: number }) {
+export function listCourierOrders(token: string, values: {
+  status?: CourierOrderFilter; date?: string; cursor?: string; limit?: number;
+}) {
   const params = new URLSearchParams();
   if (values.status) params.set('status', values.status);
+  if (values.date) params.set('date', values.date);
   if (values.cursor) params.set('cursor', values.cursor);
   params.set('limit', String(values.limit ?? 20));
   return request<CourierOrderList>(`orders?${params}`, { token });

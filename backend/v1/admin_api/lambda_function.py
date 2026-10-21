@@ -1368,19 +1368,50 @@ def get_courier_order(order_id: str) -> dict[str, Any]:
     return result
 
 
+_COURIER_LIST_STATUSES = frozenset({"pending", "confirmed", "delivering", "delivered", "cancelled"})
+# «Не доставлены»: everything still in work (neither delivered nor cancelled).
+_COURIER_UNDELIVERED_SQL = "o.status IN ('pending', 'confirmed', 'delivering')"
+
+
+def _courier_day_range(raw_date: Any) -> tuple[date, datetime, datetime]:
+    """One Asia/Dushanbe calendar day as [start, end) in absolute time."""
+    if not isinstance(raw_date, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_date):
+        raise ContractError("VALIDATION_ERROR", "Неверная дата")
+    try:
+        selected = date.fromisoformat(raw_date)
+    except ValueError as exc:
+        raise ContractError("VALIDATION_ERROR", "Неверная дата") from exc
+    if not 2020 <= selected.year <= 2100:
+        raise ContractError("VALIDATION_ERROR", "Дата вне допустимого диапазона")
+    start = datetime.combine(selected, time.min, tzinfo=ZoneInfo("Asia/Dushanbe"))
+    return selected, start, start + timedelta(days=1)
+
+
 def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
-    """Delivery projection with the order's own client prices; no admin or payment fields."""
-    if set(query) - {"limit", "cursor", "status"}:
+    """Delivery projection with the order's own client prices; no admin or payment fields.
+
+    Filters: `status` (one status, `undelivered`, or none = all but cancelled) and `date`
+    (YYYY-MM-DD, an Asia/Dushanbe day of `created_at`; adds that day's `summary`)."""
+    if set(query) - {"limit", "cursor", "status", "date"}:
         raise ContractError("VALIDATION_ERROR", "Unknown order filter")
     limit = min(_limit(query), 50)
-    clauses = ["o.deleted_at IS NULL", "o.status <> 'cancelled'"]
+    clauses = ["o.deleted_at IS NULL"]
     params: list[Any] = []
     status = query.get("status")
-    if status:
-        if status not in {"pending", "confirmed", "delivering", "delivered"}:
+    if status == "undelivered":
+        clauses.append(_COURIER_UNDELIVERED_SQL)
+    elif status:
+        if status not in _COURIER_LIST_STATUSES:
             raise ContractError("VALIDATION_ERROR", "status is invalid")
         clauses.append("o.status = %s")
         params.append(status)
+    else:
+        clauses.append("o.status <> 'cancelled'")
+    day = _courier_day_range(query["date"]) if query.get("date") is not None else None
+    day_clause = f"({_ORDER_CREATED_TZ}) >= %s AND ({_ORDER_CREATED_TZ}) < %s"
+    if day:
+        clauses.append(day_clause)
+        params.extend([day[1], day[2]])
     cursor = _decode_cursor(query.get("cursor"))
     if cursor:
         try:
@@ -1401,14 +1432,30 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
             tuple(params),
         )
         rows = [dict(row) for row in cur.fetchall()]
+        summary = None
+        if day:
+            # The whole day's counts, independent of the status tab and the page.
+            cur.execute(
+                f"""SELECT COUNT(*) FILTER (WHERE o.status <> 'cancelled') AS total,
+                           COUNT(*) FILTER (WHERE o.status = 'delivered') AS delivered,
+                           COUNT(*) FILTER (WHERE {_COURIER_UNDELIVERED_SQL}) AS undelivered,
+                           COUNT(*) FILTER (WHERE o.status = 'cancelled') AS cancelled
+                    FROM orders o WHERE o.deleted_at IS NULL AND {day_clause}""",
+                (day[1], day[2]),
+            )
+            counts = dict(cur.fetchone() or {})
+            summary = {key: int(counts.get(key) or 0) for key in ("total", "delivered", "undelivered", "cancelled")}
     has_more = len(rows) > limit
     rows = rows[:limit]
     next_cursor = None
     if has_more and rows:
         last = rows[-1]
         next_cursor = _encode_cursor({"created_at": last["created_at"].isoformat(), "id": last["id"]})
-    return {"data": [_courier_order_row(row) for row in rows],
-            "page": {"next_cursor": next_cursor, "has_more": has_more}}
+    result: dict[str, Any] = {"data": [_courier_order_row(row) for row in rows],
+                              "page": {"next_cursor": next_cursor, "has_more": has_more}}
+    if day:
+        result.update(date=day[0].isoformat(), time_zone="Asia/Dushanbe", summary=summary)
+    return result
 
 
 def add_courier_order_items(

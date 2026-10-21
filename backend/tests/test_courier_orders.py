@@ -191,21 +191,73 @@ class CourierOrderTests(unittest.TestCase):
         self.assertNotIn('id', result['data'][0])
         sql, args = cursor.execute.call_args.args
         self.assertIn('ORDER BY o.created_at DESC, o.id DESC LIMIT %s', sql)
-        self.assertIn("o.status <> 'cancelled'", sql)
+        self.assertIn('o.status = %s', sql)
         self.assertIn("'selling_unit_price'", sql)
         self.assertIn('o.order_total', sql)
         self.assertNotIn('delivery_owner_amount', sql)
         self.assertEqual(args, ('pending', 21))
 
-    def test_delivered_orders_are_visible_but_cancelled_filter_is_rejected(self):
+    def test_status_filters_delivered_cancelled_and_undelivered(self):
         cursor = Mock()
         cursor.fetchall.return_value = []
         with self._tx(cursor):
             list_courier_orders({'status': 'delivered'})
-        self.assertIn("o.status = %s", cursor.execute.call_args.args[0])
-        self.assertEqual(cursor.execute.call_args.args[1], ('delivered', 21))
-        with self.assertRaises(ContractError):
+            self.assertIn("o.status = %s", cursor.execute.call_args.args[0])
+            self.assertEqual(cursor.execute.call_args.args[1], ('delivered', 21))
             list_courier_orders({'status': 'cancelled'})
+            sql, args = cursor.execute.call_args.args
+            self.assertNotIn("o.status <> 'cancelled'", sql)
+            self.assertEqual(args, ('cancelled', 21))
+            list_courier_orders({'status': 'undelivered'})
+            sql, args = cursor.execute.call_args.args
+            self.assertIn("o.status IN ('pending', 'confirmed', 'delivering')", sql)
+            self.assertEqual(args, (21,))
+            list_courier_orders({})
+            self.assertIn("o.status <> 'cancelled'", cursor.execute.call_args.args[0])
+        self.assertEqual(cursor.execute.call_count, 4)
+        for bad in ('archived', "delivered' OR 1=1 --"):
+            with self.assertRaises(ContractError):
+                list_courier_orders({'status': bad})
+
+    def test_date_filter_uses_dushanbe_day_and_returns_summary(self):
+        cursor = Mock()
+        cursor.fetchall.return_value = []
+        cursor.fetchone.return_value = {'total': 5, 'delivered': 3, 'undelivered': 2, 'cancelled': 1}
+        with self._tx(cursor):
+            result = list_courier_orders({'date': '2026-10-21', 'status': 'delivered'})
+        self.assertEqual(cursor.execute.call_count, 2)
+        list_sql, list_args = cursor.execute.call_args_list[0].args
+        start = datetime(2026, 10, 20, 19, 0, tzinfo=timezone.utc)
+        end = datetime(2026, 10, 21, 19, 0, tzinfo=timezone.utc)
+        self.assertEqual(list_args[0], 'delivered')
+        self.assertEqual((list_args[1], list_args[2]), (start, end))
+        self.assertEqual(list_args[3], 21)
+        self.assertIn("AT TIME ZONE 'UTC'", list_sql)
+        self.assertIn(') >= %s AND (', list_sql)
+        summary_sql, summary_args = cursor.execute.call_args_list[1].args
+        self.assertEqual(summary_args, (start, end))
+        self.assertIn('o.deleted_at IS NULL', summary_sql)
+        self.assertIn("COUNT(*) FILTER (WHERE o.status = 'cancelled') AS cancelled", summary_sql)
+        self.assertEqual(result['date'], '2026-10-21')
+        self.assertEqual(result['time_zone'], 'Asia/Dushanbe')
+        self.assertEqual(result['summary'], {'total': 5, 'delivered': 3, 'undelivered': 2, 'cancelled': 1})
+
+    def test_without_date_there_is_no_summary_query(self):
+        cursor = Mock()
+        cursor.fetchall.return_value = []
+        with self._tx(cursor):
+            result = list_courier_orders({'status': 'pending'})
+        self.assertEqual(cursor.execute.call_count, 1)
+        self.assertNotIn('summary', result)
+        self.assertNotIn('date', result)
+
+    def test_invalid_date_is_rejected_before_database(self):
+        cursor = Mock()
+        with self._tx(cursor):
+            for bad in ('2026-13-01', '2026-02-30', '21.10.2026', '2026-10-21T00:00', '1999-01-01', '', 20261021):
+                with self.assertRaises(ContractError, msg=repr(bad)):
+                    list_courier_orders({'date': bad})
+        cursor.execute.assert_not_called()
 
     def test_courier_earnings_are_grouped_by_delivery_day(self):
         cursor = Mock()

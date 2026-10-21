@@ -132,6 +132,17 @@
 .c-tabs a { flex: none; padding: 9px 15px; border-radius: 999px; background: #fff; border: 1px solid var(--c-line); color: #3b463f; text-decoration: none; font-size: 14px; font-weight: 650; }
 .c-tabs a.active { background: var(--c-ink); border-color: var(--c-ink); color: #fff; }
 
+/* Courier list: day choice and the day's summary */
+.c-days { display: grid; grid-template-columns: minmax(0,1fr); gap: 8px; }
+.c-day-picker { display: flex; align-items: flex-end; gap: 8px; }
+.c-day-picker label { display: grid; gap: 4px; flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: var(--c-muted); }
+.c-day-picker input { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid #d5dbd7; border-radius: 12px; background: #fff; color: var(--c-ink); font: inherit; font-size: 16px; }
+.c-day-picker input:focus { outline: none; border-color: var(--c-brand); box-shadow: 0 0 0 3px rgba(196,22,28,.12); }
+.c-day-picker button { flex: none; min-height: 44px; padding: 0 16px; border: 1px solid #d5dbd7; border-radius: 12px; background: #fff; color: var(--c-ink); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
+.c-day-summary { display: grid; gap: 2px; padding: 10px 14px; border-radius: 12px; background: var(--c-card); border: 1px solid var(--c-line); }
+.c-day-summary strong { font-size: 16px; }
+.c-day-summary span { color: var(--c-muted); font-size: 14px; }
+
 .c-list { display: grid; grid-template-columns: minmax(0,1fr); gap: 12px; }
 .c-empty { display: grid; gap: 4px; justify-items: center; padding: 40px 16px; border: 1px dashed #cfd6d1; border-radius: var(--c-radius); color: var(--c-muted); text-align: center; }
 .c-empty strong { color: var(--c-ink); font-size: 17px; }
@@ -139,6 +150,7 @@
 .c-pill { padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; background: #eef1ef; }
 .c-pill-pending { background: var(--c-brand-soft); color: var(--c-brand-dark); }
 .c-pill-confirmed { background: var(--c-amber-soft); color: var(--c-amber); }
+.c-pill-cancelled { background: #eef1ef; color: var(--c-muted); }
 .c-pill-delivering { background: var(--c-blue-soft); color: var(--c-blue); }
 .c-pill-delivered { background: var(--c-ok-soft); color: var(--c-ok); }
 .c-pill.c-pill-assembled { background: var(--c-teal-soft); color: var(--c-teal); }
@@ -252,6 +264,7 @@
 .c-row.c-status-confirmed { border-left-color: #d38b00; }
 .c-row.c-status-delivering { border-left-color: var(--c-blue); }
 .c-row.c-status-delivered { border-left-color: var(--c-ok); }
+.c-row.c-status-cancelled { border-left-color: #9aa39d; opacity: .8; }
 .c-row-top, .c-row-bottom { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .c-row-top strong { font-size: 17px; }
 .c-row-who { font-weight: 650; overflow-wrap: anywhere; }

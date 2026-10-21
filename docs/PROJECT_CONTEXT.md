@@ -128,6 +128,15 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    `orders.created_at`, `order_status_history` and `admin_audit_log` (`backend/v1/shared/order_timeline.py`, whitelisted
    keys only, newest 200) for `GET /v1/admin/orders/{id}` and a filtered short one for the courier's
    `GET /v1/staff/orders/{id}`; Russian text in `src/lib/order-timeline.ts`. Needs the admin Lambda redeployed.
+12. Courier orders by day and status (`/staff/orders`, role `courier`): day chips «Все дни» / «Сегодня» / «Вчера»
+   plus a date picker, and status tabs Все / Новые / Собираются / В пути / Доставлены / Не доставлены / Отменённые.
+   The URL keeps `?date=YYYY-MM-DD&status=…`, so live refresh and «Показать ещё» stay on the same view. The admin
+   Lambda `GET /v1/staff/orders` (courier) accepts `date` — one Asia/Dushanbe calendar day of `orders.created_at`,
+   2020–2100, parameterized `[start, end)` — and `status` = one status, `cancelled` or `undelivered`
+   (pending/confirmed/delivering); no `status` still hides cancelled orders. With `date` the response adds `date`,
+   `time_zone` and `summary` `{ total, delivered, undelivered, cancelled }` (`total` without cancelled) for the whole
+   day, independent of the tab and page. Helpers in `src/lib/courier-day.ts`. Until the admin Lambda is redeployed
+   the old Lambda answers 400 to these filters and the page shows «Фильтр пока недоступен» instead of crashing.
 
 Telegram notifier variables are configured only in AWS, never in Git:
 

@@ -1,7 +1,12 @@
 import Link from 'next/link';
 import { requireStaffSession } from '@/lib/staff-auth';
 import { listCourierOrders, listPharmacyPreparationOrders } from '@/lib/api-v1/staff-server';
-import type { CourierOrderStatus } from '@/lib/api-v1/staff-types';
+import { ApiV1Error } from '@/lib/api-v1/server';
+import type { CourierOrderList as CourierOrderListResponse } from '@/lib/api-v1/staff-types';
+import {
+  courierDaySummaryText, courierDayTitle, courierEmptyText, courierOrdersHref, courierStatusFilters,
+  dushanbeDay, parseCourierDay, parseCourierFilter, shiftDay,
+} from '@/lib/courier-day';
 import CourierOrderList from './CourierOrderList';
 import PharmacyOrderCard from './PharmacyOrderCard';
 import PharmacyAlertBanner from './PharmacyAlertBanner';
@@ -9,21 +14,13 @@ import NotificationPermission from './NotificationPermission';
 
 export const dynamic = 'force-dynamic';
 
-const filters: Array<{ value: CourierOrderStatus | ''; label: string }> = [
-  { value: '', label: 'Все' },
-  { value: 'pending', label: 'Новые' },
-  { value: 'confirmed', label: 'Собираются' },
-  { value: 'delivering', label: 'В пути' },
-  { value: 'delivered', label: 'Доставлены' },
-];
-
 // Request time for the first paint of the waiting badge (same pattern as admin/orders).
 function requestTime() {
   return new Date().getTime();
 }
 
 export default async function CourierOrdersPage({ searchParams }: {
-  searchParams: Promise<{ status?: string; cursor?: string }>;
+  searchParams: Promise<{ status?: string; date?: string; cursor?: string }>;
 }) {
   const { account, token } = await requireStaffSession();
   const params = await searchParams;
@@ -44,22 +41,52 @@ export default async function CourierOrdersPage({ searchParams }: {
       {response.page.next_cursor && <div className="staff-pagination"><Link href={`/staff/orders?cursor=${encodeURIComponent(response.page.next_cursor)}`}>Следующие заказы →</Link></div>}
     </section>;
   }
-  const status = filters.find((filter) => filter.value && filter.value === params.status)?.value || '';
+  const status = parseCourierFilter(params.status);
+  const day = parseCourierDay(params.date);
+  const today = dushanbeDay(new Date(requestTime()));
+  const yesterday = shiftDay(today, -1);
   const cursor = params.cursor && params.cursor.length <= 500 ? params.cursor : undefined;
-  const response = await listCourierOrders(token, { status: status || undefined, cursor, limit: 20 });
+  let response: CourierOrderListResponse;
+  let filterUnavailable = false;
+  try {
+    response = await listCourierOrders(token, { status: status || undefined, date: day, cursor, limit: 20 });
+  } catch (error) {
+    // A Lambda without the day / «Не доставлены» / «Отменённые» filters answers 400; show a notice, not a crash.
+    if (!(error instanceof ApiV1Error && error.status === 400 && (day || status === 'undelivered' || status === 'cancelled'))) throw error;
+    filterUnavailable = true;
+    response = { data: [], page: { next_cursor: null, has_more: false }, request_id: '' };
+  }
   const next = response.page.next_cursor;
-  const nextHref = next ? `/staff/orders?${new URLSearchParams({
-    ...(status ? { status } : {}), cursor: next,
-  })}` : null;
+  const nextHref = next ? courierOrdersHref({ status, date: day, cursor: next }) : null;
+  const days = [{ value: undefined, label: 'Все дни' }, { value: today, label: 'Сегодня' }, { value: yesterday, label: 'Вчера' }];
 
   return <section className="c-page">
     <div className="c-page-head"><h1>Заказы</h1></div>
-    <nav className="c-tabs" aria-label="Фильтр заказов">
-      {filters.map((filter) => <Link key={filter.value} className={status === filter.value ? 'active' : ''}
+    <div className="c-days">
+      <nav className="c-tabs" aria-label="День заказов">
+        {days.map((option) => <Link key={option.label} className={day === option.value ? 'active' : ''}
+          aria-current={day === option.value ? 'page' : undefined}
+          href={courierOrdersHref({ status, date: option.value })}>{option.label}</Link>)}
+      </nav>
+      <form className="c-day-picker" action="/staff/orders">
+        {status && <input type="hidden" name="status" value={status} />}
+        <label><span>Дата</span>
+          <input type="date" name="date" defaultValue={day ?? ''} min="2020-01-01" max={today} /></label>
+        <button className="c-btn c-btn-outline" type="submit">Показать</button>
+      </form>
+    </div>
+    {day && <div className="c-day-summary" role="status">
+      <strong>{courierDayTitle(day, today)}</strong>
+      {response.summary && <span>{courierDaySummaryText(response.summary)}</span>}
+    </div>}
+    <nav className="c-tabs" aria-label="Статус заказов">
+      {courierStatusFilters.map((filter) => <Link key={filter.value} className={status === filter.value ? 'active' : ''}
         aria-current={status === filter.value ? 'page' : undefined}
-        href={filter.value ? `/staff/orders?status=${filter.value}` : '/staff/orders'}>{filter.label}</Link>)}
+        href={courierOrdersHref({ status: filter.value, date: day })}>{filter.label}</Link>)}
     </nav>
-    <CourierOrderList orders={response.data} />
+    {filterUnavailable ? <div className="c-empty"><strong>Фильтр пока недоступен</strong>
+      <span>Этот фильтр заработает после обновления сервера. Откройте «Все дни».</span></div>
+      : <CourierOrderList orders={response.data} emptyText={courierEmptyText(status, day)} />}
     {nextHref && <Link className="c-btn c-btn-outline c-btn-wide c-more" href={nextHref}>Показать ещё</Link>}
   </section>;
 }
