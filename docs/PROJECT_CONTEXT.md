@@ -137,6 +137,11 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    `time_zone` and `summary` `{ total, delivered, undelivered, cancelled }` (`total` without cancelled) for the whole
    day, independent of the tab and page. Helpers in `src/lib/courier-day.ts`. Until the admin Lambda is redeployed
    the old Lambda answers 400 to these filters and the page shows «Фильтр пока недоступен» instead of crashing.
+   Above the list a bar chart «Заказы по дням» (`CourierDayChart.tsx`, styled like the admin `DailyChart`) shows
+   30 or 70 days (`?period=70`); bar height = orders without cancelled, split into delivered / not delivered, and
+   a bar click opens that day (`?date=`). Data: courier-only `GET /v1/staff/orders/daily?days=30|70` — one
+   parameterized `GROUP BY` over the Dushanbe day of `created_at`, every day returned with zeros, oldest first.
+   If that read fails (e.g. the old Lambda has no route) the chart shows a short notice and the list still works.
 
 Telegram notifier variables are configured only in AWS, never in Git:
 

@@ -143,6 +143,31 @@
 .c-day-summary strong { font-size: 16px; }
 .c-day-summary span { color: var(--c-muted); font-size: 14px; }
 
+/* Courier chart: orders per day, same look as the admin «Доставки по дням» */
+.c-chart { display: grid; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--c-line); border-radius: var(--c-radius); background: var(--c-card); }
+.c-chart-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.c-chart-head h2 { margin: 0; font-size: 17px; }
+.c-chart-head p { margin: 2px 0 0; color: var(--c-muted); font-size: 13px; }
+.c-chart-periods { display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: #eef1ef; }
+.c-chart-periods a { padding: 6px 12px; border-radius: 999px; color: #3b463f; text-decoration: none; font-size: 13px; font-weight: 700; }
+.c-chart-periods a.active { background: #fff; color: var(--c-ink); box-shadow: 0 1px 2px rgba(20,32,26,.12); }
+.c-chart-legend { display: flex; gap: 14px; color: var(--c-muted); font-size: 12px; }
+.c-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.c-chart-legend i { width: 10px; height: 10px; border-radius: 3px; }
+.c-bar-delivered { background: var(--c-ok); }
+.c-bar-open { background: var(--c-blue); }
+.c-bars-wrap { position: relative; padding: 16px 0 18px; }
+.c-axis-max { position: absolute; top: 0; left: 0; color: var(--c-muted); font-size: 11px; }
+.c-bars { display: flex; align-items: stretch; height: 150px; border-bottom: 1px solid #d5dbd7; background: linear-gradient(#eef1ef 1px, transparent 1px) 0 0 / 100% 50%; }
+.c-col { position: relative; flex: 1; min-width: 0; display: grid; grid-template-rows: 1fr 0; color: inherit; text-decoration: none; outline: none; }
+.c-col-plot { display: flex; align-items: flex-end; justify-content: center; height: 100%; border-radius: 4px 4px 0 0; }
+.c-col:hover .c-col-plot, .c-col:focus-visible .c-col-plot { background: rgba(20,32,26,.05); }
+.c-col.active .c-col-plot { background: rgba(196,22,28,.12); box-shadow: inset 0 -2px 0 var(--c-brand); }
+.c-stack { display: flex; flex-direction: column; gap: 1px; width: min(100%, 22px); border-radius: 3px 3px 0 0; overflow: hidden; }
+.c-stack > span { display: block; min-height: 2px; }
+.c-col-x { position: relative; top: 4px; height: 16px; color: var(--c-muted); font-size: 11px; text-align: center; white-space: nowrap; overflow: visible; }
+.c-col.active .c-col-x { color: var(--c-ink); font-weight: 800; }
+
 .c-list { display: grid; grid-template-columns: minmax(0,1fr); gap: 12px; }
 .c-empty { display: grid; gap: 4px; justify-items: center; padding: 40px 16px; border: 1px dashed #cfd6d1; border-radius: var(--c-radius); color: var(--c-muted); text-align: center; }
 .c-empty strong { color: var(--c-ink); font-size: 17px; }

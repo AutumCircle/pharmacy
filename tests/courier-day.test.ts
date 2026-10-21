@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  courierDaySummaryText, courierDayTitle, courierEmptyText, courierOrdersHref, courierStatusFilters,
-  dushanbeDay, parseCourierDay, parseCourierFilter, shiftDay,
+  courierChartBarText, courierChartLabel, courierDaySummaryText, courierDayTitle, courierEmptyText,
+  courierOrdersHref, courierStatusFilters, dushanbeDay, parseCourierDay, parseCourierFilter, parseCourierPeriod, shiftDay,
 } from '../src/lib/courier-day.ts';
 
 test('Dushanbe day starts five hours before UTC midnight', () => {
@@ -54,4 +54,31 @@ test('summary and empty texts', () => {
   assert.equal(courierEmptyText('', undefined), 'Новые заказы появятся здесь.');
   assert.equal(courierEmptyText('delivered', '2026-10-21'), 'В этот день таких заказов нет.');
   assert.equal(courierEmptyText('cancelled', undefined), 'Отменённых заказов нет.');
+});
+
+test('chart period is 30 unless 70 is asked; links keep the period', () => {
+  assert.equal(parseCourierPeriod(undefined), 30);
+  assert.equal(parseCourierPeriod('70'), 70);
+  assert.equal(parseCourierPeriod('365'), 30);
+  assert.equal(courierOrdersHref({ date: '2026-10-21', period: 70 }), '/staff/orders?date=2026-10-21&period=70');
+  assert.equal(courierOrdersHref({ period: 30 }), '/staff/orders');
+});
+
+test('chart labels count back from today: every 5th day for 30, every 10th for 70', () => {
+  const thirty = Array.from({ length: 30 }, (_, index) => courierChartLabel(shiftDay('2026-10-21', index - 29), index, 30));
+  assert.equal(thirty[29], '21');
+  assert.equal(thirty[24], '16');
+  assert.equal(thirty[28], '');
+  assert.equal(thirty.filter(Boolean).length, 6);
+  const seventy = Array.from({ length: 70 }, (_, index) => courierChartLabel(shiftDay('2026-10-21', index - 69), index, 70));
+  assert.equal(seventy[69], '21');
+  assert.equal(seventy[59], '11');
+  assert.equal(seventy.filter(Boolean).length, 7);
+});
+
+test('bar text names the day and its counts', () => {
+  assert.equal(courierChartBarText({ date: '2026-10-21', total: 4, delivered: 1, undelivered: 3, cancelled: 0 }, '2026-10-21'),
+    'Сегодня: заказов 4, доставлено 1, не доставлено 3');
+  assert.equal(courierChartBarText({ date: '2026-10-18', total: 0, delivered: 0, undelivered: 0, cancelled: 2 }, '2026-10-21'),
+    '18 октября 2026: заказов 0, доставлено 0, не доставлено 0, отменено 2');
 });

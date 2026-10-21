@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import type { ApiErrorResponse, ApiSuccessResponse } from './types';
-import type { CourierEarnings, CourierOrder, CourierOrderFilter, CourierOrderList, CourierOrderStatus, CreateStaffOrderRequest, PharmacyAnswersRequest, PharmacyAnswersResult, PharmacyAssemblyRequest, PharmacyAssemblyResult, PharmacyItemCollectRequest, PharmacyItemCollectResult, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
+import type { CourierEarnings, CourierOrder, CourierOrderFilter, CourierOrderList, CourierOrdersDaily, CourierOrderStatus, CreateStaffOrderRequest, PharmacyAnswersRequest, PharmacyAnswersResult, PharmacyAssemblyRequest, PharmacyAssemblyResult, PharmacyItemCollectRequest, PharmacyItemCollectResult, PharmacyPreparationOrderList, StaffAccount, StaffOrderCreated, StaffOrderMedicine } from './staff-types';
 import type { AdminCatalogStats, AdminMedicine, AdminNumberedListResponse } from './admin-types';
 import { ApiV1Error } from './server';
 
@@ -87,6 +87,10 @@ export function listCourierOrders(token: string, values: {
   if (values.cursor) params.set('cursor', values.cursor);
   params.set('limit', String(values.limit ?? 20));
   return request<CourierOrderList>(`orders?${params}`, { token });
+}
+
+export function getCourierOrdersDaily(token: string, days: 30 | 70) {
+  return request<CourierOrdersDaily>(`orders/daily?${new URLSearchParams({ days: String(days) })}`, { token });
 }
 
 export function addCourierOrderItems(token: string, orderId: string,

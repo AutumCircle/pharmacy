@@ -1458,6 +1458,46 @@ def list_courier_orders(query: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+COURIER_DAILY_PERIODS = frozenset({30, 70})
+
+
+def courier_orders_daily(query: dict[str, Any], today: date | None = None) -> dict[str, Any]:
+    """Order counts per Asia/Dushanbe day of `created_at` for the courier chart, oldest day first.
+
+    Every day of the period is present (zeros included); `total` excludes cancelled orders."""
+    if set(query) - {"days"}:
+        raise ContractError("VALIDATION_ERROR", "Unknown chart filter")
+    raw_days = query.get("days", "30")
+    if not isinstance(raw_days, str) or not raw_days.isdigit() or int(raw_days) not in COURIER_DAILY_PERIODS:
+        raise ContractError("VALIDATION_ERROR", "days must be 30 or 70")
+    period = int(raw_days)
+    last = today or datetime.now(ZoneInfo("Asia/Dushanbe")).date()
+    first = last - timedelta(days=period - 1)
+    start = datetime.combine(first, time.min, tzinfo=ZoneInfo("Asia/Dushanbe"))
+    end = datetime.combine(last + timedelta(days=1), time.min, tzinfo=ZoneInfo("Asia/Dushanbe"))
+    with transaction() as cur:
+        cur.execute(
+            f"""SELECT (({_ORDER_CREATED_TZ}) AT TIME ZONE 'Asia/Dushanbe')::date AS day,
+                       COUNT(*) FILTER (WHERE o.status <> 'cancelled') AS total,
+                       COUNT(*) FILTER (WHERE o.status = 'delivered') AS delivered,
+                       COUNT(*) FILTER (WHERE {_COURIER_UNDELIVERED_SQL}) AS undelivered,
+                       COUNT(*) FILTER (WHERE o.status = 'cancelled') AS cancelled
+                FROM orders o
+                WHERE o.deleted_at IS NULL
+                  AND ({_ORDER_CREATED_TZ}) >= %s AND ({_ORDER_CREATED_TZ}) < %s
+                GROUP BY 1""",
+            (start, end),
+        )
+        counted = {row["day"]: row for row in (dict(entry) for entry in cur.fetchall())}
+    keys = ("total", "delivered", "undelivered", "cancelled")
+    data = []
+    for offset in range(period):
+        day = first + timedelta(days=offset)
+        row = counted.get(day, {})
+        data.append({"date": day.isoformat(), **{key: int(row.get(key) or 0) for key in keys}})
+    return {"data": data, "days": period, "time_zone": "Asia/Dushanbe", "today": last.isoformat()}
+
+
 def add_courier_order_items(
     order_id: str, payload: dict[str, Any], idempotency_key: str, current_request_id: str,
     actor_id: str = "staff:3",
@@ -5140,6 +5180,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     return success_document(list_courier_orders(query), request=current_request_id)
                 return success_document(
                     list_pharmacy_preparation_orders(query, account["account_id"]), request=current_request_id,
+                )
+            if staff_method == "GET" and staff_path == "/v1/staff/orders/daily":
+                staff_accounts.session_account(event, courier=True)
+                return success_document(
+                    courier_orders_daily(event.get("queryStringParameters") or {}), request=current_request_id,
                 )
             if staff_method == "GET" and staff_path == "/v1/staff/earnings":
                 staff_accounts.session_account(event, courier=True)

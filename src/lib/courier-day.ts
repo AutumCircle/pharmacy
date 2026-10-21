@@ -48,10 +48,20 @@ export function courierDayTitle(day: string, today: string): string {
     .format(new Date(`${day}T00:00:00Z`)).replace(/\s*г\.$/, '');
 }
 
-export function courierOrdersHref(values: { status?: CourierOrderFilter | ''; date?: string; cursor?: string }): string {
+export type CourierChartPeriod = 30 | 70;
+
+/** Chart period from the URL: 70 or the default 30. */
+export function parseCourierPeriod(value: string | undefined): CourierChartPeriod {
+  return value === '70' ? 70 : 30;
+}
+
+export function courierOrdersHref(values: {
+  status?: CourierOrderFilter | ''; date?: string; cursor?: string; period?: CourierChartPeriod;
+}): string {
   const params = new URLSearchParams();
   if (values.date) params.set('date', values.date);
   if (values.status) params.set('status', values.status);
+  if (values.period === 70) params.set('period', '70');
   if (values.cursor) params.set('cursor', values.cursor);
   const query = params.toString();
   return query ? `/staff/orders?${query}` : '/staff/orders';
@@ -63,6 +73,20 @@ export function courierDaySummaryText(summary: CourierDaySummary): string {
     `не доставлено: ${summary.undelivered}`];
   if (summary.cancelled > 0) parts.push(`отменено: ${summary.cancelled}`);
   return parts.join(' · ');
+}
+
+/** X-axis day number under every 5th bar (every 10th for 70 days), counted back from today. */
+export function courierChartLabel(day: string, index: number, count: number): string {
+  const step = count > 31 ? 10 : 5;
+  return index % step === (count - 1) % step ? String(new Date(`${day}T00:00:00Z`).getUTCDate()) : '';
+}
+
+/** Spoken/tooltip text for one bar. */
+export function courierChartBarText(day: CourierDaySummary & { date: string }, today: string): string {
+  const parts = [`${courierDayTitle(day.date, today)}: заказов ${day.total}`, `доставлено ${day.delivered}`,
+    `не доставлено ${day.undelivered}`];
+  if (day.cancelled > 0) parts.push(`отменено ${day.cancelled}`);
+  return parts.join(', ');
 }
 
 /** Empty-list text for the chosen day and status. */

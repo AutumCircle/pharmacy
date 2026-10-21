@@ -606,6 +606,22 @@ class StaffTests(unittest.TestCase):
             self.assertEqual(response['statusCode'], 400)
             self.assertIn('VALIDATION_ERROR', response['body'])
 
+    def test_daily_chart_route_is_courier_only(self):
+        courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
+        self.cursor.fetchone.return_value = courier
+        with patch('backend.v1.admin_api.lambda_function.courier_orders_daily',
+                   return_value={'data': [], 'days': 30}) as daily:
+            event = self.event('/v1/staff/orders/daily', token=staff.create_session(courier))
+            event['queryStringParameters'] = {'days': '70'}
+            response = lambda_handler(event, None)
+        self.assertEqual(response['statusCode'], 200)
+        daily.assert_called_once_with({'days': '70'})
+        self.cursor.fetchone.return_value = self.account
+        with patch('backend.v1.admin_api.lambda_function.courier_orders_daily') as daily:
+            response = lambda_handler(self.event('/v1/staff/orders/daily', token=staff.create_session(self.account)), None)
+        self.assertEqual(response['statusCode'], 403)
+        daily.assert_not_called()
+
     def test_pharmacy_reads_preparation_list_but_cannot_change_status(self):
         courier = {**self.account, 'account_id': 3, 'catalog_access': False, 'role': 'courier'}
         self.cursor.fetchone.return_value = self.account

@@ -2,13 +2,13 @@ import json
 import sqlite3
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import Mock, patch
 
 from decimal import Decimal
 
 from backend.v1.admin_api.lambda_function import (
-    add_courier_order_items, add_manual_order_items, courier_earnings, list_courier_orders, update_courier_order_status,
+    add_courier_order_items, add_manual_order_items, courier_earnings, courier_orders_daily, list_courier_orders, update_courier_order_status,
     get_courier_order, update_courier_order_checklist, update_courier_order_customer, update_courier_order_item,
     update_order_delivery, update_order_item_price,
     COURIER_CHECKLIST_MANUAL_STEPS, COURIER_CHECKLIST_MARKER, _COURIER_CHECKLIST_STEP_SQL, _COURIER_ORDER_SELECT,
@@ -250,6 +250,41 @@ class CourierOrderTests(unittest.TestCase):
         self.assertEqual(cursor.execute.call_count, 1)
         self.assertNotIn('summary', result)
         self.assertNotIn('date', result)
+
+    def test_daily_chart_fills_every_dushanbe_day_oldest_first(self):
+        cursor = Mock()
+        cursor.fetchall.return_value = [
+            {'day': date(2026, 10, 21), 'total': 4, 'delivered': 1, 'undelivered': 3, 'cancelled': 2},
+            {'day': date(2026, 9, 22), 'total': 1, 'delivered': 1, 'undelivered': 0, 'cancelled': 0},
+        ]
+        with self._tx(cursor):
+            result = courier_orders_daily({'days': '30'}, today=date(2026, 10, 21))
+        self.assertEqual(len(result['data']), 30)
+        self.assertEqual(result['data'][0], {'date': '2026-09-22', 'total': 1, 'delivered': 1,
+                                             'undelivered': 0, 'cancelled': 0})
+        self.assertEqual(result['data'][1]['total'], 0)
+        self.assertEqual(result['data'][-1], {'date': '2026-10-21', 'total': 4, 'delivered': 1,
+                                              'undelivered': 3, 'cancelled': 2})
+        self.assertEqual((result['days'], result['today'], result['time_zone']), (30, '2026-10-21', 'Asia/Dushanbe'))
+        sql, args = cursor.execute.call_args.args
+        self.assertEqual(args, (datetime(2026, 9, 21, 19, tzinfo=timezone.utc),
+                                datetime(2026, 10, 21, 19, tzinfo=timezone.utc)))
+        self.assertIn('GROUP BY 1', sql)
+        self.assertIn("AT TIME ZONE 'Asia/Dushanbe')::date AS day", sql)
+        self.assertIn('o.deleted_at IS NULL', sql)
+
+    def test_daily_chart_defaults_to_30_and_accepts_70_only(self):
+        cursor = Mock()
+        cursor.fetchall.return_value = []
+        with self._tx(cursor):
+            self.assertEqual(len(courier_orders_daily({}, today=date(2026, 10, 21))['data']), 30)
+            result = courier_orders_daily({'days': '70'}, today=date(2026, 10, 21))
+            self.assertEqual(len(result['data']), 70)
+            self.assertEqual(result['data'][0]['date'], '2026-08-13')
+            for bad in ({'days': '7'}, {'days': '-30'}, {'days': '30 '}, {'days': 30}, {'limit': '30'}):
+                with self.assertRaises(ContractError, msg=repr(bad)):
+                    courier_orders_daily(bad, today=date(2026, 10, 21))
+        self.assertEqual(cursor.execute.call_count, 2)
 
     def test_invalid_date_is_rejected_before_database(self):
         cursor = Mock()

@@ -53,6 +53,15 @@ export type CourierOrderFilter = CourierOrderStatus | 'undelivered';
 /** Counts for the selected Asia/Dushanbe day; `total` excludes cancelled orders. */
 export type CourierDaySummary = { total: number; delivered: number; undelivered: number; cancelled: number };
 
+/** `GET /v1/staff/orders/daily`: every day of the period, oldest first. */
+export type CourierOrdersDaily = {
+  data: Array<CourierDaySummary & { date: string }>;
+  days: 30 | 70;
+  today: string;
+  time_zone: 'Asia/Dushanbe';
+  request_id: string;
+};
+
 /** A pharmacist's answer about one order item (job 010). */
 export type PharmacyAnswer = 'available' | 'unavailable' | 'price_differs';
 
