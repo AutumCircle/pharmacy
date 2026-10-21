@@ -409,7 +409,8 @@ label.c-check-row { cursor: pointer; }
 /* ---- Job 011: pharmacy assembly marks (pharmacy card + courier screens) ---- */
 .pa-assembly { align-items: center; }
 .pa-assembly-mark { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 100%; color: var(--c-muted); font-size: 14px; font-weight: 700; }
-.pa-btn-start { background: var(--c-card); border-color: var(--c-ok); color: var(--c-ok); }
+/* Job 015: the one «Собран» under the pharmacy table, full width. */
+.pa-btn-assembled { flex-basis: 100%; font-size: 17px; }
 .c-assembly-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .c-assembly-line { padding: 8px 12px; border-radius: 10px; font-size: 15px; font-weight: 750; overflow-wrap: anywhere; }
 .c-assembly-waiting { background: var(--c-bg); color: var(--c-muted); }

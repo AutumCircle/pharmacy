@@ -525,6 +525,7 @@ def update_order_notification_settings(payload: dict[str, Any], actor_id: str, c
 
 
 # Job 013: a pharmacy's price change / routing to «Ватан 2» is announced to the owner and the courier only.
+# Job 015: so is «Заказ собран» (order:{id}:assembled:{request_id}).
 _CHANGE_EVENT_RECIPIENTS = ("owner_telegram", "courier_telegram")
 
 
@@ -532,7 +533,7 @@ def claim_order_notification(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict) or set(payload) != {"event_key", "recipient"}:
         raise ContractError("VALIDATION_ERROR", "Неверное событие уведомления")
     event_key, recipient = payload["event_key"], payload["recipient"]
-    match = (re.fullmatch(r"order:([1-9][0-9]*):(created|pharmacy-change:req_[0-9a-f]{32})", event_key)
+    match = (re.fullmatch(r"order:([1-9][0-9]*):(created|(?:pharmacy-change|assembled):req_[0-9a-f]{32})", event_key)
              if isinstance(event_key, str) else None)
     if not match or recipient not in NOTIFICATION_CHANNELS[:3]:
         raise ContractError("VALIDATION_ERROR", "Неверное событие уведомления")
@@ -1792,12 +1793,14 @@ def list_pharmacy_preparation_orders(query: dict[str, Any], pharmacy_id: int) ->
 
 
 PHARMACY_ANSWERS = ("available", "unavailable", "price_differs")
-# Job 011 pharmacy assembly marks: forward only, none -> assembling -> assembled.
+# Job 011 pharmacy assembly marks: forward only, none -> assembling -> assembled. Job 015: one «Собран»
+# button, so none -> assembled directly; «assembling» stays for old clients and the job 014 reopen.
 ASSEMBLY_STATES = ("assembling", "assembled")
 # Rework 1 (owner, 2026-10-16): pharmacies assemble while the order is «Новый», before the courier's call;
 # confirmed orders still accept marks (orders confirmed before this change).
 ASSEMBLY_ORDER_STATUSES = ("pending", "confirmed")
-_ASSEMBLY_TRANSITIONS = {(None, "assembling"), ("assembling", "assembled")}
+_ASSEMBLY_TRANSITIONS = {(None, "assembling"), (None, "assembled"), ("assembling", "assembled")}
+ASSEMBLY_ALREADY_DONE_MESSAGE = "Заказ уже отмечен «Собран»"
 PHARMACY_ANSWER_MAX_ITEMS = 50
 PHARMACY_PROBLEM_MIN, PHARMACY_PROBLEM_MAX = 3, 300
 _ORDER_ITEM_ID_MAX = 9223372036854775807
@@ -1902,6 +1905,12 @@ def answer_pharmacy_order_items(
         if order["status"] != "pending":
             raise ContractError("ORDER_STATUS_CONFLICT",
                                 "Ответить можно только по новому заказу", http_status=409)
+        # Job 015: after «Собран» this pharmacy's part is read-only, so the courier's «Заказ собран» message
+        # stays true. The job 014 reopen (routing to «Ватан 2») sets the part back to «Собирается».
+        cur.execute("""SELECT state FROM order_pharmacy_assembly WHERE order_id = %s AND pharmacy_id = %s""",
+                    (order["id"], pharmacy_id))
+        if any(row.get("state") == "assembled" for row in cur.fetchall()):
+            raise ContractError("ASSEMBLY_STATE_CONFLICT", ASSEMBLY_ALREADY_DONE_MESSAGE, http_status=409)
         changes: list[dict[str, Any]] = []
         routed: list[int] = []
         unavailable_both: list[int] = []
@@ -2221,14 +2230,17 @@ def _assembly_projection(order_id: str, pharmacy_id: int, row: Any) -> dict[str,
 
 
 def mark_pharmacy_assembly(order_id: str, payload: Any, pharmacy_id: int, current_request_id: str) -> dict[str, Any]:
-    """«Начать сборку» / «Сборка сделана» for this pharmacy's part of a website order (job 011, rework 1).
+    """«Собран» for this pharmacy's part of a website order (job 011, rework 1, job 015).
 
     Allowed while the order is «Новый» (assembly happens before the courier's call) or already confirmed.
     pharmacy_id comes from the HMAC staff session only. The pharmacy must hold at least one item it did
-    not answer «Нет в наличии». Transitions are forward only (none -> assembling -> assembled); repeating
-    the current state is a no-op (no writes, no audit). «Сборка сделана» on a «Новый» order records
-    «В наличии» for this pharmacy's still unanswered items (the rest were collected), so the courier gets a
-    confirmed sum. orders.status and order_status_history are never touched.
+    not answer «Нет в наличии». Transitions are forward only (none -> assembling -> assembled, and since
+    job 015 none -> assembled); repeating the current state is a no-op (no writes, no audit, no
+    notification). «Собран» on a «Новый» order records «В наличии» for this pharmacy's still unanswered
+    items (not marked = available), so the courier gets a confirmed sum. When this «Собран» completes the
+    order's assembly (every assembly pharmacy is «Собран», computed in the same transaction) the result
+    carries `_notification` (owner/courier Telegram «Заказ собран», no client data); the Next.js route
+    strips it. orders.status and order_status_history are never touched.
     """
     if pharmacy_id not in (1, 2):
         raise ContractError("FORBIDDEN", "Доступ только для аптеки", http_status=403)
@@ -2236,7 +2248,8 @@ def mark_pharmacy_assembly(order_id: str, payload: Any, pharmacy_id: int, curren
     lookup, lookup_values = _order_lookup(order_id)
     actor = f"staff:{pharmacy_id}"
     with transaction() as cur:
-        cur.execute(f"""SELECT id, status, created_by_staff_account_id, fulfillment_pharmacy_id
+        cur.execute(f"""SELECT id, public_id, order_reference, status, order_total, created_by_staff_account_id,
+                               fulfillment_pharmacy_id
                         FROM orders WHERE {lookup} AND deleted_at IS NULL FOR UPDATE""", lookup_values)
         order = cur.fetchone()
         if not order or order["created_by_staff_account_id"] is not None:
@@ -2266,9 +2279,7 @@ def mark_pharmacy_assembly(order_id: str, payload: Any, pharmacy_id: int, curren
         if current_state == target:
             return _assembly_projection(order_id, pharmacy_id, current)
         if (current_state, target) not in _ASSEMBLY_TRANSITIONS:
-            message = ("Сначала нажмите «Начать сборку»" if current_state is None
-                       else "Заказ уже отмечен «Собран»")
-            raise ContractError("ASSEMBLY_STATE_CONFLICT", message, http_status=409)
+            raise ContractError("ASSEMBLY_STATE_CONFLICT", ASSEMBLY_ALREADY_DONE_MESSAGE, http_status=409)
         cur.execute("""INSERT INTO order_pharmacy_assembly
                            (order_id, pharmacy_id, state, assembled_at, updated_by)
                        VALUES (%s, %s, %s, CASE WHEN %s = 'assembled' THEN now() END, %s)
@@ -2296,7 +2307,52 @@ def mark_pharmacy_assembly(order_id: str, payload: Any, pharmacy_id: int, curren
         _write_admin_audit(cur, actor_id=actor, action="pharmacy.order.assembly_marked",
                            resource_type="order", resource_id=order_id, request=current_request_id,
                            details=details)
-    return _assembly_projection(order_id, pharmacy_id, saved)
+        notification = (_order_assembled_notification(cur, order, order_id, pharmacy_id, current_request_id)
+                        if target == "assembled" else None)
+    result = _assembly_projection(order_id, pharmacy_id, saved)
+    if notification:
+        result["_notification"] = notification
+    return result
+
+
+def _order_assembled_notification(
+    cur: Any, order: Any, order_id: str, pharmacy_id: int, current_request_id: str,
+) -> dict[str, Any] | None:
+    """Job 015: the owner/courier Telegram payload «Заказ собран» when this «Собран» completed the whole
+    order's assembly (every assembly pharmacy is «Собран»; same rule as _require_assembly_complete), read
+    in the marking transaction. Per pharmacy: the medicines (name and quantity) lying there; `missing` are
+    the items their current pharmacy answered «Нет в наличии» (at «Ватан 2»: missing in both). Never the
+    client name, phone, address, landmark or comment. None while another pharmacy still has to assemble."""
+    cur.execute(_ORDER_ASSEMBLY_PARTS_SQL, (order["id"], order["id"]))
+    parts = [dict(row) for row in cur.fetchall()]
+    if not parts or any(row.get("state") != "assembled" for row in parts):
+        return None
+    cur.execute(f"""SELECT oi.id, {_ITEM_PHARMACY_SQL} AS pharmacy_id, oi.medicine_name, oi.quantity,
+                           cur.answer
+                    FROM order_items oi
+                    JOIN orders o ON o.id = oi.order_id
+                    LEFT JOIN order_item_pharmacy_answers cur
+                           ON cur.order_item_id = oi.id AND cur.pharmacy_id = {_ITEM_PHARMACY_SQL}
+                    WHERE oi.order_id = %s ORDER BY oi.id""", (order["id"],))
+    by_pharmacy: dict[int, list[dict[str, Any]]] = {int(row["pharmacy_id"]): [] for row in parts}
+    missing: list[dict[str, Any]] = []
+    for item in cur.fetchall():
+        entry = {"medicine_name": item.get("medicine_name"), "quantity": _decimal_text(item.get("quantity"))}
+        if item.get("answer") == "unavailable":
+            missing.append(entry)
+        else:
+            by_pharmacy.setdefault(int(item["pharmacy_id"]), []).append(entry)
+    return {
+        "notification_kind": "pharmacy_order_assembled",
+        "admin_order_id": int(order["id"]),
+        "order_id": order.get("public_id") or order_id,
+        "order_reference": order.get("order_reference"),
+        "pharmacy_id": pharmacy_id,
+        "event_key": f"order:{int(order['id'])}:assembled:{current_request_id}",
+        "parts": [{"pharmacy_id": key, "items": items} for key, items in sorted(by_pharmacy.items()) if items],
+        "missing": missing,
+        "client_total": _decimal_text(order.get("order_total")),
+    }
 
 
 def courier_earnings(query: dict[str, Any]) -> dict[str, Any]:

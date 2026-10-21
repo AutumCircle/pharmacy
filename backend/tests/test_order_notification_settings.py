@@ -162,6 +162,67 @@ class NotificationSettingsTests(unittest.TestCase):
                 self.assertEqual((raised.exception.code, raised.exception.http_status), ('VALIDATION_ERROR', 400))
                 cursor.execute.assert_not_called()
 
+    # --- job 015: «Заказ собран» events -------------------------------------------------------
+
+    ASSEMBLED_KEY = 'order:17:assembled:req_' + 'cd' * 16
+
+    def test_assembled_event_is_claimed_for_owner_and_courier(self):
+        now = datetime.now(timezone.utc)
+        for recipient in ('owner_telegram', 'courier_telegram'):
+            with self.subTest(recipient=recipient):
+                cursor = Mock()
+                cursor.fetchone.side_effect = [
+                    {'courier_enabled': True, 'courier_enabled_since': now - timedelta(days=1),
+                     'order_created_at': now, 'policies': {}, 'revision': 1},
+                    {'event_key': self.ASSEMBLED_KEY},
+                ]
+                with self._transaction(cursor):
+                    result = claim_order_notification({'event_key': self.ASSEMBLED_KEY, 'recipient': recipient})
+                self.assertTrue(result['claimed'])
+                self.assertEqual(result['fields'], default_policies()[recipient])
+                insert = cursor.execute.call_args_list[1]
+                self.assertEqual(insert.args[1], (self.ASSEMBLED_KEY, recipient))
+                self.assertEqual(cursor.execute.call_args_list[0].args[1], (17,))
+        self.assertLessEqual(len('order:2147483647:assembled:req_' + 'cd' * 16), 100)
+
+    def test_assembled_event_second_claim_and_disabled_courier_send_nothing(self):
+        now = datetime.now(timezone.utc)
+        cursor = Mock()
+        cursor.fetchone.side_effect = [{'courier_enabled': True, 'courier_enabled_since': now - timedelta(days=1),
+                                        'order_created_at': now, 'policies': {}, 'revision': 1}, None]
+        with self._transaction(cursor):
+            second = claim_order_notification({'event_key': self.ASSEMBLED_KEY, 'recipient': 'courier_telegram'})
+        self.assertEqual(second, {'claimed': False, 'fields': {}})
+        cursor = Mock()
+        cursor.fetchone.return_value = {'courier_enabled': False, 'courier_enabled_since': now,
+                                        'order_created_at': now, 'policies': {}, 'revision': 1}
+        with self._transaction(cursor):
+            disabled = claim_order_notification({'event_key': self.ASSEMBLED_KEY, 'recipient': 'courier_telegram'})
+        self.assertFalse(disabled['claimed'])
+        self.assertFalse(any('INSERT' in call.args[0] for call in cursor.execute.call_args_list))
+
+    def test_assembled_event_rejects_pharmacy_recipient_and_malformed_keys(self):
+        bad = [
+            (self.ASSEMBLED_KEY, 'pharmacy_telegram'),
+            (self.ASSEMBLED_KEY, 'pharmacy_web'),
+            ('order:17:assembled', 'owner_telegram'),
+            ('order:17:assembled:', 'owner_telegram'),
+            ('order:17:assembled:req_123', 'courier_telegram'),
+            ('order:17:assembled:req_' + 'CD' * 16, 'owner_telegram'),
+            ('order:17:assembled:req_' + 'cd' * 16 + '0', 'owner_telegram'),
+            ('order:0:assembled:req_' + 'cd' * 16, 'owner_telegram'),
+            ('order:17:assembly:req_' + 'cd' * 16, 'owner_telegram'),
+            ('order:17:created:assembled:req_' + 'cd' * 16, 'owner_telegram'),
+            ('order:17:assembled:req_' + 'cd' * 16 + '\n', 'courier_telegram'),
+        ]
+        for event_key, recipient in bad:
+            with self.subTest(event_key=event_key, recipient=recipient):
+                cursor = Mock()
+                with self._transaction(cursor), self.assertRaises(ContractError) as raised:
+                    claim_order_notification({'event_key': event_key, 'recipient': recipient})
+                self.assertEqual((raised.exception.code, raised.exception.http_status), ('VALIDATION_ERROR', 400))
+                cursor.execute.assert_not_called()
+
     def test_created_event_still_accepts_pharmacy_recipient(self):
         now = datetime.now(timezone.utc)
         cursor = Mock()

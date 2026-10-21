@@ -117,7 +117,14 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    «Собран» mark of «Ватан 2» is reopened in the same transaction (audit `pharmacy.order.assembly_reopened`).
    Both pharmacies use one order table (`PharmacyItemRow`); a «Ватан 2» «Нет в наличии» is announced to the
    owner/courier as «нет в наличии в обеих аптеках».
-9. Job 016: order history («История») without a new table — the admin Lambda builds `timeline` from
+9. Job 015: one assembly panel for «Ватан 1» and «Ватан 2». Each own row has only «Нет в наличии» and the
+   tap-to-edit price; one «Собран» under the table (Lambda `none → assembled`; not marked = available). After
+   «Собран» the pharmacy's part is read-only (`pharmacy-answers` → 409) until the job 014 reopen. When a «Собран»
+   completes the whole order's assembly, the admin Lambda adds `_notification`
+   (`notification_kind: "pharmacy_order_assembled"`, event key `order:{id}:assembled:{request_id}`, no client
+   data) to the `assembly` response; Next.js sends it in `after()` and the notifier tells the owner and the courier
+   (never the pharmacy) where the order lies: «лежит в Ватан 1 / Ватан 2» or «В Ватан 1: … / В Ватан 2: …».
+10. Job 016: order history («История») without a new table — the admin Lambda builds `timeline` from
    `orders.created_at`, `order_status_history` and `admin_audit_log` (`backend/v1/shared/order_timeline.py`, whitelisted
    keys only, newest 200) for `GET /v1/admin/orders/{id}` and a filtered short one for the courier's
    `GET /v1/staff/orders/{id}`; Russian text in `src/lib/order-timeline.ts`. Needs the admin Lambda redeployed.

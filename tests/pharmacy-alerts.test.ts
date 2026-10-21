@@ -47,8 +47,8 @@ test('an order keeps alerting while needs_attention stays true and stops once as
   assert.equal(attentionCount(assembled), 0);
 });
 
-test('attentionBannerText says «Сборка сделана» and nothing for zero', () => {
-  assert.equal(attentionBannerText(2), 'Заказов ждут «Сборка сделана»: 2');
+test('attentionBannerText says «Собран» (job 015) and nothing for zero', () => {
+  assert.equal(attentionBannerText(2), 'Заказов ждут «Собран»: 2');
   assert.equal(attentionBannerText(0), null);
 });
 

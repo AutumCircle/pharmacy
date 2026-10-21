@@ -2,10 +2,11 @@ import type {
   CourierAssemblyMark, CourierAssemblyState, PharmacyAssemblyRequest, PharmacyAssemblyState, PharmacyItemCollectRequest,
 } from './api-v1/staff-types';
 
-// Pharmacy assembly marks (job 011 + rework 1): «Начать сборку» -> «Собирается», «Сборка сделана» ->
-// «Собран», per (order, pharmacy), while the order is «Новый» (or already confirmed). «Ватан 2» may instead
-// mark each routed item «Собрано»; its part follows the items. The courier's «Согласовано» waits until every
-// pharmacy holding items is «Собран». Customer statuses and /tracking never change. Lambda is the authority.
+// Pharmacy assembly marks per (order, pharmacy), while the order is «Новый» (or already confirmed).
+// Job 015: one «Собран» button for both pharmacies (none -> assembled); «Собирается» remains only for old
+// clients and the job 014 reopen of «Ватан 2». After «Собран» the pharmacy's part is read-only. The courier's
+// «Согласовано» waits until every pharmacy holding items is «Собран». Customer statuses and /tracking never
+// change. Lambda is the authority.
 
 export const ASSEMBLY_STATES: readonly PharmacyAssemblyState[] = ['assembling', 'assembled'];
 
@@ -64,17 +65,18 @@ type PharmacyAssemblyInput = { assembly_available?: boolean; assembly_state?: st
 
 export type AssemblyAction = { state: PharmacyAssemblyState; label: string };
 
+/** Job 015: the one button under the pharmacy table. */
+export const ASSEMBLED_ACTION: AssemblyAction = { state: 'assembled', label: 'Собран' };
+
 /**
- * The next button on the pharmacy card: «Начать сборку», then «Сборка сделана», then nothing (the chip
- * says «Собран»). Null when the Lambda did not offer assembly (not confirmed, nothing to assemble, or an
- * old Lambda without the field).
+ * Job 015: the button on the pharmacy card is always «Собран» until the part is «Собран» (then only the
+ * chip). Null when the Lambda did not offer assembly (nothing to assemble, a closed order, or an old Lambda
+ * without the field).
  */
 export function nextAssemblyAction(order: PharmacyAssemblyInput): AssemblyAction | null {
   if (order.assembly_available !== true) return null;
-  const state = order.assembly_state ?? null;
-  if (state === null) return { state: 'assembling', label: 'Начать сборку' };
-  if (state === 'assembling') return { state: 'assembled', label: 'Сборка сделана' };
-  return null;
+  if (order.assembly_state === 'assembled') return null;
+  return { ...ASSEMBLED_ACTION };
 }
 
 type CourierAssemblyInput = {
