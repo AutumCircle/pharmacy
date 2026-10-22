@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from backend.v1.public_api.lambda_function import search_medicines
 from backend.v1.shared.search_ranking import (
+    did_you_mean,
     edit_distances,
     normalize,
     query_variants,
@@ -65,6 +66,17 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(retrieval_terms(query_variants("Now"), raw_query="Now")[0], "now")
 
 
+    def test_retrieval_sends_every_latin_word_as_typed(self):
+        terms = retrieval_terms(query_variants("natures made"), raw_query="natures made")
+        self.assertEqual(terms[:2], ["natures", "made"])
+        self.assertNotIn("таб", retrieval_terms(query_variants("now таб"), raw_query="now таб"))
+
+    def test_did_you_mean_keeps_customer_spelling(self):
+        self.assertEqual(did_you_mean("natures made", "Nature Made Магнезиум 250 мг №100 тб"), "Nature made")
+        self.assertIsNone(did_you_mean("nature made", "Nature Made Магнезиум 250 мг №100 тб"))
+        self.assertEqual(did_you_mean("осфикс 75", "Освикс (клопидогрель) 75 мг №30 тб"), "Освикс 75")
+
+
 class DistanceTests(unittest.TestCase):
     def test_common_russian_confusions_are_cheaper(self):
         self.assertEqual(edit_distances("кетанол", "кетонал")[0], 1.0)
@@ -109,6 +121,19 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(_ranked_names("валерьянка")[0], "Валериана экстракт 20мг таб №50")
         self.assertEqual(_ranked_names("амоксицилин 500")[0], "Амоксициллин 500мг капс №16")
         self.assertEqual(_ranked_names("цефтриоксон")[0], "Цефтриаксон 1г пор д/ин фл №1")
+
+    def test_whole_latin_brand_is_found_not_only_one_product_line(self):
+        brand = [
+            "Nature Made Магнезиум 250 мг №100 тб",
+            "Nature Made Витамин D3 1000 МЕ №100",
+            "NATURE MADE Омега-3 1200мг №100",
+            "Nature Made Мультивитамины для женщин №90",
+        ]
+        rows = _rows(brand + ["Мадерал таб", "Натуре гель"])
+        for query in ("Nature Made", "natures made", "nature made омега"):
+            names = [row["name"] for row in rank_candidates(query, rows)]
+            self.assertTrue(set(names) <= set(brand), query)
+        self.assertEqual(len(rank_candidates("natures made", rows)), 4)
 
     def test_similar_suffix_brands_do_not_outrank_typo(self):
         names = [row["name"] for row in rank_candidates("Осфикс", _rows([

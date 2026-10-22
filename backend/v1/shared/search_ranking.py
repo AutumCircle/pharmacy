@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Iterable, Sequence
 
 
@@ -105,10 +106,25 @@ def normalize(text: str) -> str:
 
 
 def tokenize(text: str) -> list[str]:
+    return list(_tokenize(text))
+
+
+# Catalogue names and their words repeat across requests on a warm Lambda, so the
+# pure-Python comparisons below are cached; this makes ranking several times faster.
+@lru_cache(maxsize=20_000)
+def _tokenize(text: str) -> tuple[str, ...]:
     tokens: list[str] = []
     for raw in _TOKEN_RE.findall(normalize(text)):
         tokens.extend(part for part in _LETTER_DIGIT_RE.split(raw) if part)
-    return tokens
+    return tuple(tokens)
+
+
+def _raw_words(text: str) -> list[str]:
+    """Words as typed (lower-case, ё folded, no transliteration), split like tokenize()."""
+    words: list[str] = []
+    for raw in _TOKEN_RE.findall(" ".join(text.split()).casefold().translate(_CYRILLIC_FOLD)):
+        words.extend(part for part in _LETTER_DIGIT_RE.split(raw) if part)
+    return words
 
 
 def _has_latin(text: str) -> bool:
@@ -162,11 +178,13 @@ def retrieval_terms(variants: Sequence[Sequence[QueryToken]], limit: int = 24, r
     Generic words and numbers are left out whenever the query has a real
     medicine word, otherwise "таб" alone would flood the candidate pool.
     """
-    # Keep Latin brand names in the SQL recall pool. Ranking transliterates
-    # "box" to "бокс", but a catalogue row named "BOX ..." would otherwise
-    # never reach the Python ranker because SQL searches the original name.
-    terms = [token for token in _TOKEN_RE.findall(raw_query.casefold())
-             if len(token) >= 2 and any("a" <= char <= "z" for char in token)]
+    # Keep the words as typed in the SQL recall pool. Ranking transliterates
+    # "box" to "бокс", but a catalogue row named "BOX ..." / "Nature Made ..."
+    # would otherwise never reach the Python ranker because SQL searches the
+    # original name. Applies to every Latin word, not only known brands.
+    terms = [token for token in _raw_words(raw_query)
+             if len(token) >= 2 and not token.isdigit() and token not in GENERIC_WORDS
+             and any("a" <= char <= "z" for char in token)]
     for tokens in variants:
         significant = [token for token in tokens if token.is_significant]
         for token in significant or tokens:
@@ -223,6 +241,7 @@ def _allowed_errors(length: int) -> float:
     return 2.5
 
 
+@lru_cache(maxsize=200_000)
 def word_match(token: str, word: str) -> float:
     """Score in [0, 1] of how well one query token matches one name word."""
     if token == word:
@@ -252,14 +271,15 @@ class RankedName:
     matched_all: bool
 
 
-def _name_words(name: str) -> list[str]:
-    words = tokenize(name)
+@lru_cache(maxsize=20_000)
+def _name_words(name: str) -> tuple[str, ...]:
+    words = _tokenize(name)
     # "Но-шпа" is also matched as "ношпа", "Аква детрим" as "аквадетрим".
-    joined = [words[i] + words[i + 1] for i in range(len(words) - 1) if not words[i + 1].isdigit()]
+    joined = tuple(words[i] + words[i + 1] for i in range(len(words) - 1) if not words[i + 1].isdigit())
     return words + joined
 
 
-def _score_variant(tokens: Sequence[QueryToken], words: list[str], plain_words: int, normalized_name: str) -> RankedName:
+def _score_variant(tokens: Sequence[QueryToken], words: Sequence[str], plain_words: int, normalized_name: str) -> RankedName:
     total_weight = sum(token.weight for token in tokens)
     gained = 0.0
     matched_all = True
@@ -317,14 +337,19 @@ def rank_candidates(query: str, rows: Iterable[dict[str, Any]], max_tokens: int 
 
 
 def did_you_mean(query: str, name: str) -> str | None:
-    """Corrected query built from the words of the best match, if the query had a typo."""
+    """Corrected query built from the words of the best match, if the query had a typo.
+
+    Unchanged words keep the customer's own spelling, so "natures made" becomes
+    "Nature Made" and never a half-transliterated "Nature маде".
+    """
     words = [word for word in re.findall(r"[^\W\d_]+", name) if len(word) >= 2]
     normalized_words = [normalize(word) for word in words]
     corrected: list[str] = []
     changed = False
-    for token in tokenize(query):
+    for raw in _raw_words(query):
+        token = normalize(raw)
         if token.isdigit() or token in GENERIC_WORDS or len(token) < 4:
-            corrected.append(token)
+            corrected.append(raw)
             continue
         best_score, best_word = 0.0, None
         for original, normalized in zip(words, normalized_words):
@@ -332,8 +357,8 @@ def did_you_mean(query: str, name: str) -> str | None:
             if score > best_score:
                 best_score, best_word = score, original
         if best_word and best_score < 0.9:
-            corrected.append(best_word.capitalize())
+            corrected.append(best_word if best_word.isupper() and len(best_word) <= 4 else best_word.capitalize())
             changed = True
         else:
-            corrected.append(token)
+            corrected.append(raw)
     return " ".join(corrected) if changed else None
