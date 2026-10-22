@@ -893,3 +893,28 @@ Admin (bearer): `GET/POST /v1/admin/collections`, `PATCH/DELETE /v1/admin/collec
 `POST /v1/admin/collections/resolve-products`, `GET /v1/admin/collection-stats?from&to&slug`.
 Saving validates that every product ID exists (`422 PRODUCTS_NOT_FOUND`). Order list/detail include
 the attribution fields. Cookies: `vatan_vid` (random visitor id, 30 days), `vatan_src` (7 days).
+
+## Read-only Oracle shadow mirror (admin)
+
+All routes require the existing admin identity in Lambda and an admin session in
+the Next.js server layer. Agent bearer credentials are never used by this UI.
+Responses use `{data, request_id}` and `Cache-Control: no-store`.
+
+| GET route | Query / response data |
+| --- | --- |
+| `/v1/admin/pharmacy-mirror/status` | No query parameters. Pharmacy 1 connection/batch timestamps, last batch metadata, `checked_at`, `freshness`, and all 12 tables with `row_count`, `max_change_id`, `last_received_at`, `source_generated_at`, `freshness`. |
+| `/v1/admin/pharmacy-mirror/products` | `q` (max 120 characters), `mode=auto\|name\|id\|barcode`, `page=1..9999`, `limit=25` only. Returns `items,total,page,limit,mode`. Name substring: at least 2 characters, literal `%`, `_`, `\`. Numeric auto mode finds exact PRODUCT_ID, product SCAN_CODE or batch INCOME_SCAN_CODE. |
+| `/v1/admin/pharmacy-mirror/products/{product_id}` | Digit ID, up to 18 characters. `stock_page` and `income_page` (1..9999, independent 25-row pages). Product, six dictionary lookups, full stock aggregate, paginated stock and income rows, safe Oracle fields, timestamps/change IDs, `checked_at`, explicit unavailable site comparison. |
+
+Unknown parameters/invalid pagination return 400; missing admin identity returns
+403; missing product returns 404. Mirror mutations return 405 after authorization.
+Stock is `SUM(PRODUCT_COUNT_SKLAD)` without subtracting reserves or converting units.
+Missing stock rows differ from zero. Malformed numeric source fields are counted
+and surfaced instead of silently publishing a partial aggregate. Price/date fields
+keep their Oracle names until their business meaning has been checked by the owner.
+Per-row JSON contains only explicitly allowed product/stock/income scalar fields.
+
+The UI is `/admin/pharmacy-mirror`. It refreshes visible tabs every 60 seconds;
+table freshness measures last changed-row reception, while connection freshness
+uses `pharmacy_sources.last_seen_at` (stale after 180 seconds). Unchanged dictionaries
+may be old while the agent remains connected. No storefront writes or matching by name.

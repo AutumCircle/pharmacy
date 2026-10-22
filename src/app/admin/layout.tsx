@@ -10,6 +10,7 @@ import './admin.css';
 const menu = [
   { name: 'Панель управления', path: '/admin', icon: '⌂' },
   { name: 'Лекарства', path: '/admin/medicines', icon: '✚' },
+  { name: 'База аптеки', path: '/admin/pharmacy-mirror', icon: '▤' },
   { name: 'Дубликаты', path: '/admin/duplicates', icon: '≡' },
   { name: 'Заказы', path: '/admin/orders', icon: '◉' },
   { name: 'Уведомления заказов', path: '/admin/order-notifications', icon: '✉' },

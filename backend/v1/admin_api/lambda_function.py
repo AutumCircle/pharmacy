@@ -39,7 +39,7 @@ from backend.v1.shared.xlsx_export import (
     build_available_medicines_workbook,
     build_out_of_stock_workbook,
 )
-from backend.v1.shared import collection_admin, staff_accounts
+from backend.v1.shared import collection_admin, staff_accounts, pharmacy_mirror_admin
 from backend.v1.shared.order_notification_settings import (
     CHANNELS as NOTIFICATION_CHANNELS, effective_settings, stored_policies, validate_update,
 )
@@ -5298,6 +5298,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             require_notification_claim_identity(event)
             return success(claim_order_notification(_body(event)), request=current_request_id)
         actor_id = require_admin_identity(event)
+        if staff_path.startswith('/v1/admin/pharmacy-mirror/'):
+            if staff_method != 'GET':
+                raise ContractError('METHOD_NOT_ALLOWED', 'Read-only interface', http_status=405)
+            mirror_query = event.get('queryStringParameters') or {}
+            if staff_path == '/v1/admin/pharmacy-mirror/status':
+                if mirror_query:
+                    raise ContractError('VALIDATION_ERROR', 'Unknown query parameter')
+                return success(pharmacy_mirror_admin.status(), request=current_request_id)
+            if staff_path == '/v1/admin/pharmacy-mirror/products':
+                return success(pharmacy_mirror_admin.products(mirror_query), request=current_request_id)
+            mirror_match = re.fullmatch(r'/v1/admin/pharmacy-mirror/products/([0-9]{1,18})', staff_path)
+            if mirror_match:
+                return success(pharmacy_mirror_admin.detail(mirror_match.group(1), mirror_query), request=current_request_id)
+            raise ContractError('ROUTE_NOT_FOUND', 'Route was not found', http_status=404)
         method = str(event.get("httpMethod") or "").upper()
         path = str(event.get("path") or "")
         query = event.get("queryStringParameters") or {}
