@@ -1,0 +1,38 @@
+name: Build pharmacy agent (Windows 7, Python 3.8 x64)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "backend/pharmacy_agent/**"
+      - "scripts/build_pharmacy_agent.ps1"
+      - ".github/workflows/build-pharmacy-agent.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.8"
+          architecture: x64
+
+      - name: Build pharmacy_agent.exe
+        shell: pwsh
+        run: ./scripts/build_pharmacy_agent.ps1 -Python38 "${{ steps.python.outputs.python-path }}"
+
+      - name: Smoke-check the Oracle driver in the build environment
+        shell: pwsh
+        run: ./build/pharmacy-agent-py38-venv/Scripts/python.exe -c "import cx_Oracle, requests; print('cx_Oracle', cx_Oracle.version)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pharmacy-agent-win7-py38
+          path: output/pharmacy-agent-win7-py38.zip
+          retention-days: 30

@@ -50,6 +50,10 @@ yarn-error.log*
 /backend/v1/local_agent/config.json
 /backend/v1/local_agent/agent_sync_state.json
 /backend/v1/local_agent/*.tmp
+/backend/pharmacy_agent/config.json
+/backend/pharmacy_agent/*.sqlite3
+/backend/pharmacy_agent/*.log*
+/backend/pharmacy_agent/*.lock
 
 # vercel
 .vercel

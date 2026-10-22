@@ -1,0 +1,16 @@
+{
+  "pharmacy_id": 1,
+  "api_base_url": "https://example.execute-api.eu-central-1.amazonaws.com/prod",
+  "api_token": "set-on-the-pharmacy-machine-only",
+  "api_gateway_key": "",
+  "schema": "ORGANIZ",
+  "oracle": {
+    "dsn": "127.0.0.1:1521/xe",
+    "user": "SITE_READER",
+    "password": "set-on-the-pharmacy-machine-only",
+    "client_lib_dir": "C:\\oraclexe\\app\\oracle\\product\\11.2.0\\server\\bin"
+  },
+  "cycle_seconds": 60,
+  "change_overlap": 2000,
+  "http_timeout_seconds": 60
+}
