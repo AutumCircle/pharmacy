@@ -3,7 +3,7 @@ import { requireAdminSession } from '@/lib/admin-auth';
 import { getMirrorStatus, searchMirrorProducts } from '@/lib/api-v1/pharmacy-mirror-server';
 import { mirrorTime, mirrorQuantity, mirrorSearchError } from '@/lib/pharmacy-mirror';
 import Refresh from './Refresh';
-import { Pager, ReadOnly } from './parts';
+import { Pager, ReadOnly, Prices, Valuation } from './parts';
 
 export const dynamic = 'force-dynamic';
 export default async function MirrorPage({
@@ -156,12 +156,12 @@ export default async function MirrorPage({
                 <table>
                   <thead>
                     <tr>
-                      <th>ID</th>
+                      <th>PRODUCT_ID</th>
                       <th>Название</th>
                       <th>Штрихкод</th>
-                      <th>Производитель</th>
-                      <th>Общий остаток</th>
-                      <th>Обновление остатков</th>
+                      <th>Остаток</th>
+                      <th>Цены за единицу, с НДС</th>
+                      <th>Сумма текущего остатка</th>
                       <th>Карточка</th>
                     </tr>
                   </thead>
@@ -169,13 +169,22 @@ export default async function MirrorPage({
                     {products.items.map((p) => (
                       <tr key={p.product_id}>
                         <td>{p.product_id}</td>
-                        <th scope="row">{p.name}</th>
+                        <th scope="row">
+                          {p.name}
+                          <small className="mirror-result-vendor">
+                            {p.vendor || 'Производитель не указан'}
+                          </small>
+                        </th>
                         <td>{p.barcode || '—'}</td>
-                        <td>{p.vendor || '—'}</td>
-                        <td>{mirrorQuantity(p.total_stock, p.stock_rows, p.invalid_stock_rows)}</td>
                         <td>
-                          {mirrorTime(p.stock_received_at)}
-                          <small>Товар: {mirrorTime(p.received_at)}</small>
+                          {mirrorQuantity(p.total_stock, p.stock_rows, p.invalid_stock_rows)}
+                          <small>{mirrorTime(p.stock_received_at)}</small>
+                        </td>
+                        <td>
+                          <Prices prices={p} />
+                        </td>
+                        <td>
+                          <Valuation prices={p} />
                         </td>
                         <td>
                           <Link
@@ -195,12 +204,15 @@ export default async function MirrorPage({
                   <article className="mirror-panel" key={p.product_id}>
                     <h2>{p.name}</h2>
                     <p>
-                      ID: {p.product_id} · {p.barcode || 'Штрихкод не указан'}
+                      PRODUCT_ID: {p.product_id} · {p.barcode || 'Штрихкод не указан'}
                     </p>
                     <p>{p.vendor || 'Производитель не указан'}</p>
                     <strong>
                       Остаток: {mirrorQuantity(p.total_stock, p.stock_rows, p.invalid_stock_rows)}
                     </strong>
+                    <Prices prices={p} />
+                    <p className="mirror-meta">Сумма текущего остатка</p>
+                    <Valuation prices={p} />
                     <p>Остатки: {mirrorTime(p.stock_received_at)}</p>
                     <Link
                       href={`/admin/pharmacy-mirror/products/${p.product_id}`}
@@ -215,8 +227,11 @@ export default async function MirrorPage({
           )}
           <Pager total={products.total} page={products.page} href={href} />
           <p className="mirror-meta">
-            Остаток = сумма PRODUCT_COUNT_SKLAD по всем складам, без вычитания резерва. Цены
-            доступны в исходных полях; назначение ценовых уровней требует сверки с «Алгоритмом».
+            PRODUCT_ID — ID товара в «Алгоритме». Продажа: OUTCOME_PRICE_ONE_W_NDS; приход:
+            INCOME_PRICE_W_NDS, с НДС. Диапазон — разные цены партий с положительным остатком; при
+            его отсутствии показаны исторические цены. Сумма остатка = количество каждой партии × её
+            цена. Это стоимость оставшегося товара, а не выручка и не сумма всех приходов. Нет
+            данных — нужные строки или цены отсутствуют в зеркале.
           </p>
         </>
       )}

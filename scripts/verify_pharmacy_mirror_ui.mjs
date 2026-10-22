@@ -76,6 +76,8 @@ async function main() {
     await page.waitForURL(/q=/);
     await page.locator('.mirror-desktop tbody tr').first().waitFor();
     assert.equal(await page.locator('.mirror-desktop tbody tr').count(), 25);
+    assert.equal(await page.locator('.mirror-desktop .mirror-prices').count(), 50);
+    await page.getByRole('columnheader', { name: 'Цены за единицу, с НДС', exact: true }).waitFor();
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
       false,
@@ -99,6 +101,11 @@ async function main() {
     await page
       .getByRole('heading', { name: 'Остатки по складам и партиям', exact: true })
       .waitFor();
+    await page.getByRole('heading', { name: 'Цены и текущий остаток', exact: true }).waitFor();
+    assert.match(await page.locator('.mirror-product-id').innerText(), /144403.*PRODUCT_ID/);
+    assert(
+      (await page.locator('.mirror-oracle-fields').first().locator(':scope > div').count()) >= 10,
+    );
     await page.locator('details').first().locator('summary').click();
     await page.locator('pre').first().waitFor();
     assert.equal(

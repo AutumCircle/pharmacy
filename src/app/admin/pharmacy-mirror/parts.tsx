@@ -1,5 +1,12 @@
 import Link from 'next/link';
-import { mirrorTime, type OracleRow } from '@/lib/pharmacy-mirror';
+import {
+  mirrorTime,
+  mirrorMoney,
+  mirrorPriceRange,
+  type OracleRow,
+  type MirrorPrices,
+} from '@/lib/pharmacy-mirror';
+import { oracleFieldLabel, oracleFieldValue } from '@/lib/pharmacy-mirror-fields';
 export function Pager({
   total,
   page,
@@ -39,4 +46,55 @@ export function Raw({ row, title = 'Исходные поля Oracle' }: { row: 
 }
 export function ReadOnly() {
   return <p className="mirror-badge">Только просмотр · тестовая база</p>;
+}
+
+export function Prices({ prices }: { prices: MirrorPrices }) {
+  return (
+    <div className="mirror-prices">
+      <div>
+        <span>Продажа · уровень 1</span>
+        <strong>{mirrorPriceRange(prices.sale_price_min, prices.sale_price_max)}</strong>
+      </div>
+      <div>
+        <span>Приход · за единицу</span>
+        <strong>{mirrorPriceRange(prices.purchase_price_min, prices.purchase_price_max)}</strong>
+      </div>
+      {prices.price_basis === 'historical' && (
+        <small>Цены прошлых партий — положительного остатка сейчас нет.</small>
+      )}
+    </div>
+  );
+}
+
+export function Valuation({ prices }: { prices: MirrorPrices }) {
+  return (
+    <div className="mirror-prices">
+      <div>
+        <span>По продаже</span>
+        <strong>{mirrorMoney(prices.sale_value)}</strong>
+      </div>
+      <div>
+        <span>По приходу</span>
+        <strong>{mirrorMoney(prices.purchase_value)}</strong>
+      </div>
+    </div>
+  );
+}
+
+export function OracleFields({ row }: { row: OracleRow }) {
+  return (
+    <dl className="mirror-oracle-fields">
+      {Object.entries(row.oracle)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => (
+          <div key={key}>
+            <dt>
+              {oracleFieldLabel(key)}
+              <code>{key}</code>
+            </dt>
+            <dd>{oracleFieldValue(value)}</dd>
+          </div>
+        ))}
+    </dl>
+  );
 }

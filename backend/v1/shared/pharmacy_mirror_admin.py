@@ -15,7 +15,7 @@ PAGE_SIZE = 25
 STALE_SECONDS = 180
 PRODUCT_FIELDS = frozenset('CHANGE_ID COUNTRY_ID DEFAULT_NDS FLAG_NO_SKIDKA FLAG_NO_ZAKAZ IS_ANGRO IS_DESINFECT IS_IMMUNO IS_KEEP_RECEPT IS_LIFE IS_NO_DIVISION IS_NO_LIFE IS_NO_RECEPT IS_OVERSIZE IS_PSYCHO IS_SPIRT IS_STRONG MARKETING_ID MEASURE_ID PRODUCT_GROUP_ID PRODUCT_ID PRODUCT_IN_PACK PRODUCT_IN_PACK_SUB PRODUCT_MIN PRODUCT_MNN_ID PRODUCT_NAME PRODUCT_NAME_DIVISION PRODUCT_PRICE PRODUCT_REESTR_PRICE PRODUCT_REESTR_PRICE_DATE PRODUCT_SOSTAV_ID PRODUCT_STELAZ PRODUCT_STORE_PLACE_ID PRODUCT_TEMPERATURA PRODUCT_TYPE_ID SCAN_CODE SYNONYM_ID VENDOR_ID'.split())
 STOCK_FIELDS = frozenset('SKLAD_STATE_ID PRODUCT_ID INCOME_ID SKLAD_ID CHANGE_ID PRODUCT_COUNT_SKLAD PRODUCT_COUNT_REZERV PRODUCT_COUNT_SALE PRODUCT_COUNT_INCOME PRODUCT_COUNT_MOVED PRODUCT_COUNT_SHET PRODUCT_COUNT_WAY OUTCOME_PRICE_ONE_W_NDS OUTCOME_PRICE_ONE_NO_NDS OUTCOME_PRICE_TWO_W_NDS OUTCOME_PRICE_TWO_NO_NDS OUTCOME_PRICE_TH_W_NDS OUTCOME_PRICE_TH_NO_NDS OUTCOME_PRICE_FO_W_NDS OUTCOME_PRICE_FO_NO_NDS OUTCOME_NDS_SIZE'.split())
-INCOME_FIELDS = frozenset('INCOME_ID PRODUCT_ID SKLAD_ID INCOME_HEAD_ID INCOME_SCAN_CODE INCOME_COUNT INCOME_REAL_COUNT INCOME_DATE_OLD INCOME_DATE_MADE INCOME_SERIA INCOME_PRICE_W_NDS INCOME_PRICE_NO_NDS INCOME_REAL_PRICE'.split())
+INCOME_FIELDS = frozenset('DATE_SALE_FROM_VENDOR EXTERNAL_OUTCOME_ID EXT_ANALIT_ID EXT_INCOME_COUNT EXT_INCOME_DATE_SALE EXT_INCOME_HEAD_DATE EXT_INCOME_HEAD_ID EXT_INCOME_HEAD_NUMBER EXT_INCOME_ID EXT_INCOME_NDS_SIZE EXT_INCOME_PRICE_NO_NDS EXT_INCOME_PRICE_W_NDS EXT_INCOME_PROVIDER_PROCENT EXT_INCOME_SUM_NDS EXT_INCOME_SUM_NO_NDS EXT_INCOME_SUM_W_NDS EXT_INCOME_VENDOR_PRICE EXT_INCOME_VENDOR_PRICE_NO_NDS EXT_INCOME_VENDOR_PRICE_W_NDS EXT_OPERATION_ID EXT_SKLAD_ID FIRST_INCOME_HEAD_ID FIRST_INCOME_ID INCOME_COUNT INCOME_DATE_MADE INCOME_DATE_OLD INCOME_HEAD_ID INCOME_ID INCOME_NDS_SIZE INCOME_OPRIX_FLAG INCOME_PRICE_NO_NDS INCOME_PRICE_W_NDS INCOME_PROVIDER_PROCENT INCOME_REAL_COUNT INCOME_REAL_PRICE INCOME_REESTR_PRICE INCOME_SCAN_CODE INCOME_SERIA INCOME_SERTIF_NUMBER INCOME_SUM_NDS INCOME_SUM_NO_NDS INCOME_SUM_W_NDS INCOME_VENDOR_PRICE INCOME_VENDOR_PRICE_NO_NDS INCOME_VENDOR_PRICE_W_NDS IS_GIS_MT LABEL_COUNT PRICE_CHECK_FLAG PRODUCT_ID SKLAD_ID'.split())
 
 
 @contextmanager
@@ -123,14 +123,45 @@ def status():
             'checked_at': datetime.now(timezone.utc)}
 
 
-# Regex limits conversion size and prevents malformed source values from crashing SQL.
-STOCK_NUMBER = "CASE WHEN s.data->>'PRODUCT_COUNT_SKLAD' ~ '^-?[0-9]{1,18}([.][0-9]{1,12})?$' THEN (s.data->>'PRODUCT_COUNT_SKLAD')::numeric END"
-AGGREGATE = f"""SELECT SUM({STOCK_NUMBER})::text AS total_stock,COUNT(*) AS stock_rows,
-    COUNT(*) FILTER (WHERE ({STOCK_NUMBER}) IS NULL) AS invalid_stock_rows,
-    MAX(s.received_at) AS stock_received_at,MAX(s.change_id) AS stock_max_change_id,
-    MAX(s.source_generated_at) AS stock_generated_at
-    FROM pharmacy_mirror_rows s WHERE s.pharmacy_id=1 AND s.table_name='T_SKLAD_STATE'
-    AND s.data->>'PRODUCT_ID'=p.row_key"""
+# All identifiers here are server-owned constants, never request values.
+def decimal_sql(alias, field):
+    value = f"{alias}.data->>'{field}'"
+    return f"CASE WHEN {value} ~ '^-?[0-9]{{1,18}}([.][0-9]{{1,12}})?$' THEN ({value})::numeric END"
+
+
+STOCK_NUMBER = decimal_sql('s', 'PRODUCT_COUNT_SKLAD')
+SALE_NUMBER = decimal_sql('s', 'OUTCOME_PRICE_ONE_W_NDS')
+PURCHASE_NUMBER = decimal_sql('i', 'INCOME_PRICE_W_NDS')
+PRICE_KEYS = ('sale_price_min','sale_price_max','purchase_price_min','purchase_price_max',
+              'sale_value','purchase_value','price_basis')
+STOCK_KEYS = ('total_stock','stock_rows','invalid_stock_rows','stock_received_at',
+              'stock_max_change_id','stock_generated_at') + PRICE_KEYS
+AGGREGATE = f"""SELECT SUM(qty)::text AS total_stock,COUNT(*) AS stock_rows,
+    COUNT(*) FILTER (WHERE qty IS NULL) AS invalid_stock_rows,
+    MAX(received_at) AS stock_received_at,MAX(change_id) AS stock_max_change_id,
+    MAX(source_generated_at) AS stock_generated_at,
+    CASE WHEN COUNT(*) FILTER (WHERE qty>0)>0 THEN 'in_stock'
+         WHEN COUNT(*)>0 THEN 'historical' ELSE 'none' END AS price_basis,
+    (CASE WHEN COUNT(*) FILTER (WHERE qty>0)>0 THEN MIN(sale_price) FILTER (WHERE qty>0)
+         ELSE MIN(sale_price) END)::text AS sale_price_min,
+    (CASE WHEN COUNT(*) FILTER (WHERE qty>0)>0 THEN MAX(sale_price) FILTER (WHERE qty>0)
+         ELSE MAX(sale_price) END)::text AS sale_price_max,
+    (CASE WHEN COUNT(*) FILTER (WHERE qty>0)>0 THEN MIN(purchase_price) FILTER (WHERE qty>0)
+         ELSE MIN(purchase_price) END)::text AS purchase_price_min,
+    (CASE WHEN COUNT(*) FILTER (WHERE qty>0)>0 THEN MAX(purchase_price) FILTER (WHERE qty>0)
+         ELSE MAX(purchase_price) END)::text AS purchase_price_max,
+    CASE WHEN COUNT(*)=0 OR COUNT(*) FILTER (WHERE qty IS NULL OR (qty<>0 AND sale_price IS NULL))>0
+         THEN NULL ELSE COALESCE(SUM(qty*sale_price),0)::text END AS sale_value,
+    CASE WHEN COUNT(*)=0 OR COUNT(*) FILTER (WHERE qty IS NULL OR (qty<>0 AND purchase_price IS NULL))>0
+         THEN NULL ELSE COALESCE(SUM(qty*purchase_price),0)::text END AS purchase_value
+    FROM (
+        SELECT {STOCK_NUMBER} AS qty,{SALE_NUMBER} AS sale_price,
+            {PURCHASE_NUMBER} AS purchase_price,s.received_at,s.change_id,s.source_generated_at
+        FROM pharmacy_mirror_rows s
+        LEFT JOIN pharmacy_mirror_rows i ON i.pharmacy_id=1 AND i.table_name='T_INCOME'
+            AND i.row_key=s.data->>'INCOME_ID' AND i.data->>'PRODUCT_ID'=s.data->>'PRODUCT_ID'
+        WHERE s.pharmacy_id=1 AND s.table_name='T_SKLAD_STATE' AND s.data->>'PRODUCT_ID'=p.row_key
+    ) stock_prices"""
 
 
 def products_sql(q, mode, page):
@@ -192,7 +223,8 @@ def detail(key, query):
             value = product['data'].get(id_field)
             dictionaries[label] = {'id': value, 'name': lookup.get((table, str(value)), {}).get(name_field)}
         cur.execute('''SELECT s.*,w.data->>'SKLAD_NAME' AS warehouse_name,
-            i.data->>'PRODUCT_ID' AS income_product_id,i.data->>'INCOME_DATE_OLD' AS income_date_old
+            i.data->>'PRODUCT_ID' AS income_product_id,i.data->>'INCOME_DATE_OLD' AS income_date_old,
+            i.data->>'INCOME_PRICE_W_NDS' AS purchase_price,i.data->>'INCOME_SCAN_CODE' AS income_barcode
             FROM pharmacy_mirror_rows s
             LEFT JOIN pharmacy_mirror_rows w ON w.pharmacy_id=1 AND w.table_name='T_SKLAD' AND w.row_key=s.data->>'SKLAD_ID'
             LEFT JOIN pharmacy_mirror_rows i ON i.pharmacy_id=1 AND i.table_name='T_INCOME'
@@ -200,7 +232,8 @@ def detail(key, query):
             WHERE s.pharmacy_id=1 AND s.table_name='T_SKLAD_STATE' AND s.data->>'PRODUCT_ID'=%s
             ORDER BY s.row_key LIMIT %s OFFSET %s''', (key, PAGE_SIZE, (stock_page-1)*PAGE_SIZE))
         stocks = [{**safe_row(r, STOCK_FIELDS), 'warehouse_name': r['warehouse_name'],
-                   'income_product_id': r['income_product_id'], 'income_date_old': r['income_date_old']} for r in cur.fetchall()]
+                   'income_product_id': r['income_product_id'], 'income_date_old': r['income_date_old'],
+                   'purchase_price': r['purchase_price'], 'income_barcode': r['income_barcode']} for r in cur.fetchall()]
         cur.execute("""SELECT COUNT(*) AS total FROM pharmacy_mirror_rows WHERE pharmacy_id=1
             AND table_name='T_INCOME' AND data->>'PRODUCT_ID'=%s""", (key,))
         income_total = cur.fetchone()['total']
@@ -210,7 +243,7 @@ def detail(key, query):
         incomes = [safe_row(r, INCOME_FIELDS) for r in cur.fetchall()]
     return {'product': safe_row(product, PRODUCT_FIELDS), 'dictionaries': dictionaries,
             'checked_at': datetime.now(timezone.utc),
-            'stock': {k: product[k] for k in ('total_stock','stock_rows','invalid_stock_rows','stock_received_at','stock_max_change_id','stock_generated_at')},
+            'stock': {k: product[k] for k in STOCK_KEYS},
             'stocks': {'items': stocks, 'total': product['stock_rows'], 'page': stock_page, 'limit': PAGE_SIZE},
             'incomes': {'items': incomes, 'total': income_total, 'page': income_page, 'limit': PAGE_SIZE},
             'site_comparison': {'available': False, 'reason': 'В каталоге сайта нет подтверждённого source ID или штрихкода. Автоматическое сопоставление не выполняется.'}}

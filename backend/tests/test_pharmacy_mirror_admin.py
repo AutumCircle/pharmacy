@@ -101,6 +101,8 @@ class MirrorQueryTests(unittest.TestCase):
     def test_detail_uses_product_and_income_join_and_bounded_pages(self):
         product = {'row_key':'1','data':{'PRODUCT_ID':1},'change_id':1,'received_at':'x','source_generated_at':'x',
             'total_stock':'7.5','stock_rows':2,'invalid_stock_rows':0,'stock_received_at':'x','stock_max_change_id':2,'stock_generated_at':'x'}
+        product.update({k:None for k in mirror.PRICE_KEYS})
+        product['price_basis'] = 'in_stock'
         cur, transaction = self.cursor([product, [], [], {'total':2}, []])
         with patch.object(mirror, 'transaction', transaction): result = mirror.detail('1', {'income_page':'2'})
         self.assertEqual(result['stock']['total_stock'], '7.5')
@@ -114,6 +116,12 @@ class MirrorQueryTests(unittest.TestCase):
         cur, transaction = self.cursor([None])
         with patch.object(mirror, 'transaction', transaction), self.assertRaises(ContractError) as cm: mirror.detail('1', {})
         self.assertEqual(cm.exception.http_status,404)
+
+    def test_income_fields_include_prices_and_sums_but_not_employee_identity(self):
+        safe = mirror.safe_row({'row_key':'1','change_id':None,'received_at':'x','source_generated_at':'x',
+            'data':{'INCOME_SUM_W_NDS':'100.5','INCOME_PRICE_W_NDS':'50.25','EMPLOY_ID':381,
+                    'EXT_PARTNER_ID':563}},mirror.INCOME_FIELDS)
+        self.assertEqual(safe['oracle'],{'INCOME_SUM_W_NDS':'100.5','INCOME_PRICE_W_NDS':'50.25'})
 
 
 if __name__ == '__main__': unittest.main()

@@ -918,3 +918,13 @@ The UI is `/admin/pharmacy-mirror`. It refreshes visible tabs every 60 seconds;
 table freshness measures last changed-row reception, while connection freshness
 uses `pharmacy_sources.last_seen_at` (stale after 180 seconds). Unchanged dictionaries
 may be old while the agent remains connected. No storefront writes or matching by name.
+
+Price display extension (2026-10-22): product list items and detail `stock` also
+contain nullable decimal strings `sale_price_min/max`, `purchase_price_min/max`,
+`sale_value`, `purchase_value`, and `price_basis` (`in_stock`, `historical`, `none`).
+Sale means source level 1 `OUTCOME_PRICE_ONE_W_NDS`; purchase means
+`INCOME_PRICE_W_NDS`, joined by pharmacy + INCOME_ID + PRODUCT_ID. Ranges use
+positive-stock batches, falling back to historical batches only if none has
+positive stock. Values sum each batch's quantity × its own price; missing prices
+for nonzero batches make the relevant value null. Stock rows also include
+`purchase_price` and `income_barcode` from that exact income. No data writes.

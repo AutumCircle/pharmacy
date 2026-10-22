@@ -7,8 +7,19 @@ export type OracleRow = {
   oracle: Record<string, OracleValue>;
   warehouse_name?: string | null;
   income_date_old?: string | null;
+  purchase_price?: string | null;
+  income_barcode?: string | null;
 };
-export type MirrorStock = {
+export type MirrorPrices = {
+  sale_price_min: string | null;
+  sale_price_max: string | null;
+  purchase_price_min: string | null;
+  purchase_price_max: string | null;
+  sale_value: string | null;
+  purchase_value: string | null;
+  price_basis: 'in_stock' | 'historical' | 'none';
+};
+export type MirrorStock = MirrorPrices & {
   total_stock: string | null;
   stock_rows: number;
   invalid_stock_rows: number;
@@ -86,6 +97,15 @@ function stock(value: unknown): boolean {
   return (
     object(value) &&
     nullableString(value.total_stock) &&
+    [
+      'sale_price_min',
+      'sale_price_max',
+      'purchase_price_min',
+      'purchase_price_max',
+      'sale_value',
+      'purchase_value',
+    ].every((k) => nullableString(value[k])) &&
+    ['in_stock', 'historical', 'none'].includes(String(value.price_basis)) &&
     count(value.stock_rows) &&
     count(value.invalid_stock_rows) &&
     nullableTime(value.stock_received_at) &&
@@ -197,7 +217,7 @@ export function mirrorQuantity(value: string | null, rows: number, invalid: numb
   return invalid
     ? 'Есть некорректные значения'
     : rows === 0
-      ? 'Нет строк остатков'
+      ? 'Нет данных об остатке в зеркале'
       : (value ?? 'Нет данных');
 }
 export function mirrorSearchError(q: string, mode: string) {
@@ -208,4 +228,24 @@ export function mirrorSearchError(q: string, mode: string) {
   if ((mode === 'name' || !/^[0-9]+$/.test(q.trim())) && q.trim().length < 2)
     return 'Введите минимум 2 символа.';
   return '';
+}
+
+export function mirrorMoney(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return 'Нет данных';
+  const match = /^(-?)([0-9]+)(?:[.]([0-9]+))?$/.exec(String(value));
+  if (!match) return 'Нет данных';
+  const decimals = (match[3] || '').replace(/0+$/, '');
+  return (
+    match[1] +
+    match[2].replace(/\B(?=(\d{3})+(?!\d))/g, ' ') +
+    ',' +
+    (decimals || '00').padEnd(2, '0') +
+    ' с.'
+  );
+}
+export function mirrorPriceRange(min: string | null, max: string | null): string {
+  if (min === null || max === null) return 'Нет данных';
+  const low = mirrorMoney(min),
+    high = mirrorMoney(max);
+  return low === high ? low : low + ' — ' + high;
 }

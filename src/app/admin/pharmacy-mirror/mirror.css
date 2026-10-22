@@ -280,3 +280,96 @@
 .mirror-records article p {
   font-size: 13px;
 }
+.mirror-prices {
+  display: grid;
+  gap: 8px;
+  min-width: 135px;
+}
+.mirror-prices > div {
+  display: grid;
+  gap: 3px;
+}
+.mirror-prices span {
+  font-size: 12px;
+  color: #5b6c63;
+}
+.mirror-prices strong {
+  font-size: 14px;
+  line-height: 1.4;
+}
+.mirror-prices small {
+  font-size: 11px;
+  color: #80601f;
+}
+.mirror-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 20px;
+}
+.mirror-summary-grid > div > span {
+  display: block;
+  color: #536b5e;
+  margin-bottom: 10px;
+}
+.mirror-summary-grid > div > strong {
+  display: block;
+  font-size: 26px;
+}
+.mirror-summary-grid .mirror-prices strong {
+  font-size: 20px;
+}
+.mirror-product-id code {
+  font-size: 11px;
+  background: #e9f1ec;
+  padding: 3px 6px;
+  border-radius: 5px;
+}
+.mirror-oracle-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 0 20px;
+  margin: 12px 0;
+}
+.mirror-oracle-fields > div {
+  padding: 10px 0;
+  border-bottom: 1px solid #e3ebe6;
+  min-width: 0;
+}
+.mirror-oracle-fields dt {
+  font-size: 12px;
+  color: #52685b;
+}
+.mirror-oracle-fields code {
+  display: block;
+  font-size: 10px;
+  color: #718278;
+  overflow-wrap: anywhere;
+  margin-top: 3px;
+}
+.mirror-oracle-fields dd {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 5px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mirror-mobile .mirror-prices {
+  margin-top: 14px;
+}
+.mirror-records summary small {
+  line-height: 1.6;
+}
+.mirror-result-vendor {
+  display: block;
+  font-size: 11px;
+  color: #627269;
+  margin-top: 6px;
+}
+.mirror-desktop th:nth-child(5),
+.mirror-desktop th:nth-child(6) {
+  white-space: normal;
+  min-width: 130px;
+}
+.mirror-desktop td:first-child {
+  font-size: 12px;
+}
