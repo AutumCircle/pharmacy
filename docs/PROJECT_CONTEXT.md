@@ -148,6 +148,17 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    a bar click opens that day (`?date=`). Data: courier-only `GET /v1/staff/orders/daily?days=30|70` — one
    parameterized `GROUP BY` over the Dushanbe day of `created_at`, every day returned with zeros, oldest first.
    If that read fails (e.g. the old Lambda has no route) the chart shows a short notice and the list still works.
+13. Owner's «Нет в наличии» mark (migration `0027`, column `medicines.hidden_from_clients` + `hidden_from_clients_at`):
+   on `/admin/medicines` each row has «Нет в наличии» / «Вернуть в продажу» (`MedicineVisibilityToggle.tsx` →
+   `PATCH /api/admin/medicines/{id}/visibility` → admin Lambda `PATCH /v1/admin/medicines/{id}/visibility`
+   `{ "hidden_from_clients": true|false }`, audited as `medicine.hidden_from_clients` / `medicine.shown_to_clients`),
+   plus a «Скрытые от клиентов» filter (`availability=hidden`). The pharmacy DBF sync writes only `in_stock` and never
+   touches the mark, so a marked medicine stays hidden after every sync. The public Lambda treats a medicine as
+   sellable only when `in_stock IS TRUE AND hidden_from_clients IS NOT TRUE`: search, product page (404), featured,
+   carousels, categories and collections leave it out, the cart shows it as unavailable and checkout rejects it
+   (`409 ORDER_ITEMS_UNAVAILABLE`). Public reads are cached 30–60 s on Vercel, so it disappears within about a minute.
+   Staff/courier order search and admin exports are unchanged. Deploy order: migration (one-shot runner in
+   `backend/operations/medicine_client_visibility_once`), then admin and public Lambdas, then the site.
 
 Telegram notifier variables are configured only in AWS, never in Git:
 

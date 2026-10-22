@@ -404,7 +404,7 @@ export function updateAdminContactSettings(deliveryContactPhone: string): Promis
 }
 
 export function listAdminMedicines(values: {
-  availability?: 'all' | 'in_stock' | 'out_of_stock';
+  availability?: 'all' | 'in_stock' | 'out_of_stock' | 'hidden';
   page?: number;
   limit?: number;
   q?: string;
@@ -424,6 +424,12 @@ export function listAdminMedicines(values: {
 export function updateAdminMedicineImage(medicineId: number, imageUrl: string | null) {
   return request<ApiSuccessResponse<Pick<AdminMedicine, 'medicine_id' | 'medicine_name' | 'image_url' | 'updated_at'>>>(
     `/v1/admin/medicines/${medicineId}/image`, { method: 'PATCH', body: { image_url: imageUrl } },
+  );
+}
+
+export function updateAdminMedicineVisibility(medicineId: number, hiddenFromClients: boolean) {
+  return request<ApiSuccessResponse<Pick<AdminMedicine, 'medicine_id' | 'medicine_name' | 'hidden_from_clients'>>>(
+    `/v1/admin/medicines/${medicineId}/visibility`, { method: 'PATCH', body: { hidden_from_clients: hiddenFromClients } },
   );
 }
 

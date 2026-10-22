@@ -166,7 +166,7 @@ def search_medicines(query: dict[str, Any]) -> dict[str, Any]:
                        m.updated_at, m.image_url,
                        translate(lower(m.name), 'ё', 'е') AS search_name
                 FROM medicines AS m
-                WHERE m.in_stock IS TRUE
+                WHERE m.in_stock IS TRUE AND m.hidden_from_clients IS NOT TRUE
             )
             SELECT c.id, c.name, c.price, c.country, c.vendor, c.in_stock, c.updated_at, c.image_url,
                    vatan_selling_unit_price(c.price) AS selling_unit_price,
@@ -230,7 +230,7 @@ def get_medicine(medicine_id: str) -> dict[str, Any]:
             SELECT id, name, price, country, vendor, in_stock, updated_at, image_url,
                    vatan_selling_unit_price(price) AS selling_unit_price
             FROM medicines
-            WHERE id = %s AND in_stock IS TRUE
+            WHERE id = %s AND in_stock IS TRUE AND hidden_from_clients IS NOT TRUE
             """,
             (parsed_id,),
         )
@@ -276,7 +276,7 @@ def list_featured_products() -> dict[str, Any]:
                    fp.image_url, COALESCE(fp.sort_order, 0) AS sort_order
             FROM featured_products fp
             JOIN medicines m ON m.id = fp.medicine_id
-            WHERE m.in_stock IS TRUE
+            WHERE m.in_stock IS TRUE AND m.hidden_from_clients IS NOT TRUE
             ORDER BY COALESCE(fp.sort_order, 0) ASC, fp.id ASC
             LIMIT 30
             """
@@ -324,6 +324,7 @@ def list_product_carousels() -> dict[str, Any]:
                 FROM product_carousel_items pci
                 JOIN medicines m ON m.id = pci.medicine_id
                 WHERE pci.carousel_id = ANY(%s) AND m.in_stock IS TRUE
+                  AND m.hidden_from_clients IS NOT TRUE
             ) AS ranked
             WHERE ranked.position <= 30
             ORDER BY ranked.carousel_id ASC, ranked.item_sort_order ASC, ranked.id ASC
@@ -362,7 +363,8 @@ def resolve_medicines(payload: dict[str, Any]) -> dict[str, Any]:
     with transaction() as cur:
         cur.execute(
             """
-            SELECT id, name, price, country, vendor, in_stock, updated_at, image_url,
+            SELECT id, name, price, country, vendor,
+                   (in_stock IS TRUE AND hidden_from_clients IS NOT TRUE) AS in_stock, updated_at, image_url,
                    vatan_selling_unit_price(price) AS selling_unit_price
             FROM medicines
             WHERE id = ANY(%s)
@@ -440,7 +442,7 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
         medicine_ids = [item["medicine_id"] for item in request["items"]]
         cur.execute(
             """
-            SELECT id, name, price, in_stock,
+            SELECT id, name, price, (in_stock IS TRUE AND hidden_from_clients IS NOT TRUE) AS in_stock,
                    vatan_selling_unit_price(price) AS selling_unit_price
             FROM medicines
             WHERE id = ANY(%s)
@@ -636,7 +638,7 @@ def category_medicines(slug: str, query: dict[str, Any]) -> dict[str, Any]:
             SELECT COUNT(*) AS count
             FROM category_medicines cm
             JOIN medicines m ON m.id = cm.medicine_id
-            WHERE cm.category_id = %s AND m.in_stock IS TRUE
+            WHERE cm.category_id = %s AND m.in_stock IS TRUE AND m.hidden_from_clients IS NOT TRUE
             """,
             (category["id"],),
         )
@@ -650,7 +652,7 @@ def category_medicines(slug: str, query: dict[str, Any]) -> dict[str, Any]:
                    vatan_selling_unit_price(m.price) AS selling_unit_price
             FROM category_medicines cm
             JOIN medicines m ON m.id = cm.medicine_id
-            WHERE cm.category_id = %s AND m.in_stock IS TRUE
+            WHERE cm.category_id = %s AND m.in_stock IS TRUE AND m.hidden_from_clients IS NOT TRUE
             ORDER BY m.name ASC, m.id ASC
             LIMIT %s OFFSET %s
             """,
@@ -740,7 +742,7 @@ def get_collection(slug: str) -> dict[str, Any]:
                 SELECT id, name, price, country, vendor, in_stock, updated_at, image_url,
                        vatan_selling_unit_price(price) AS selling_unit_price
                 FROM medicines
-                WHERE id = ANY(%s)
+                WHERE id = ANY(%s) AND hidden_from_clients IS NOT TRUE
                 """,
                 (product_ids,),
             )

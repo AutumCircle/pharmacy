@@ -17,7 +17,7 @@ class OrderCursor:
         text = " ".join(sql.split())
         if text.startswith("INSERT INTO order_idempotency"):
             self._result = {"id": 1}
-        elif text.startswith("SELECT id, name, price, in_stock"):
+        elif text.startswith("SELECT id, name, price, (in_stock IS TRUE AND hidden_from_clients IS NOT TRUE) AS in_stock"):
             self._result = [{"id": 7, "name": "Paracetamol", "price": Decimal("100"), "in_stock": True,
                              "selling_unit_price": Decimal("230")}]
         elif text.startswith("INSERT INTO orders"):

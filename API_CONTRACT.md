@@ -746,6 +746,13 @@ Phone-only tracking с rate limiting утверждён для MVP. OTP и св�
 - Bulk mutation использует один set-based `INSERT ... SELECT` в транзакции, не удаляет другие категории и возвращает `matched`, `added`, `already_present`.
 - Повторные `PUT`/`DELETE` relation идемпотентны.
 
+### 8.3 Ручная отметка «Нет в наличии»
+
+- `PATCH /v1/admin/medicines/{medicine_id}/visibility` с телом `{ "hidden_from_clients": true }` скрывает лекарство от клиентов, `false` возвращает. Другие поля или не-boolean → `400 VALIDATION_ERROR`, неизвестный `medicine_id` → `404 MEDICINE_NOT_FOUND`. Ответ: `{ medicine_id, medicine_name, hidden_from_clients, hidden_from_clients_at }`; в `admin_audit_log` пишется `medicine.hidden_from_clients` или `medicine.shown_to_clients`.
+- Отметка хранится отдельно от `in_stock`: синхронизация аптеки (DBF) её не меняет.
+- `GET /v1/admin/medicines` возвращает `hidden_from_clients` и принимает `availability=hidden` (только отмеченные).
+- Публичный API считает лекарство продаваемым, только если `in_stock = true` и `hidden_from_clients = false`: поиск, карточка (`404`), избранное, карусели, категории и подборки его не показывают; `resolve` отдаёт `in_stock: false`; `create_order` отвечает `409 ORDER_ITEMS_UNAVAILABLE`.
+
 ## 9. Internal catalog sync
 
 `agent_sync.exe` не обращается к RDS. С отдельной machine identity он:

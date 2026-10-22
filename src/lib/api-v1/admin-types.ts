@@ -108,6 +108,8 @@ export type AdminMedicine = {
   in_stock: boolean;
   updated_at: string | null;
   image_url: string | null;
+  /** Owner's «Нет в наличии»: hidden from clients whatever the pharmacy sync says. Absent on older Lambdas. */
+  hidden_from_clients?: boolean;
 };
 
 export type AdminMedicineExport = {

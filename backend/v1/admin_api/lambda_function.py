@@ -769,7 +769,7 @@ def list_medicines(query: dict[str, Any]) -> dict[str, Any]:
     limit = _limit(query)
     page = _page_number(query)
     availability = str(query.get("availability") or "all")
-    if availability not in {"all", "in_stock", "out_of_stock"}:
+    if availability not in {"all", "in_stock", "out_of_stock", "hidden"}:
         raise ContractError("VALIDATION_ERROR", "availability is invalid")
     clauses: list[str] = []
     params: list[Any] = []
@@ -777,6 +777,9 @@ def list_medicines(query: dict[str, Any]) -> dict[str, Any]:
         clauses.append("m.in_stock IS TRUE")
     elif availability == "out_of_stock":
         clauses.append("m.in_stock IS NOT TRUE")
+    elif availability == "hidden":
+        # Marked «Нет в наличии» by the owner: hidden from clients whatever the pharmacy sync says.
+        clauses.append("m.hidden_from_clients IS TRUE")
     search = str(query.get("q") or "").strip()
     if search:
         if len(search) > 120:
@@ -801,7 +804,7 @@ def list_medicines(query: dict[str, Any]) -> dict[str, Any]:
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     offset = (page - 1) * limit
     with transaction() as cur:
-        if not search and not country and not vendor:
+        if not search and not country and not vendor and availability != "hidden":
             cur.execute("""
                 SELECT in_stock_count, out_of_stock_count
                 FROM sync_logs ORDER BY id DESC LIMIT 1
@@ -820,7 +823,7 @@ def list_medicines(query: dict[str, Any]) -> dict[str, Any]:
             f"""
             SELECT id AS medicine_id, name AS medicine_name, price AS base_unit_price,
                    vatan_selling_unit_price(price) AS selling_unit_price,
-                   source_sku, country, vendor, in_stock, updated_at, image_url
+                   source_sku, country, vendor, in_stock, updated_at, image_url, hidden_from_clients
             FROM medicines m
             {where}
             ORDER BY id DESC
@@ -2546,6 +2549,34 @@ def update_medicine_image(
             cur, actor_id=actor_id, action="medicine.image.updated",
             resource_type="medicine", resource_id=str(medicine_id), request=current_request_id,
             details={"has_image": image_url is not None},
+        )
+    return dict(row)
+
+
+def update_medicine_client_visibility(
+    medicine_id: int, payload: dict[str, Any], actor_id: str, current_request_id: str,
+) -> dict[str, Any]:
+    """Owner's manual «Нет в наличии»: hides a medicine from clients. The pharmacy sync never changes it."""
+    if set(payload) != {"hidden_from_clients"} or not isinstance(payload["hidden_from_clients"], bool):
+        raise ContractError("VALIDATION_ERROR", "hidden_from_clients must be true or false")
+    hidden = payload["hidden_from_clients"]
+    with transaction() as cur:
+        cur.execute(
+            """UPDATE medicines
+               SET hidden_from_clients = %s,
+                   hidden_from_clients_at = CASE WHEN %s THEN CURRENT_TIMESTAMP END
+               WHERE id = %s
+               RETURNING id AS medicine_id, name AS medicine_name, hidden_from_clients, hidden_from_clients_at""",
+            (hidden, hidden, medicine_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ContractError("MEDICINE_NOT_FOUND", "Medicine was not found", http_status=404)
+        _write_admin_audit(
+            cur, actor_id=actor_id,
+            action="medicine.hidden_from_clients" if hidden else "medicine.shown_to_clients",
+            resource_type="medicine", resource_id=str(medicine_id), request=current_request_id,
+            details={"hidden_from_clients": hidden},
         )
     return dict(row)
 
@@ -5308,6 +5339,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if method == "PATCH" and len(tail) == 3 and tail[0] == "medicines" and tail[2] == "image":
             return success(
                 update_medicine_image(
+                    _positive_int(tail[1], "medicine_id"), _body(event), actor_id, current_request_id,
+                ),
+                request=current_request_id,
+            )
+        if method == "PATCH" and len(tail) == 3 and tail[0] == "medicines" and tail[2] == "visibility":
+            return success(
+                update_medicine_client_visibility(
                     _positive_int(tail[1], "medicine_id"), _body(event), actor_id, current_request_id,
                 ),
                 request=current_request_id,

@@ -2,10 +2,11 @@ import Link from 'next/link';
 import { requireAdminSession } from '@/lib/admin-auth';
 import { listAdminMedicines } from '@/lib/api-v1/admin-server';
 import MedicineImageEditor from './MedicineImageEditor';
+import MedicineVisibilityToggle from './MedicineVisibilityToggle';
 
 export const dynamic = 'force-dynamic';
 const PHARMACY_TIME_ZONE = 'Asia/Dushanbe';
-type Availability = 'all' | 'in_stock' | 'out_of_stock';
+type Availability = 'all' | 'in_stock' | 'out_of_stock' | 'hidden';
 
 type Filters = {
   availability: Availability;
@@ -28,7 +29,7 @@ export default async function AdminMedicinesPage({ searchParams }: {
   await requireAdminSession();
   const params = await searchParams;
   const page = Math.max(1, Number.parseInt(params.page || '1', 10) || 1);
-  const availability: Availability = ['in_stock', 'out_of_stock'].includes(params.availability || '')
+  const availability: Availability = ['in_stock', 'out_of_stock', 'hidden'].includes(params.availability || '')
     ? params.availability as Availability
     : 'all';
   const filters: Filters = {
@@ -81,11 +82,12 @@ export default async function AdminMedicinesPage({ searchParams }: {
         <Link href={pageHref(1, { ...filters, availability: 'all' })}>Все</Link>
         <Link href={pageHref(1, { ...filters, availability: 'in_stock' })}>Доступные</Link>
         <Link href={pageHref(1, { ...filters, availability: 'out_of_stock' })}>Архивные</Link>
+        <Link href={pageHref(1, { ...filters, availability: 'hidden' })}>Скрытые от клиентов</Link>
       </div>
 
       <div style={{ overflowX: 'auto' }}>
         <table className="admin-table">
-          <thead><tr><th>Изображение</th><th>ID / SKU</th><th>Название</th><th>Базовая цена</th><th>Цена продажи</th><th>Страна / производитель</th><th>Наличие</th><th>Обновлено</th></tr></thead>
+          <thead><tr><th>Изображение</th><th>ID / SKU</th><th>Название</th><th>Базовая цена</th><th>Цена продажи</th><th>Страна / производитель</th><th>Наличие</th><th>Для клиентов</th><th>Обновлено</th></tr></thead>
           <tbody>
             {response.data.map((medicine) => (
               <tr key={medicine.medicine_id}>
@@ -97,10 +99,11 @@ export default async function AdminMedicinesPage({ searchParams }: {
                 <td><strong>{Number(medicine.selling_unit_price).toFixed(2)} TJS</strong></td>
                 <td>{medicine.country || '—'}<div className="admin-country">{medicine.vendor || '—'}</div></td>
                 <td><span className={`admin-stock-badge ${medicine.in_stock ? 'in-stock' : 'out-of-stock'}`}>{medicine.in_stock ? 'Доступно' : 'Архив'}</span></td>
+                <td><MedicineVisibilityToggle medicineId={medicine.medicine_id} initialHidden={medicine.hidden_from_clients === true} /></td>
                 <td>{medicine.updated_at ? new Date(medicine.updated_at).toLocaleString('ru-RU', { timeZone: PHARMACY_TIME_ZONE }) : '—'}</td>
               </tr>
             ))}
-            {response.data.length === 0 && <tr><td colSpan={8}>Лекарства не найдены.</td></tr>}
+            {response.data.length === 0 && <tr><td colSpan={9}>Лекарства не найдены.</td></tr>}
           </tbody>
         </table>
       </div>
