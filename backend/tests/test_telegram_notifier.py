@@ -18,6 +18,23 @@ from backend.v1.shared.order_notification_settings import default_policies
 
 
 class TelegramMessageTests(unittest.TestCase):
+    def test_website_payment_and_landmark_reach_owner_and_courier_but_not_pharmacy(self):
+        event = {'order_reference': '1234-001', 'address': 'Такси Худжанд', 'landmark': 'Отправка кардан даркор',
+                 'payment_method': 'e_wallet', 'items': []}
+        policies = default_policies()
+        for channel in ('owner_telegram', 'courier_telegram'):
+            text = format_configured_message(event, policies[channel], channel)
+            self.assertIn('📍 Адрес: Такси Худжанд\n', text)
+            self.assertIn('🧭 Ориентир: Отправка кардан даркор', text)
+            self.assertIn('💳 Оплата: электронный кошелёк', text)
+        self.assertNotIn('Оплата', format_configured_message(event, policies['pharmacy_telegram'], 'pharmacy_telegram'))
+        cash = format_configured_message({**event, 'payment_method': 'cash_on_delivery'},
+                                         policies['courier_telegram'], 'courier_telegram')
+        self.assertIn('💳 Оплата: наличными курьеру', cash)
+        staff = format_configured_message({'order_reference': '1234-002', 'items': []},
+                                          policies['owner_telegram'], 'owner_telegram')
+        self.assertNotIn('Оплата', staff)
+
     def test_recipient_policy_omits_private_fields(self):
         fields = default_policies()['courier_telegram']
         text = format_configured_message({

@@ -42,6 +42,7 @@ LOGGER.setLevel(logging.INFO)
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 20
 MINIMUM_ORDER_SUBTOTAL = 50
+DUPLICATE_ORDER_WINDOW_MINUTES = 10
 SEARCH_CANDIDATE_POOL = 400
 
 
@@ -385,7 +386,7 @@ def _order_response(order: dict[str, Any], items: list[dict[str, Any]], stage: s
         "order_id": order["public_id"],
         "order_reference": order["order_reference"],
         "status": order["status"],
-        "payment_method": "cash_on_delivery",
+        "payment_method": order.get("payment_method") or "cash_on_delivery",
         "payment_status": "unpaid",
         "currency": "TJS",
         "items": items,
@@ -397,6 +398,47 @@ def _order_response(order: dict[str, Any], items: list[dict[str, Any]], stage: s
         # Job 013: customer stage, derived in Lambda (shared.order_stage); `status` stays unchanged.
         response["stage"] = stage
     return response
+
+
+def _recent_duplicate_order(cur: Any, request: dict[str, Any]) -> dict[str, Any] | None:
+    """A website order from the same phone, to the same address, with exactly the same items, created in the
+    last DUPLICATE_ORDER_WINDOW_MINUTES and still pending: a second tap or a second tab, not a new order.
+    The caller holds a per-phone advisory lock, so two concurrent submits cannot both miss each other."""
+    cur.execute(
+        f"""
+        SELECT o.id, o.public_id, o.order_reference, o.status, o.items_subtotal, o.order_total, o.created_at,
+               o.payment_method, {assembled_sql("o")} AS stage_assembled
+        FROM orders o
+        WHERE o.phone_normalized = %s AND o.address = %s AND o.status = 'pending'
+          AND o.public_id IS NOT NULL AND o.deleted_at IS NULL AND o.created_by_staff_account_id IS NULL
+          AND o.created_at > CURRENT_TIMESTAMP - make_interval(mins => %s)
+        ORDER BY o.created_at DESC, o.id DESC
+        LIMIT 3
+        """,
+        (request["phone"], request["address"], DUPLICATE_ORDER_WINDOW_MINUTES),
+    )
+    candidates = [dict(row) for row in cur.fetchall() or []]
+    if not candidates:
+        return None
+    cur.execute(
+        """
+        SELECT order_id, medicine_id, medicine_name, selling_unit_price, quantity, line_total
+        FROM order_items WHERE order_id = ANY(%s) ORDER BY id ASC
+        """,
+        ([row["id"] for row in candidates],),
+    )
+    items_by_order: dict[int, list[dict[str, Any]]] = {}
+    for row in cur.fetchall() or []:
+        item = dict(row)
+        items_by_order.setdefault(item["order_id"], []).append(item)
+    wanted = sorted((item["medicine_id"], Decimal(str(item["quantity"]))) for item in request["items"])
+    for order in candidates:
+        items = items_by_order.get(order["id"], [])
+        if sorted((item["medicine_id"], Decimal(str(item["quantity"]))) for item in items) == wanted:
+            response_items = [{key: item[key] for key in ("medicine_id", "medicine_name", "quantity",
+                                                          "selling_unit_price", "line_total")} for item in items]
+            return _order_response(order, response_items, order_stage(order["status"], order.get("stage_assembled")))
+    return None
 
 
 def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[str, Any], int, dict[str, Any] | None]:
@@ -438,6 +480,23 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             if saved_response.get("created_at"):
                 saved_response["created_at"] = order_time_iso(saved_response["created_at"])
             return saved_response, int(existing["response_status"]), None
+
+        # A new idempotency key with the same order (second tab, page reopened) returns the order already made,
+        # with no second Telegram message. The lock is released when this transaction ends.
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"public-order:{request['phone']}",))
+        duplicate = _recent_duplicate_order(cur, request)
+        if duplicate is not None:
+            duplicate["deduplicated"] = True
+            cur.execute(
+                """
+                UPDATE order_idempotency
+                SET order_id = (SELECT id FROM orders WHERE public_id = %s), response_status = 200,
+                    response_body = %s::jsonb, completed_at = CURRENT_TIMESTAMP
+                WHERE idempotency_key = %s
+                """,
+                (duplicate["order_id"], json.dumps(duplicate, cls=ResponseEncoder), normalized_key),
+            )
+            return duplicate, 200, None
 
         medicine_ids = [item["medicine_id"] for item in request["items"]]
         cur.execute(
@@ -492,17 +551,17 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
                 user_id, customer_name, phone, phone_normalized, address, notes,
                 total_price, items_subtotal, order_total, public_id, status,
                 payment_method, payment_status, currency,
-                source_collection, utm_source, utm_medium, utm_campaign, utm_content
+                source_collection, utm_source, utm_medium, utm_campaign, utm_content, landmark
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending',
-                    'cash_on_delivery', 'unpaid', 'TJS', %s, %s, %s, %s, %s)
-            RETURNING id, public_id, status, items_subtotal, order_total, created_at
+                    %s, 'unpaid', 'TJS', %s, %s, %s, %s, %s, %s)
+            RETURNING id, public_id, status, items_subtotal, order_total, created_at, payment_method
             """,
             (
                 None, request["customer_name"], request["phone"], request["phone"], request["address"], request["comment"],
-                subtotal, subtotal, subtotal, public_id,
+                subtotal, subtotal, subtotal, public_id, request["payment_method"],
                 attribution.get("source_collection"), attribution.get("utm_source"), attribution.get("utm_medium"),
-                attribution.get("utm_campaign"), attribution.get("utm_content"),
+                attribution.get("utm_campaign"), attribution.get("utm_content"), request["landmark"],
             ),
         )
         order = dict(cur.fetchone())
@@ -555,6 +614,8 @@ def create_order(payload: dict[str, Any], idempotency_key: str) -> tuple[dict[st
             "customer_name": request["customer_name"],
             "phone": request["phone"],
             "address": request["address"],
+            "landmark": request["landmark"],
+            "payment_method": request["payment_method"],
             "comment": request["comment"],
             "source_collection": attribution.get("source_collection"),
             "utm_source": attribution.get("utm_source"),
@@ -682,7 +743,7 @@ def track_orders(payload: dict[str, Any]) -> dict[str, Any]:
         cur.execute(
             f"""
             SELECT o.id, o.public_id, o.order_reference, o.status, o.items_subtotal, o.order_total, o.created_at,
-                   {assembled_sql("o")} AS stage_assembled
+                   o.payment_method, {assembled_sql("o")} AS stage_assembled
             FROM orders o
             WHERE o.phone_normalized = %s AND o.public_id IS NOT NULL AND o.deleted_at IS NULL
             ORDER BY o.created_at DESC, o.id DESC
@@ -695,8 +756,11 @@ def track_orders(payload: dict[str, Any]) -> dict[str, Any]:
             return {"data": []}
         cur.execute(
             """
-            SELECT order_id, medicine_id, medicine_name, selling_unit_price, quantity, line_total
-            FROM order_items WHERE order_id = ANY(%s) ORDER BY id ASC
+            SELECT oi.order_id, oi.medicine_id, oi.medicine_name, oi.selling_unit_price, oi.quantity, oi.line_total,
+                   m.image_url
+            FROM order_items oi
+            LEFT JOIN medicines m ON m.id = oi.medicine_id
+            WHERE oi.order_id = ANY(%s) ORDER BY oi.id ASC
             """,
             ([row["id"] for row in orders],),
         )
@@ -706,7 +770,7 @@ def track_orders(payload: dict[str, Any]) -> dict[str, Any]:
             items_by_order.setdefault(item["order_id"], []).append({
                 "medicine_id": item["medicine_id"], "medicine_name": item["medicine_name"],
                 "selling_unit_price": item["selling_unit_price"], "quantity": item["quantity"],
-                "line_total": item["line_total"],
+                "line_total": item["line_total"], "image_url": item.get("image_url"),
             })
     return {"data": [_order_response(order, items_by_order.get(order["id"], []),
                                      order_stage(order["status"], order.get("stage_assembled")))

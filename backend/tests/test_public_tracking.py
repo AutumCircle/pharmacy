@@ -38,6 +38,11 @@ class PublicTrackingStageTests(unittest.TestCase):
             ('pending', 'assembling'), ('pending', 'assembled'), ('confirmed', 'confirmed'),
             ('delivering', 'delivering'), ('delivered', 'delivered'), ('cancelled', 'cancelled')])
         self.assertEqual(result['data'][1]['items'][0]['medicine_name'], 'A')
+        # Checkout redesign: the item photo comes from the catalogue (missing for legacy rows) and the
+        # payment method from the order row (rows without it read as cash).
+        self.assertIsNone(result['data'][1]['items'][0]['image_url'])
+        self.assertEqual(result['data'][0]['payment_method'], 'cash_on_delivery')
+        self.assertIn('LEFT JOIN medicines m ON m.id = oi.medicine_id', cursor.execute.call_args_list[1].args[0])
         for row in result['data']:
             self.assertNotIn('stage_assembled', row)
         # Two statements whatever the number of orders: the stage is computed inside the order SELECT.
@@ -50,6 +55,13 @@ class PublicTrackingStageTests(unittest.TestCase):
             self.assertTrue(call.args[0].lstrip().startswith('SELECT'))
             self.assertNotIn('INSERT', call.args[0])
             self.assertNotIn('UPDATE', call.args[0])
+
+    def test_item_photo_and_e_wallet_are_returned(self):
+        row = {**order_row(1, 'pending', False), 'payment_method': 'e_wallet'}
+        result, _ = self._track([row], [{'order_id': 1, 'medicine_id': 7, 'medicine_name': 'A', 'selling_unit_price': 50,
+                                         'quantity': 2, 'line_total': 100, 'image_url': 'https://img.example/a.jpg'}])
+        self.assertEqual(result['data'][0]['payment_method'], 'e_wallet')
+        self.assertEqual(result['data'][0]['items'][0]['image_url'], 'https://img.example/a.jpg')
 
     def test_one_order_uses_the_same_two_statements(self):
         _, cursor = self._track([order_row(1, 'pending', True)])

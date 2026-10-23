@@ -1226,7 +1226,7 @@ _COURIER_ORDER_PHARMACY_SQL = """COALESCE(o.fulfillment_pharmacy_id,
 _COURIER_ORDER_SELECT = f"""
     SELECT o.id, o.public_id, o.order_reference, o.customer_name, o.phone,
            o.address, o.landmark, o.notes, o.order_source, o.status, o.created_at,
-           o.delivery_courier_amount, o.order_total,
+           o.delivery_courier_amount, o.order_total, o.payment_method,
            o.created_by_staff_account_id IS NULL AS website_order,
            COALESCE(o.created_by_staff_account_id = 3, false) AS own_order,
            COALESCE(items.medicines, '[]'::json) AS medicines,

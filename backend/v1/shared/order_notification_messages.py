@@ -9,6 +9,9 @@ from backend.v1.shared.order_notification_settings import CHANNELS, FIELDS
 from backend.v1.shared.order_time import order_time_dushanbe
 
 
+PAYMENT_LABELS = {"cash_on_delivery": "наличными курьеру", "e_wallet": "электронный кошелёк"}
+
+
 def _money(value: Any) -> str:
     try:
         return f"{Decimal(str(value)).quantize(Decimal('0.01'))} с."
@@ -47,6 +50,11 @@ def format_configured_message(event: dict[str, Any], fields: dict[str, bool], ch
             value = f"Аптека {event.get('fulfillment_pharmacy_id') or 1}"
         if value is not None and str(value).strip():
             lines.append(f"{label}: {html.escape(str(value)[:500])}")
+    # Website checkout payment choice: the owner and the courier need it to collect the money, the pharmacy
+    # does not. Staff orders carry no payment_method, so they get no line.
+    payment = PAYMENT_LABELS.get(str(event.get("payment_method") or ""))
+    if payment and channel in ("owner_telegram", "courier_telegram"):
+        lines.append(f"💳 Оплата: {payment}")
     amount_lines = []
     for field, label, key in (
         ("client_total", "💵 Клиентская сумма", "order_total"),

@@ -29,7 +29,10 @@ class ContractError(ValueError):
         self.fields = fields or {}
 
 
-ORDER_FIELDS = {"customer_name", "phone", "address", "comment", "items", "attribution"}
+ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "payment_method", "comment", "items", "attribution"}
+# Website checkout: the customer's choice is only recorded with the order; nobody is charged online.
+PUBLIC_PAYMENT_METHODS = frozenset({"cash_on_delivery", "e_wallet"})
+DEFAULT_PAYMENT_METHOD = "cash_on_delivery"
 ORDER_ITEM_FIELDS = {"medicine_id", "quantity"}
 STAFF_ORDER_FIELDS = {"customer_name", "phone", "address", "landmark", "source", "items", "manual_items", "pharmacy_id", "comment"}
 STAFF_ORDER_SOURCES = frozenset({"instagram", "whatsapp", "phone"})
@@ -208,6 +211,29 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
     phone = normalize_phone(payload.get("phone"))
     address = _required_text(payload.get("address"), "address", minimum=5, maximum=500)
 
+    # Optional since the checkout redesign; older clients put it in brackets inside `address`.
+    landmark_value = payload.get("landmark")
+    if landmark_value is None:
+        landmark = None
+    elif isinstance(landmark_value, str) and len(landmark_value.strip()) <= 300:
+        landmark = landmark_value.strip() or None
+    else:
+        raise ContractError(
+            "VALIDATION_ERROR",
+            "Request validation failed",
+            fields={"landmark": "must be a string with at most 300 characters"},
+        )
+
+    payment_method = payload.get("payment_method")
+    if payment_method is None:
+        payment_method = DEFAULT_PAYMENT_METHOD
+    elif not isinstance(payment_method, str) or payment_method not in PUBLIC_PAYMENT_METHODS:
+        raise ContractError(
+            "VALIDATION_ERROR",
+            "Request validation failed",
+            fields={"payment_method": "must be cash_on_delivery or e_wallet"},
+        )
+
     comment_value = payload.get("comment")
     if comment_value is None:
         comment = None
@@ -277,6 +303,8 @@ def validate_create_order_request(payload: Any) -> dict[str, Any]:
         "customer_name": customer_name,
         "phone": phone,
         "address": address,
+        "landmark": landmark,
+        "payment_method": payment_method,
         "comment": comment,
         "items": normalized_items,
         "attribution": normalize_attribution(payload.get("attribution")),
