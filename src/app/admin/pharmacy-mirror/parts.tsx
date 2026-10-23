@@ -7,6 +7,8 @@ import {
   type MirrorPrices,
 } from '@/lib/pharmacy-mirror';
 import { oracleFieldLabel, oracleFieldValue } from '@/lib/pharmacy-mirror-fields';
+import Help from './Help';
+import { oracleFieldHelpTopic } from '@/lib/pharmacy-mirror-help';
 export function Pager({
   total,
   page,
@@ -52,15 +54,21 @@ export function Prices({ prices }: { prices: MirrorPrices }) {
   return (
     <div className="mirror-prices">
       <div>
-        <span>Продажа · уровень 1</span>
+        <span>
+          Цена продажи <Help topic="sale" />
+        </span>
         <strong>{mirrorPriceRange(prices.sale_price_min, prices.sale_price_max)}</strong>
       </div>
       <div>
-        <span>Приход · за единицу</span>
+        <span>
+          Цена прихода <Help topic="purchase" />
+        </span>
         <strong>{mirrorPriceRange(prices.purchase_price_min, prices.purchase_price_max)}</strong>
       </div>
       {prices.price_basis === 'historical' && (
-        <small>Цены прошлых партий — положительного остатка сейчас нет.</small>
+        <small>
+          Цены прошлых поступлений <Help topic="historicalPrice" />
+        </small>
       )}
     </div>
   );
@@ -70,11 +78,11 @@ export function Valuation({ prices }: { prices: MirrorPrices }) {
   return (
     <div className="mirror-prices">
       <div>
-        <span>По продаже</span>
+        <span>По ценам продажи</span>
         <strong>{mirrorMoney(prices.sale_value)}</strong>
       </div>
       <div>
-        <span>По приходу</span>
+        <span>По ценам прихода</span>
         <strong>{mirrorMoney(prices.purchase_value)}</strong>
       </div>
     </div>
@@ -90,6 +98,7 @@ export function OracleFields({ row }: { row: OracleRow }) {
           <div key={key}>
             <dt>
               {oracleFieldLabel(key)}
+              <Help topic={oracleFieldHelpTopic(key)} />
               <code>{key}</code>
             </dt>
             <dd>{oracleFieldValue(value)}</dd>

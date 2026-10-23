@@ -928,3 +928,10 @@ positive-stock batches, falling back to historical batches only if none has
 positive stock. Values sum each batch's quantity × its own price; missing prices
 for nonzero batches make the relevant value null. Stock rows also include
 `purchase_price` and `income_barcode` from that exact income. No data writes.
+
+UX extension (2026-10-23): detail additionally accepts `stock_view=all|nonzero`
+(API default `all` for existing callers; UI default `nonzero`). Filtering occurs
+in parameterized Lambda SQL before pagination. `stocks.total` matches the chosen
+view. `stock.current_stock_rows` counts nonzero or malformed/missing-quantity
+records; zero-only rows are hidden in the default UI, negative/unknown rows stay
+visible for inspection. Overall stock and valuation always include all rows.
