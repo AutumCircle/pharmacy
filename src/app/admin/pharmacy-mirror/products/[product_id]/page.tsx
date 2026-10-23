@@ -5,6 +5,7 @@ import { getMirrorProduct } from '@/lib/api-v1/pharmacy-mirror-server';
 import { ApiV1Error } from '@/lib/api-v1/server';
 import { mirrorTime, mirrorQuantity, mirrorMoney } from '@/lib/pharmacy-mirror';
 import Refresh from '../../Refresh';
+import Help from '../../Help';
 import { Pager, Raw, ReadOnly, Prices, Valuation, OracleFields } from '../../parts';
 
 export const dynamic = 'force-dynamic';
@@ -22,63 +23,59 @@ export default async function ProductPage({
     typeof v === 'string' && /^[1-9][0-9]{0,3}$/.test(v) ? Number(v) : 1;
   const stockPage = page(query.stock_page),
     incomePage = page(query.income_page);
-  const data = await getMirrorProduct(id, stockPage, incomePage).catch((error) => {
+  const stockView = query.stock_view === 'all' ? 'all' : 'nonzero';
+  const data = await getMirrorProduct(id, stockPage, incomePage, stockView).catch((error) => {
     if (error instanceof ApiV1Error && error.status === 404) notFound();
     throw error;
   });
   const { product, stock, dictionaries } = data;
-  const value = (k: string) => String(product.oracle[k] ?? '—');
-  const href = (s: number, i: number) =>
-    `/admin/pharmacy-mirror/products/${id}?stock_page=${s}&income_page=${i}`;
+  const value = (k: string) => String(product.oracle[k] ?? 'Не указано');
+  const href = (s: number, i: number, view = stockView) =>
+    `/admin/pharmacy-mirror/products/${id}?stock_page=${s}&income_page=${i}&stock_view=${view}`;
   return (
     <>
-      <Link href="/admin/pharmacy-mirror">← К поиску</Link>
+      <Link className="mirror-back" href="/admin/pharmacy-mirror">
+        ← К поиску товаров
+      </Link>
       <header className="mirror-header">
         <div>
           <h1>{value('PRODUCT_NAME')}</h1>
           <p className="mirror-product-id">
-            ID товара в «Алгоритме»: <strong>{id}</strong> <code>PRODUCT_ID</code>
+            Номер товара: <strong>{id}</strong> <Help topic="productId" />
           </p>
-          <ReadOnly />
+          <div className="mirror-inline">
+            <ReadOnly />
+            <Help topic="shadow" />
+          </div>
         </div>
         <Refresh />
       </header>
-      <p>Обновление каждые 60 секунд. Время Душанбе (UTC+5).</p>
-      <section className="mirror-panel" aria-label="Цены и текущий остаток">
-        <h2>Цены и текущий остаток</h2>
+      <section className="mirror-panel mirror-overview" aria-label="Цены и текущий остаток">
+        <h2>Главное о товаре</h2>
         <div className="mirror-summary-grid">
-          <div>
-            <span>Количество в наличии</span>
+          <div className="mirror-quantity-tile">
+            <span>
+              Общий остаток <Help topic="stock" />
+            </span>
             <strong>
-              {mirrorQuantity(stock.total_stock, stock.stock_rows, stock.invalid_stock_rows)}
+              {stock.stock_rows === 0
+                ? 'Нет данных'
+                : mirrorQuantity(stock.total_stock, stock.stock_rows, stock.invalid_stock_rows)}
             </strong>
+            <small>Единица учёта: {dictionaries.measure.name || 'не указана'}</small>
           </div>
-          <div>
-            <span>Цены за единицу, с НДС</span>
-            <Prices prices={stock} />
-          </div>
-          <div>
-            <span>Стоимость текущего остатка</span>
-            <Valuation prices={stock} />
-          </div>
+          <Prices prices={stock} />
         </div>
-        <p className="mirror-meta">
-          Продажа — OUTCOME_PRICE_ONE_W_NDS (уровень 1), приход — INCOME_PRICE_W_NDS. Диапазон
-          учитывает партии с положительным остатком; если их нет, показаны исторические цены.
-          Стоимость остатка — сумма «остаток партии × её цена», без вычитания резерва. Это не
-          выручка и не общая сумма документов прихода. Если цена отсутствует у ненулевой партии,
-          итоговая стоимость не рассчитывается.
+        <p className="mirror-last-update">
+          Изменение остатков получено: {mirrorTime(stock.stock_received_at)}{' '}
+          <Help topic="received" />
         </p>
       </section>
       <section className="mirror-panel">
-        <h2>Основная информация</h2>
+        <h2>О товаре</h2>
         <dl className="mirror-facts">
           <div>
-            <dt>ID товара · PRODUCT_ID</dt>
-            <dd>{id}</dd>
-          </div>
-          <div>
-            <dt>Штрихкод товара · SCAN_CODE</dt>
+            <dt>Штрихкод</dt>
             <dd>{value('SCAN_CODE')}</dd>
           </div>
           {(
@@ -87,137 +84,210 @@ export default async function ProductPage({
               ['country', 'Страна'],
               ['mnn', 'МНН'],
               ['group', 'Группа'],
-              ['measure', 'Единица'],
               ['type', 'Тип'],
             ] as const
           ).map(([key, label]) => (
             <div key={key}>
               <dt>{label}</dt>
-              <dd>
-                {dictionaries[key].name ??
-                  (dictionaries[key].id != null
-                    ? `ID ${dictionaries[key].id} · справочник не найден`
-                    : 'Не указано в источнике')}
-              </dd>
+              <dd>{dictionaries[key].name || 'Не указано'}</dd>
             </div>
           ))}
         </dl>
-        <p className="mirror-meta">
-          Скопировано: {mirrorTime(product.source_generated_at)} · Получено:{' '}
-          {mirrorTime(product.received_at)} · Номер изменения: {product.change_id ?? '—'}
-        </p>
-        <h3>Все поля товара</h3>
-        <OracleFields row={product} />
-        <Raw row={product} />
       </section>
-      <section className="mirror-panel">
-        <h2>Остатки по складам и партиям</h2>
-        <p>
-          Записей: {stock.stock_rows}. Получены: {mirrorTime(stock.stock_received_at)} · Последнее
-          изменение: <strong>{stock.stock_max_change_id ?? '—'}</strong>
-        </p>
-        <p className="mirror-meta">
-          Партия — INCOME_ID, строка остатка — SKLAD_STATE_ID. Они отличаются от ID товара
-          PRODUCT_ID. Раскройте строку, чтобы увидеть все значения.
-        </p>
-        {stock.stock_received_at &&
-          Date.parse(data.checked_at) - Date.parse(stock.stock_received_at) > 180_000 && (
-            <p className="mirror-warning">
-              Остатки давно не менялись. После продажи проверьте количество и время получения;
-              отсутствие изменений само по себе не означает потерю связи.
-            </p>
-          )}
+      <section className="mirror-panel" id="stock-breakdown">
+        <div className="mirror-section-heading">
+          <h2>Из чего складывается остаток</h2>
+          <Help topic="receipt" />
+        </div>
+        <div className="mirror-stock-controls">
+          <nav className="mirror-view-switch" aria-label="Какие поступления показывать">
+            <Link
+              href={href(1, incomePage, 'nonzero') + '#stock-breakdown'}
+              aria-current={stockView === 'nonzero' ? 'page' : undefined}
+            >
+              С остатком
+            </Link>
+            <Link
+              href={href(1, incomePage, 'all') + '#stock-breakdown'}
+              aria-current={stockView === 'all' ? 'page' : undefined}
+            >
+              Все поступления
+            </Link>
+          </nav>
+          <Help topic="history" />
+        </div>
+        <p className="mirror-meta">Найдено записей: {data.stocks.total.toLocaleString('ru-RU')}</p>
         {data.stocks.items.length === 0 && (
-          <p>
-            Нет данных об остатке на этой странице зеркала. Это не подтверждённый нулевой остаток.
+          <p className="mirror-empty">
+            {stock.stock_rows === 0
+              ? 'В зеркале пока нет данных об остатке этого товара.'
+              : stockView === 'nonzero' && stock.current_stock_rows === 0
+                ? 'Все найденные записи имеют нулевой остаток. Они доступны в списке «Все поступления».'
+                : 'На этой странице записей нет.'}
           </p>
         )}
         <div className="mirror-records">
           {data.stocks.items.map((row) => (
-            <article key={row.row_key}>
+            <article className="mirror-stock-record" key={row.row_key}>
               <details>
                 <summary>
-                  <span>
-                    {row.warehouse_name || `Склад ${row.oracle.SKLAD_ID ?? '—'}`} · Партия{' '}
-                    {String(row.oracle.INCOME_ID ?? '—')}
+                  <span className="mirror-record-quantity">
+                    Осталось: {String(row.oracle.PRODUCT_COUNT_SKLAD ?? 'нет данных')}
                   </span>
                   <small>
-                    Остаток:{' '}
-                    <strong>{String(row.oracle.PRODUCT_COUNT_SKLAD ?? 'нет данных')}</strong> ·
-                    Резерв: {String(row.oracle.PRODUCT_COUNT_REZERV ?? '—')}
+                    {row.warehouse_name || `Склад ${row.oracle.SKLAD_ID ?? 'не указан'}`}
                   </small>
-                  <small>
+                  <small className="mirror-record-prices">
                     Продажа:{' '}
-                    {mirrorMoney(row.oracle.OUTCOME_PRICE_ONE_W_NDS as string | number | null)} ·
-                    Приход: {mirrorMoney(row.purchase_price)}
+                    <strong>
+                      {mirrorMoney(row.oracle.OUTCOME_PRICE_ONE_W_NDS as string | number | null)}
+                    </strong>{' '}
+                    · Приход: <strong>{mirrorMoney(row.purchase_price)}</strong>
                   </small>
+                  <span className="mirror-record-more">Подробнее о поступлении</span>
                 </summary>
                 <dl className="mirror-facts">
                   <div>
-                    <dt>ID строки остатка · SKLAD_STATE_ID</dt>
-                    <dd>{row.row_key}</dd>
+                    <dt>
+                      Номер поступления <Help topic="receiptId" />
+                    </dt>
+                    <dd>{String(row.oracle.INCOME_ID ?? 'Нет данных')}</dd>
                   </div>
                   <div>
-                    <dt>Штрихкод партии</dt>
-                    <dd>{row.income_barcode || 'Нет данных'}</dd>
+                    <dt>
+                      Склад <Help topic="warehouse" />
+                    </dt>
+                    <dd>{row.warehouse_name || String(row.oracle.SKLAD_ID ?? 'Нет данных')}</dd>
                   </div>
                   <div>
-                    <dt>Цена прихода, с НДС</dt>
-                    <dd>{mirrorMoney(row.purchase_price)}</dd>
+                    <dt>
+                      В резерве <Help topic="reserve" />
+                    </dt>
+                    <dd>{String(row.oracle.PRODUCT_COUNT_REZERV ?? 'Нет данных')}</dd>
                   </div>
                   <div>
-                    <dt>Получено</dt>
+                    <dt>Штрихкод поступления</dt>
+                    <dd>{row.income_barcode || 'Не указан'}</dd>
+                  </div>
+                  <div>
+                    <dt>
+                      Получено в AWS <Help topic="received" />
+                    </dt>
                     <dd>{mirrorTime(row.received_at)}</dd>
                   </div>
                 </dl>
-                <OracleFields row={row} />
-                <Raw row={row} />
+                <details className="mirror-technical">
+                  <summary>Исходные поля этой записи</summary>
+                  <OracleFields row={row} />
+                  <Raw row={row} />
+                </details>
               </details>
             </article>
           ))}
         </div>
-        <Pager total={data.stocks.total} page={stockPage} href={(p) => href(p, incomePage)} />
+        {data.stocks.total > 25 && (
+          <Pager
+            total={data.stocks.total}
+            page={stockPage}
+            href={(p) => href(p, incomePage) + '#stock-breakdown'}
+          />
+        )}
       </section>
       <section className="mirror-panel">
-        <h2>Связанные приходы / партии</h2>
-        <p>
-          Здесь показаны цены, количества и суммы каждого прихода. INCOME_ID — ID прихода,
-          INCOME_HEAD_ID — ID его документа. Дата INCOME_DATE_OLD сохранена под исходным названием.
-        </p>
-        {data.incomes.items.length === 0 && <p>Нет приходов на этой странице.</p>}
-        <div className="mirror-records">
-          {data.incomes.items.map((row) => (
-            <article key={row.row_key}>
-              <details>
-                <summary>
-                  <span>Приход / партия № {row.row_key}</span>
-                  <small>
-                    Количество: {String(row.oracle.INCOME_COUNT ?? '—')} · Цена:{' '}
-                    {mirrorMoney(row.oracle.INCOME_PRICE_W_NDS as string | number | null)}
-                  </small>
-                  <small>
-                    Сумма прихода:{' '}
-                    {mirrorMoney(row.oracle.INCOME_SUM_W_NDS as string | number | null)} · Дата
-                    INCOME_DATE_OLD: {String(row.oracle.INCOME_DATE_OLD ?? '—').slice(0, 10)}
-                  </small>
-                </summary>
-                <h3>Все поля прихода</h3>
-                <OracleFields row={row} />
-                <Raw row={row} />
-              </details>
-            </article>
-          ))}
+        <div className="mirror-section-heading">
+          <h2>Стоимость всего остатка</h2>
+          <Help topic="valuation" />
         </div>
-        <Pager total={data.incomes.total} page={incomePage} href={(p) => href(stockPage, p)} />
+        <details className="mirror-valuation">
+          <summary>Посмотреть суммы по продаже и приходу</summary>
+          <Valuation prices={stock} />
+        </details>
       </section>
-      <p className="mirror-meta">
-        Показаны все разрешённые поля, которые получены в зеркале. Пустые Oracle-поля агент не
-        передаёт. Служебные данные сотрудников и контрагентов скрыты.
+      <section className="mirror-panel" id="income-history">
+        <div className="mirror-section-heading">
+          <h2>История поступлений</h2>
+          <Help topic="history" />
+        </div>
+        <details className="mirror-income-history" open={incomePage > 1}>
+          <summary>
+            Посмотреть историю · записей {data.incomes.total.toLocaleString('ru-RU')}
+          </summary>
+          {data.incomes.items.length === 0 && (
+            <p className="mirror-empty">Записей о поступлениях на этой странице нет.</p>
+          )}
+          <div className="mirror-records">
+            {data.incomes.items.map((row) => (
+              <article className="mirror-income-record" key={row.row_key}>
+                <details>
+                  <summary>
+                    <span>Поступило: {String(row.oracle.INCOME_COUNT ?? 'нет данных')}</span>
+                    <small>
+                      Цена прихода за единицу:{' '}
+                      <strong>
+                        {mirrorMoney(row.oracle.INCOME_PRICE_W_NDS as string | number | null)}
+                      </strong>
+                    </small>
+                    <span className="mirror-record-more">Подробнее о поступлении</span>
+                  </summary>
+                  <dl className="mirror-facts">
+                    <div>
+                      <dt>
+                        Номер поступления <Help topic="receiptId" />
+                      </dt>
+                      <dd>{row.row_key}</dd>
+                    </div>
+                    <div>
+                      <dt>
+                        Сумма строки прихода <Help topic="incomeSum" />
+                      </dt>
+                      <dd>{mirrorMoney(row.oracle.INCOME_SUM_W_NDS as string | number | null)}</dd>
+                    </div>
+                    <div>
+                      <dt>Штрихкод поступления</dt>
+                      <dd>{String(row.oracle.INCOME_SCAN_CODE ?? 'Не указан')}</dd>
+                    </div>
+                    <div>
+                      <dt>
+                        Дата из «Алгоритма» <Help topic="sourceDate" />
+                      </dt>
+                      <dd>{String(row.oracle.INCOME_DATE_OLD ?? 'Не указана')}</dd>
+                    </div>
+                  </dl>
+                  <details className="mirror-technical">
+                    <summary>Все поля этого прихода</summary>
+                    <OracleFields row={row} />
+                    <Raw row={row} />
+                  </details>
+                </details>
+              </article>
+            ))}
+          </div>
+          <Pager
+            total={data.incomes.total}
+            page={incomePage}
+            href={(p) => href(stockPage, p) + '#income-history'}
+          />
+        </details>
+      </section>
+      <section className="mirror-panel">
+        <div className="mirror-section-heading">
+          <h2>Данные «Алгоритма»</h2>
+          <Help topic="raw" />
+        </div>
+        <details className="mirror-product-source">
+          <summary>Все исходные поля товара</summary>
+          <p className="mirror-meta">
+            PRODUCT_ID: {id} · CHANGE_ID: {product.change_id ?? 'нет в источнике'} · Скопировано:{' '}
+            {mirrorTime(product.source_generated_at)} · Получено: {mirrorTime(product.received_at)}
+          </p>
+          <OracleFields row={product} />
+          <Raw row={product} />
+          <p className="mirror-meta">{data.site_comparison.reason}</p>
+        </details>
+      </section>
+      <p className="mirror-page-note">
+        Страница обновляется раз в минуту. Время Душанбе (UTC+5). <Help topic="sync" />
       </p>
-      <section className="mirror-panel">
-        <h2>Сравнение с действующим сайтом</h2>
-        <p>{data.site_comparison.reason}</p>
-      </section>
     </>
   );
 }

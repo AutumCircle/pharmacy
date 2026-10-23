@@ -59,10 +59,15 @@ export function searchMirrorProducts(q: string, mode: string, page: number) {
     validMirrorProducts,
   );
 }
-export function getMirrorProduct(id: string, stockPage: number, incomePage: number) {
+export function getMirrorProduct(
+  id: string,
+  stockPage: number,
+  incomePage: number,
+  stockView: 'nonzero' | 'all' = 'nonzero',
+) {
   if (!/^[0-9]{1,18}$/.test(id)) throw new ApiV1Error(404, 'NOT_FOUND', 'Товар не найден');
   return read(
-    `products/${id}?stock_page=${stockPage}&income_page=${incomePage}`,
+    `products/${id}?stock_page=${stockPage}&income_page=${incomePage}&stock_view=${stockView}`,
     validMirrorDetail,
   );
 }

@@ -76,8 +76,31 @@ async function main() {
     await page.waitForURL(/q=/);
     await page.locator('.mirror-desktop tbody tr').first().waitFor();
     assert.equal(await page.locator('.mirror-desktop tbody tr').count(), 25);
-    assert.equal(await page.locator('.mirror-desktop .mirror-prices').count(), 50);
-    await page.getByRole('columnheader', { name: 'Цены за единицу, с НДС', exact: true }).waitFor();
+    assert.equal(await page.locator('.mirror-desktop .mirror-prices').count(), 25);
+    await page.getByRole('columnheader', { name: 'Цены за единицу', exact: true }).waitFor();
+    const priceHelp = page
+      .locator('.mirror-desktop')
+      .getByRole('button', { name: 'Пояснение: Цена продажи', exact: true })
+      .first();
+    await priceHelp.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog');
+    await dialog.waitFor();
+    assert.match(await dialog.innerText(), /60–64/);
+    await page.keyboard.press('Tab');
+    assert(
+      await page.evaluate(() => !!document.activeElement?.closest('dialog')),
+      'Help dialog must retain keyboard focus',
+    );
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden' });
+    assert(
+      await priceHelp.evaluate((element) => document.activeElement === element),
+      'Escape must return focus to help button',
+    );
+    await priceHelp.click();
+    await dialog.getByRole('button', { name: 'Понятно', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
       false,
@@ -99,15 +122,41 @@ async function main() {
     await page.getByText('Введите минимум 2 символа.', { exact: true }).waitFor();
     await page.goto(base + '/admin/pharmacy-mirror/products/144403');
     await page
-      .getByRole('heading', { name: 'Остатки по складам и партиям', exact: true })
+      .getByRole('heading', { name: 'Из чего складывается остаток', exact: true })
       .waitFor();
-    await page.getByRole('heading', { name: 'Цены и текущий остаток', exact: true }).waitFor();
-    assert.match(await page.locator('.mirror-product-id').innerText(), /144403.*PRODUCT_ID/);
+    await page.getByRole('heading', { name: 'Главное о товаре', exact: true }).waitFor();
+    assert.match(await page.locator('.mirror-product-id').innerText(), /144403/);
+    assert.equal(await page.locator('.mirror-income-history').getAttribute('open'), null);
+    assert.equal(await page.locator('.mirror-product-source').getAttribute('open'), null);
+    assert.equal(await page.locator('.mirror-valuation').getAttribute('open'), null);
+    const currentRows = await page.locator('.mirror-stock-record').count();
+    for (const summary of await page.locator('.mirror-stock-record > details > summary').all()) {
+      const quantity = /Осталось:\s*(-?[0-9]+(?:[.,][0-9]+)?)/.exec(await summary.innerText());
+      if (quantity)
+        assert.notEqual(
+          Number(quantity[1].replace(',', '.')),
+          0,
+          'Default stock list must hide zero rows',
+        );
+    }
+    await page
+      .getByRole('button', { name: 'Пояснение: Что такое поступление?', exact: true })
+      .click();
+    await dialog.waitFor();
+    assert.match(await dialog.innerText(), /не относятся к отдельным дням/);
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden' });
+    await page.screenshot({ path: out + '/desktop-detail.png', fullPage: true });
+    await page.getByRole('link', { name: 'Все поступления', exact: true }).click();
+    await page.waitForURL(/stock_view=all/);
+    assert((await page.locator('.mirror-stock-record').count()) >= currentRows);
+    await page.locator('.mirror-product-source > summary').click();
+    await page.locator('.mirror-product-source .mirror-oracle-fields').waitFor();
     assert(
-      (await page.locator('.mirror-oracle-fields').first().locator(':scope > div').count()) >= 10,
+      (await page.locator('.mirror-product-source .mirror-oracle-fields').locator(':scope > div').count()) >= 10,
     );
-    await page.locator('details').first().locator('summary').click();
-    await page.locator('pre').first().waitFor();
+    await page.locator('.mirror-product-source > details > summary').click();
+    await page.locator('.mirror-product-source pre').waitFor();
     assert.equal(
       await page
         .locator('button')
@@ -115,7 +164,6 @@ async function main() {
         .count(),
       0,
     );
-    await page.screenshot({ path: out + '/desktop-detail.png', fullPage: true });
     for (const width of [390, 320]) {
       await page.setViewportSize({ width, height: 844 });
       await page.goto(base + '/admin/pharmacy-mirror?q=440050&mode=id');
@@ -126,11 +174,22 @@ async function main() {
         'Mobile search overflow ' + width,
       );
       await page.screenshot({ path: out + '/mobile-search-' + width + '.png', fullPage: true });
-      await page.goto(base + '/admin/pharmacy-mirror/products/144403');
       await page
-        .getByRole('heading', { name: 'Связанные приходы / партии', exact: true })
-        .waitFor();
-      await page.locator('details').first().locator('summary').click();
+        .locator('.mirror-mobile article')
+        .first()
+        .getByRole('button', { name: 'Пояснение: Что означает остаток?', exact: true })
+        .click();
+      await dialog.waitFor();
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+        false,
+        'Mobile help overflow',
+      );
+      await page.screenshot({ path: out + '/mobile-help-' + width + '.png', animations: 'disabled' });
+      await page.mouse.click(3, 3);
+      await dialog.waitFor({ state: 'hidden' });
+      await page.goto(base + '/admin/pharmacy-mirror/products/144403');
+      await page.getByRole('heading', { name: 'История поступлений', exact: true }).waitFor();
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
         false,
@@ -140,7 +199,7 @@ async function main() {
     }
     assert.deepEqual(mutations, [], 'Mirror UI must only issue reads');
     console.log(
-      'PASS: anonymous auth redirect; 25-row desktop results; page 2; literal wildcard empty state; keyboard Enter validation; raw Oracle detail; no edit controls; 390/320px layouts without overflow; GET-only browser traffic',
+      'PASS: auth; search/pagination/empty states; click/keyboard help, Escape/focus return, confirm/backdrop close; nonzero/all stock views; collapsed history/values/technical fields; raw JSON; desktop and 390/320px without overflow; GET-only traffic',
     );
   } finally {
     await browser.close();

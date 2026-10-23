@@ -1,36 +1,50 @@
 .pharmacy-mirror {
-  max-width: 1440px;
+  max-width: 1400px;
   margin: auto;
   min-width: 0;
-  color: #18362d;
+  color: #193c30;
   font-size: 14px;
   overflow-wrap: anywhere;
 }
 .pharmacy-mirror h1 {
-  font-size: clamp(22px, 3vw, 30px);
-  line-height: 1.2;
+  font-size: clamp(23px, 3vw, 30px);
+  line-height: 1.25;
   margin: 10px 0;
 }
 .pharmacy-mirror h2 {
   font-size: 18px;
-  margin: 0 0 12px;
+  line-height: 1.4;
+  margin: 0;
 }
 .pharmacy-mirror h3 {
   font-size: 15px;
-  margin: 0 0 8px;
 }
 .pharmacy-mirror p {
   margin: 10px 0;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 .pharmacy-mirror a {
-  color: #126147;
-  text-decoration: underline;
+  color: #16644a;
   text-underline-offset: 3px;
 }
-.pharmacy-mirror :focus-visible {
-  outline: 3px solid #058f71;
+.pharmacy-mirror :focus-visible,
+.mirror-help-dialog :focus-visible {
+  outline: 3px solid #17896a;
   outline-offset: 3px;
+}
+.pharmacy-mirror button {
+  background: #176648;
+  color: white;
+  border: 0;
+  border-radius: 9px;
+  padding: 11px 16px;
+  min-height: 44px;
+  font: inherit;
+  cursor: pointer;
+}
+.pharmacy-mirror button:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 .mirror-header {
   display: flex;
@@ -39,185 +53,587 @@
   gap: 16px;
   flex-wrap: wrap;
 }
+.mirror-inline {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
 .mirror-badge {
   display: inline-block;
   background: #edf6f1;
-  border: 1px solid #bad7c7;
+  color: #236048;
+  border: 1px solid #c6dfd0;
   border-radius: 30px;
-  padding: 5px 12px;
+  padding: 4px 12px;
+  font-size: 12px;
   font-weight: 600;
 }
 .mirror-panel {
-  background: #fff;
-  border: 1px solid #d8e5de;
-  border-radius: 14px;
-  padding: 20px;
+  background: white;
+  border: 1px solid #dbe7e0;
+  border-radius: 16px;
+  padding: 22px;
   margin: 18px 0;
   min-width: 0;
 }
-.mirror-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 16px;
+.mirror-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
 }
-.mirror-stats strong {
-  display: block;
-  font-size: 18px;
-  margin-top: 6px;
+.mirror-section-heading h2 {
+  min-width: 0;
 }
-.mirror-meta {
+.mirror-meta,
+.mirror-page-note {
+  color: #5b7165;
   font-size: 12px;
-  color: #53675e;
+}
+.mirror-page-note {
+  margin: 22px 0 !important;
 }
 .mirror-warning {
-  background: #fff4db;
-  border-left: 4px solid #bd7518;
   padding: 12px;
-  color: #704709;
+  border-left: 4px solid #b97925;
+  background: #fff4df;
+  color: #77501b;
+  border-radius: 4px;
+}
+.mirror-empty {
+  padding: 20px;
+  background: #f4f8f5;
+  border-radius: 12px;
+  color: #50695b;
+}
+.mirror-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+.mirror-stats > div {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+.mirror-stats > div > span {
+  font-size: 12px;
+  color: #576d61;
+}
+.mirror-stats strong {
+  font-size: 17px;
+  font-weight: 650;
+}
+.mirror-stats small {
+  font-size: 12px;
+  color: #6a7a71;
+}
+.mirror-online {
+  color: #137349;
+}
+.mirror-offline {
+  color: #9b6222;
+}
+.pharmacy-mirror summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-weight: 600;
+  min-height: 44px;
+  line-height: 1.5;
+}
+.mirror-technical {
+  margin-top: 14px;
+  border-top: 1px solid #e7eee9;
+}
+.mirror-technical > summary {
+  font-size: 12px;
+  color: #586f61;
+  font-weight: 500;
+}
+.mirror-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+  margin-top: 14px;
+}
+.pharmacy-mirror table {
+  border-collapse: collapse;
+  width: 100%;
+  text-align: left;
+}
+.pharmacy-mirror th,
+.pharmacy-mirror td {
+  border-bottom: 1px solid #e5ece7;
+  padding: 14px 12px;
+  vertical-align: top;
+}
+.pharmacy-mirror thead th {
+  background: #f0f6f2;
+  font-size: 12px;
+  color: #526b5c;
+  font-weight: 600;
+}
+.pharmacy-mirror tbody th {
+  font-weight: 500;
+}
+.pharmacy-mirror td small,
+.mirror-results tbody th small {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #6d7d73;
+}
+.mirror-results tbody th {
+  width: 38%;
+}
+.mirror-product-name {
+  font-weight: 650;
+  font-size: 14px;
+  text-decoration: none;
+  line-height: 1.5;
+}
+.mirror-product-name:hover {
+  text-decoration: underline;
+}
+.mirror-barcode {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.mirror-stock-number {
+  font-size: 18px;
+}
+.mirror-open {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 8px 0;
+  font-weight: 600;
+  text-decoration: none;
+}
+.mirror-open:hover {
+  text-decoration: underline;
 }
 .mirror-search {
   display: flex;
   align-items: end;
   gap: 12px;
+  background: #f0f7f2;
+  border: 1px solid #d4e5da;
+  border-radius: 13px;
   padding: 16px;
-  background: #edf6f1;
   position: sticky;
   top: 0;
   z-index: 5;
-  border: 1px solid #cadfd2;
-  border-radius: 12px;
   margin: 20px 0;
   box-shadow: 0 3px 12px #173b2610;
-}
-.mirror-search label:first-child {
-  flex: 1;
 }
 .mirror-search label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
+  font-size: 12px;
   font-weight: 600;
   min-width: 0;
 }
+.mirror-search label:first-child {
+  flex: 1;
+}
 .mirror-search input,
 .mirror-search select {
-  border: 1px solid #a8c4b6;
+  border: 1px solid #b5cdbd;
   border-radius: 8px;
-  background: #fff;
-  color: #18362d;
+  background: white;
   padding: 10px;
+  color: #204431;
   font: inherit;
+  font-size: 14px;
   min-height: 44px;
-  width: 100%;
   min-width: 0;
-}
-.pharmacy-mirror button {
-  background: #176648;
-  color: #fff;
-  border: 0;
-  border-radius: 8px;
-  padding: 11px 16px;
-  font: inherit;
-  min-height: 44px;
-  cursor: pointer;
-}
-.pharmacy-mirror button:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-.mirror-table-wrap {
-  overflow-x: auto;
-  max-width: 100%;
-  margin: 12px 0;
-}
-.pharmacy-mirror table {
-  border-collapse: collapse;
   width: 100%;
-  font-size: 13px;
-  text-align: left;
 }
-.pharmacy-mirror th,
-.pharmacy-mirror td {
-  padding: 12px 10px;
-  border-bottom: 1px solid #dfebe4;
-  vertical-align: top;
+.mirror-search select {
+  max-width: 255px;
 }
-.pharmacy-mirror thead th {
-  background: #edf4ef;
-  white-space: nowrap;
+.mirror-prices {
+  display: grid;
+  gap: 10px;
+  min-width: 145px;
 }
-.pharmacy-mirror tbody th {
-  font-weight: 500;
+.mirror-prices > div {
+  display: grid;
+  gap: 2px;
 }
-.pharmacy-mirror td small {
-  display: block;
-  color: #627269;
-  margin-top: 5px;
+.mirror-prices span {
+  font-size: 12px;
+  color: #5b7165;
+}
+.mirror-prices strong {
+  font-size: 16px;
+  line-height: 1.4;
+}
+.mirror-prices small {
+  font-size: 11px;
+  color: #896329;
 }
 .mirror-pager {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 14px;
+  flex-wrap: wrap;
   margin: 16px 0;
+  font-size: 12px;
 }
 .mirror-pager a {
-  padding: 8px;
-  background: #fff;
-  border: 1px solid #d2e2d8;
+  padding: 9px 13px;
+  background: white;
+  border: 1px solid #d6e5db;
   border-radius: 8px;
+  text-decoration: none;
 }
-.pharmacy-mirror summary {
-  cursor: pointer;
+.mirror-mobile {
+  display: none;
+}
+.mirror-product-card h2 {
+  font-size: 18px;
+  line-height: 1.4;
+}
+.mirror-product-card h2 a {
+  text-decoration: none;
+}
+.mirror-card-stock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid #edf1ee;
+}
+.mirror-card-stock > span {
+  font-size: 13px;
+  color: #57715f;
+}
+.mirror-card-stock > strong {
+  font-size: 23px;
+}
+.mirror-product-card > .mirror-prices {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px 0;
+  min-width: 0;
+}
+.mirror-product-card > .mirror-prices small {
+  grid-column: 1/-1;
+}
+.mirror-card-footer {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid #edf1ee;
+}
+.mirror-card-footer small {
+  font-size: 11px;
+  color: #6d7e71;
+  line-height: 1.8;
+}
+.mirror-back {
+  display: inline-block;
+  margin: 8px 0;
+  text-decoration: none;
+}
+.mirror-product-id {
+  font-size: 13px;
+  color: #587160;
+}
+.mirror-summary-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr);
+  gap: 22px;
+  margin-top: 16px;
+}
+.mirror-quantity-tile {
+  padding: 14px 18px;
+  background: #f1f7f2;
+  border-radius: 12px;
+}
+.mirror-quantity-tile > span {
+  font-size: 13px;
+  color: #55735f;
+}
+.mirror-quantity-tile > strong {
+  display: block;
+  font-size: 34px;
+  margin: 10px 0;
+}
+.mirror-quantity-tile > small {
+  color: #637969;
+  font-size: 12px;
+}
+.mirror-summary-grid > .mirror-prices {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: center;
+  gap: 16px;
+}
+.mirror-summary-grid > .mirror-prices strong {
+  font-size: 25px;
+}
+.mirror-summary-grid > .mirror-prices small {
+  grid-column: 1/-1;
+}
+.mirror-last-update {
+  font-size: 12px;
+  color: #657a6b;
+  border-top: 1px solid #ecf0ed;
+  padding-top: 14px;
+  margin-top: 20px !important;
+}
+.mirror-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 16px;
+  margin: 14px 0 0;
+}
+.mirror-facts dt {
+  font-size: 12px;
+  color: #647a6c;
+}
+.mirror-facts dd {
+  font-size: 14px;
   font-weight: 600;
+  margin: 5px 0;
+}
+.mirror-stock-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mirror-view-switch {
+  display: inline-flex;
+  gap: 4px;
+  background: #edf4ef;
+  border-radius: 10px;
+  padding: 4px;
+  flex-wrap: wrap;
+}
+.mirror-view-switch a {
+  padding: 9px 13px;
+  font-size: 12px;
+  text-decoration: none;
+  border-radius: 7px;
+  color: #536e5d;
+}
+.mirror-view-switch a[aria-current='page'] {
+  background: white;
+  color: #146341;
+  box-shadow: 0 1px 4px #1f553c15;
+  font-weight: 650;
+}
+.mirror-records {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.mirror-records > article {
+  border: 1px solid #dce8df;
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 0;
+}
+.mirror-records > article > details > summary {
+  padding: 0;
+}
+.mirror-records summary > span:not(.mirror-record-more) {
+  font-size: 16px;
+  display: inline-block;
+  font-weight: 650;
+}
+.mirror-records summary small {
+  display: block;
+  margin-top: 7px;
+  font-size: 12px;
+  color: #627b69;
+  font-weight: 400;
+  line-height: 1.65;
+}
+.mirror-records .mirror-record-prices strong {
+  font-weight: 600;
+  color: #315b43;
+}
+.mirror-record-more {
+  display: block !important;
+  color: #24744d;
+  font-size: 11px;
+  margin-top: 10px;
+  font-weight: 500;
+}
+.mirror-records .mirror-technical > summary {
+  font-size: 12px;
+}
+.mirror-income-history > summary,
+.mirror-product-source > summary,
+.mirror-valuation > summary {
+  font-size: 13px;
+  color: #3f6c52;
+}
+.mirror-valuation > .mirror-prices {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 12px;
+  background: #f5f8f5;
+  border-radius: 10px;
+  max-width: 600px;
+}
+.mirror-oracle-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 0 20px;
+  margin: 12px 0;
+}
+.mirror-oracle-fields > div {
   padding: 10px 0;
-  min-height: 44px;
+  border-bottom: 1px solid #e6eee8;
+  min-width: 0;
+}
+.mirror-oracle-fields dt {
+  font-size: 12px;
+  color: #58705f;
+}
+.mirror-oracle-fields code {
+  display: block;
+  font-size: 10px;
+  color: #7e8c82;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+.mirror-oracle-fields dd {
+  margin: 5px 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .pharmacy-mirror pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  background: #f2f6f3;
   padding: 14px;
-  border-radius: 8px;
+  background: #f3f7f3;
+  border-radius: 9px;
   font-size: 12px;
-  max-height: 420px;
+  max-height: 400px;
   overflow: auto;
 }
-.pharmacy-mirror details small {
-  display: block;
+.pharmacy-mirror .mirror-help-trigger {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  vertical-align: middle;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin-left: 3px;
+  border: 1px solid #b8d3c3;
+  border-radius: 50%;
+  background: #f4faf6;
+  color: #256a49;
+  font: 600 14px/1 system-ui;
+  cursor: pointer;
 }
-.mirror-facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
+.pharmacy-mirror .mirror-help-trigger:hover {
+  background: #e5f2e9;
+  border-color: #6aa982;
 }
-.mirror-facts dt {
-  color: #5c7165;
-  font-size: 12px;
+.mirror-section-heading > .mirror-help-trigger {
+  flex-shrink: 0;
 }
-.mirror-facts dd {
-  margin: 6px 0;
-  font-weight: 600;
+.mirror-help-dialog {
+  font-family: system-ui, sans-serif;
+  background: #fff;
+  color: #193c30;
+  border: 1px solid #d4e4d9;
+  border-radius: 20px;
+  padding: 24px;
+  width: 440px;
+  max-width: calc(100vw - 28px);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  box-shadow: 0 20px 70px #09231438;
+  box-sizing: border-box;
+  position: fixed;
+  inset: 0;
+  margin: auto;
 }
-.mirror-records {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+.mirror-help-dialog::backdrop {
+  background: #102a20a6;
+}
+.mirror-help-dialog-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 12px;
 }
-.mirror-records article {
-  border: 1px solid #dce8df;
+.mirror-help-dialog-top > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #eaf6ee;
+  color: #20623f;
+  font-size: 23px;
+  font-weight: 600;
+}
+.mirror-help-dialog button {
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+}
+.mirror-help-dialog-top > button {
+  background: #f1f5f2;
+  color: #4d6758;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  font-size: 28px;
+}
+.mirror-help-dialog h2 {
+  font-size: 22px;
+  line-height: 1.3;
+  margin: 20px 0 12px;
+}
+.mirror-help-dialog p {
+  font-size: 15px;
+  line-height: 1.8;
+  margin: 0 0 22px;
+  overflow-wrap: anywhere;
+}
+.mirror-help-dialog .mirror-help-done {
+  padding: 12px 20px;
+  min-height: 44px;
   border-radius: 10px;
-  padding: 14px;
-  min-width: 0;
+  background: #176648;
+  color: white;
+  font-weight: 600;
+  width: 100%;
 }
-.mirror-total {
-  font-size: 20px;
-}
-.mirror-mobile {
-  display: none;
-}
-@media (max-width: 760px) {
+@media (max-width: 840px) {
+  .mirror-desktop {
+    display: none;
+  }
+  .mirror-mobile {
+    display: block;
+  }
+  .mirror-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .mirror-stats {
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .mirror-stats > div:last-child {
+    grid-column: 1/-1;
+  }
   .mirror-search {
     flex-wrap: wrap;
     padding: 12px;
@@ -230,146 +646,52 @@
     flex: 1;
   }
   .mirror-search select {
-    max-width: 100%;
+    max-width: none;
     font-size: 12px;
   }
   .mirror-panel {
-    padding: 14px;
-  }
-  .mirror-desktop {
-    display: none;
-  }
-  .mirror-mobile {
-    display: block;
-  }
-  .mirror-mobile h2 {
-    font-size: 17px;
-  }
-  .mirror-stats {
-    grid-template-columns: 1fr 1fr;
-  }
-  .mirror-stats strong {
-    font-size: 15px;
+    padding: 16px;
   }
   .mirror-header {
-    padding-top: 12px;
+    padding-top: 10px;
+  }
+  .mirror-header h1 {
+    font-size: 23px;
+  }
+  .mirror-stats strong {
+    font-size: 14px;
   }
   .mirror-facts {
     grid-template-columns: 1fr 1fr;
   }
+  .mirror-summary-grid > .mirror-prices strong {
+    font-size: 21px;
+  }
+  .mirror-help-dialog {
+    padding: 20px;
+  }
+  .mirror-card-footer {
+    gap: 8px;
+  }
+  .mirror-summary-grid {
+    gap: 16px;
+  }
+  .mirror-overview h2 {
+    font-size: 17px;
+  }
 }
-
-.mirror-desktop td:first-child,
-.mirror-desktop td:nth-child(3) {
-  white-space: nowrap;
-}
-.mirror-records summary span {
-  display: inline;
-  font-size: 14px;
-}
-.mirror-records summary small {
-  display: block;
-  font-weight: 400;
-  margin-top: 8px;
-  color: #4b6557;
-}
-.mirror-records article > details > summary {
-  padding: 0;
-  min-height: 40px;
-}
-.mirror-records article p {
-  font-size: 13px;
-}
-.mirror-prices {
-  display: grid;
-  gap: 8px;
-  min-width: 135px;
-}
-.mirror-prices > div {
-  display: grid;
-  gap: 3px;
-}
-.mirror-prices span {
-  font-size: 12px;
-  color: #5b6c63;
-}
-.mirror-prices strong {
-  font-size: 14px;
-  line-height: 1.4;
-}
-.mirror-prices small {
-  font-size: 11px;
-  color: #80601f;
-}
-.mirror-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-  gap: 20px;
-}
-.mirror-summary-grid > div > span {
-  display: block;
-  color: #536b5e;
-  margin-bottom: 10px;
-}
-.mirror-summary-grid > div > strong {
-  display: block;
-  font-size: 26px;
-}
-.mirror-summary-grid .mirror-prices strong {
-  font-size: 20px;
-}
-.mirror-product-id code {
-  font-size: 11px;
-  background: #e9f1ec;
-  padding: 3px 6px;
-  border-radius: 5px;
-}
-.mirror-oracle-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  gap: 0 20px;
-  margin: 12px 0;
-}
-.mirror-oracle-fields > div {
-  padding: 10px 0;
-  border-bottom: 1px solid #e3ebe6;
-  min-width: 0;
-}
-.mirror-oracle-fields dt {
-  font-size: 12px;
-  color: #52685b;
-}
-.mirror-oracle-fields code {
-  display: block;
-  font-size: 10px;
-  color: #718278;
-  overflow-wrap: anywhere;
-  margin-top: 3px;
-}
-.mirror-oracle-fields dd {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 5px 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.mirror-mobile .mirror-prices {
-  margin-top: 14px;
-}
-.mirror-records summary small {
-  line-height: 1.6;
-}
-.mirror-result-vendor {
-  display: block;
-  font-size: 11px;
-  color: #627269;
-  margin-top: 6px;
-}
-.mirror-desktop th:nth-child(5),
-.mirror-desktop th:nth-child(6) {
-  white-space: normal;
-  min-width: 130px;
-}
-.mirror-desktop td:first-child {
-  font-size: 12px;
+@media (prefers-reduced-motion: no-preference) {
+  .mirror-help-dialog[open] {
+    animation: mirror-help-in 0.12s ease-out;
+  }
+  @keyframes mirror-help-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 }

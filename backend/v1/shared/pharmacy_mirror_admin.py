@@ -135,9 +135,10 @@ PURCHASE_NUMBER = decimal_sql('i', 'INCOME_PRICE_W_NDS')
 PRICE_KEYS = ('sale_price_min','sale_price_max','purchase_price_min','purchase_price_max',
               'sale_value','purchase_value','price_basis')
 STOCK_KEYS = ('total_stock','stock_rows','invalid_stock_rows','stock_received_at',
-              'stock_max_change_id','stock_generated_at') + PRICE_KEYS
+              'stock_max_change_id','stock_generated_at','current_stock_rows') + PRICE_KEYS
 AGGREGATE = f"""SELECT SUM(qty)::text AS total_stock,COUNT(*) AS stock_rows,
     COUNT(*) FILTER (WHERE qty IS NULL) AS invalid_stock_rows,
+    COUNT(*) FILTER (WHERE qty IS NULL OR qty<>0) AS current_stock_rows,
     MAX(received_at) AS stock_received_at,MAX(change_id) AS stock_max_change_id,
     MAX(source_generated_at) AS stock_generated_at,
     CASE WHEN COUNT(*) FILTER (WHERE qty>0)>0 THEN 'in_stock'
@@ -198,8 +199,12 @@ def products(query):
 
 def detail(key, query):
     key = product_key(key)
-    if set(query) - {'stock_page', 'income_page'}:
+    if set(query) - {'stock_page', 'income_page', 'stock_view'}:
         raise invalid('Unknown query parameter')
+    stock_view = query.get('stock_view', 'all')
+    if stock_view not in {'all', 'nonzero'}:
+        raise invalid('Invalid stock view')
+    stock_filter = f" AND (({STOCK_NUMBER}) IS NULL OR ({STOCK_NUMBER})<>0)" if stock_view == 'nonzero' else ''
     stock_page, income_page = (page_number(query.get(k, '1')) for k in ('stock_page', 'income_page'))
     with read_cursor() as cur:
         cur.execute(f"""SELECT p.*,a.* FROM pharmacy_mirror_rows p
@@ -230,7 +235,7 @@ def detail(key, query):
             LEFT JOIN pharmacy_mirror_rows i ON i.pharmacy_id=1 AND i.table_name='T_INCOME'
                 AND i.row_key=s.data->>'INCOME_ID' AND i.data->>'PRODUCT_ID'=s.data->>'PRODUCT_ID'
             WHERE s.pharmacy_id=1 AND s.table_name='T_SKLAD_STATE' AND s.data->>'PRODUCT_ID'=%s
-            ORDER BY s.row_key LIMIT %s OFFSET %s''', (key, PAGE_SIZE, (stock_page-1)*PAGE_SIZE))
+            ''' + stock_filter + ' ORDER BY s.row_key LIMIT %s OFFSET %s', (key, PAGE_SIZE, (stock_page-1)*PAGE_SIZE))
         stocks = [{**safe_row(r, STOCK_FIELDS), 'warehouse_name': r['warehouse_name'],
                    'income_product_id': r['income_product_id'], 'income_date_old': r['income_date_old'],
                    'purchase_price': r['purchase_price'], 'income_barcode': r['income_barcode']} for r in cur.fetchall()]
@@ -244,6 +249,6 @@ def detail(key, query):
     return {'product': safe_row(product, PRODUCT_FIELDS), 'dictionaries': dictionaries,
             'checked_at': datetime.now(timezone.utc),
             'stock': {k: product[k] for k in STOCK_KEYS},
-            'stocks': {'items': stocks, 'total': product['stock_rows'], 'page': stock_page, 'limit': PAGE_SIZE},
+            'stocks': {'items': stocks, 'total': product['current_stock_rows'] if stock_view == 'nonzero' else product['stock_rows'], 'page': stock_page, 'limit': PAGE_SIZE},
             'incomes': {'items': incomes, 'total': income_total, 'page': income_page, 'limit': PAGE_SIZE},
             'site_comparison': {'available': False, 'reason': 'В каталоге сайта нет подтверждённого source ID или штрихкода. Автоматическое сопоставление не выполняется.'}}

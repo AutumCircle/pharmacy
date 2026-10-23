@@ -103,10 +103,12 @@ class MirrorQueryTests(unittest.TestCase):
             'total_stock':'7.5','stock_rows':2,'invalid_stock_rows':0,'stock_received_at':'x','stock_max_change_id':2,'stock_generated_at':'x'}
         product.update({k:None for k in mirror.PRICE_KEYS})
         product['price_basis'] = 'in_stock'
+        product['current_stock_rows'] = 1
         cur, transaction = self.cursor([product, [], [], {'total':2}, []])
         with patch.object(mirror, 'transaction', transaction): result = mirror.detail('1', {'income_page':'2'})
         self.assertEqual(result['stock']['total_stock'], '7.5')
         self.assertFalse(result['site_comparison']['available'])
+        self.assertEqual(result['stocks']['total'],2)
         self.assertEqual(cur.sql[-1][1], ('1',25,25))
         self.assertIn("i.data->>'PRODUCT_ID'=s.data->>'PRODUCT_ID'", cur.sql[4][0])
         self.assertEqual(len(cur.sql), 7)
@@ -116,6 +118,25 @@ class MirrorQueryTests(unittest.TestCase):
         cur, transaction = self.cursor([None])
         with patch.object(mirror, 'transaction', transaction), self.assertRaises(ContractError) as cm: mirror.detail('1', {})
         self.assertEqual(cm.exception.http_status,404)
+
+    def test_stock_view_rejects_unknown_values_before_querying(self):
+        with patch.object(mirror, 'transaction') as transaction, self.assertRaises(ContractError):
+            mirror.detail('1', {'stock_view':'anything'})
+        transaction.assert_not_called()
+
+    def test_nonzero_stock_view_counts_and_paginates_the_filtered_rows(self):
+        product = {'row_key':'1','data':{'PRODUCT_ID':1},'change_id':1,'received_at':'x','source_generated_at':'x',
+            'total_stock':'3','stock_rows':30,'current_stock_rows':2,'invalid_stock_rows':0,
+            'stock_received_at':'x','stock_max_change_id':2,'stock_generated_at':'x'}
+        product.update({k:None for k in mirror.PRICE_KEYS})
+        product['price_basis']='in_stock'
+        cur, transaction=self.cursor([product, [], [], {'total':30}, []])
+        with patch.object(mirror,'transaction',transaction): result=mirror.detail('1',{'stock_view':'nonzero'})
+        self.assertEqual(result['stocks']['total'],2)
+        self.assertEqual(result['stock']['total_stock'],'3')
+        self.assertIn('IS NULL OR',cur.sql[4][0])
+        self.assertIn('<>0',cur.sql[4][0])
+        self.assertEqual(cur.sql[4][1],('1',25,0))
 
     def test_income_fields_include_prices_and_sums_but_not_employee_identity(self):
         safe = mirror.safe_row({'row_key':'1','change_id':None,'received_at':'x','source_generated_at':'x',

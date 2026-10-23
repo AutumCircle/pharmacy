@@ -22,6 +22,7 @@ export type MirrorPrices = {
 export type MirrorStock = MirrorPrices & {
   total_stock: string | null;
   stock_rows: number;
+  current_stock_rows: number;
   invalid_stock_rows: number;
   stock_received_at: string | null;
   stock_max_change_id: number | null;
@@ -107,6 +108,7 @@ function stock(value: unknown): boolean {
     ].every((k) => nullableString(value[k])) &&
     ['in_stock', 'historical', 'none'].includes(String(value.price_basis)) &&
     count(value.stock_rows) &&
+    count(value.current_stock_rows) &&
     count(value.invalid_stock_rows) &&
     nullableTime(value.stock_received_at) &&
     nullableTime(value.stock_generated_at) &&

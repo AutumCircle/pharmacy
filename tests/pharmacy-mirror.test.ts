@@ -10,6 +10,7 @@ import {
   mirrorPriceRange,
 } from '../src/lib/pharmacy-mirror.ts';
 import { oracleFieldLabel, oracleFieldValue } from '../src/lib/pharmacy-mirror-fields.ts';
+import { mirrorHelp, oracleFieldHelpTopic } from '../src/lib/pharmacy-mirror-help.ts';
 
 test('search validates short names and permits a one digit exact ID', () => {
   assert.match(mirrorSearchError('a', 'name'), /минимум 2/);
@@ -53,4 +54,15 @@ test('contracts reject unbounded sets and malformed row data', () => {
   assert.equal(validMirrorProducts({ items: [], total: -1, page: 1, limit: 25 }), false);
   assert.equal(validMirrorDetail({ product: { oracle: 'private' } }), false);
   assert.equal(validMirrorStatus({ tables: [] }), false);
+});
+
+test('help distinguishes product/receipt IDs, arrival dates, and missing versus zero stock', () => {
+  assert.equal(oracleFieldHelpTopic('PRODUCT_ID'), 'productId');
+  assert.equal(oracleFieldHelpTopic('INCOME_ID'), 'receiptId');
+  assert.equal(oracleFieldHelpTopic('INCOME_DATE_OLD'), 'sourceDate');
+  assert.match(mirrorHelp.productId.text, /PRODUCT_ID/);
+  assert.match(mirrorHelp.receiptId.text, /не дата, не количество/);
+  assert.match(mirrorHelp.stock.text, /не подтверждённый ноль/);
+  assert.match(mirrorHelp.history.text, /Отрицательные или некорректные/);
+  assert.match(mirrorHelp.received.text, /не дата покупки, продажи/);
 });
