@@ -178,7 +178,10 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    five stages, «Позвонить» (`tel:` link to `site_contact_settings.delivery_contact_phone`, hidden when unset) and a quiet
    refresh once a minute while visible. Admin, courier and pharmacy screens show the payment method (website orders) and
    split old bracketed addresses for display only. Deploy order: public Lambda, admin Lambda (courier `payment_method`),
-   Telegram notifier (shared message renderer), then the site. No migration.
+   Telegram notifier (shared message renderer), then the site. No migration. If the site is live first, `/api/checkout`
+   sees the old Lambda's `VALIDATION_ERROR` «field is not allowed» for `landmark`/`payment_method` (nothing is created
+   before that check) and resends the same order once in the old form: landmark in brackets in `address`, e-wallet as
+   «Оплата: электронный кошелёк.» in the comment (`legacyOrderPayload` in `src/lib/checkout-order.ts`).
 
 Telegram notifier variables are configured only in AWS, never in Git:
 

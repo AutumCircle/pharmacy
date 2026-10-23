@@ -33,6 +33,29 @@ export function formatSom(value: number | string | null | undefined): string {
   return `${Number.isFinite(number) ? Math.round(number as number) : 0} с.`;
 }
 
+type OrderBody = { address: string; landmark?: string | null; payment_method?: string; comment?: string | null };
+
+/**
+ * True when a public Lambda deployed before the checkout redesign rejected the new fields. It validates the body
+ * before reserving the Idempotency-Key, so nothing was created and the same request may be sent again in the old form.
+ */
+export function isLegacyOrderFieldsRejection(code: string | undefined, fields: Record<string, string> | undefined): boolean {
+  if (code !== 'VALIDATION_ERROR' || !fields) return false;
+  const keys = Object.keys(fields);
+  return keys.length > 0 && keys.every((key) => (key === 'landmark' || key === 'payment_method') && fields[key] === 'field is not allowed');
+}
+
+/** The same order in the form an older public Lambda accepts: landmark in brackets inside the address (as before the
+ * redesign) and the e-wallet choice written into the comment, so the courier still sees both. */
+export function legacyOrderPayload<T extends OrderBody>(body: T): Omit<T, 'landmark' | 'payment_method'> {
+  const { landmark, payment_method: paymentMethod, ...rest } = body;
+  const cleanLandmark = (landmark ?? '').trim();
+  const address = cleanLandmark ? `${rest.address} (${cleanLandmark})`.slice(0, 500) : rest.address;
+  let comment = rest.comment ?? null;
+  if (paymentMethod === 'e_wallet') comment = `Оплата: электронный кошелёк.${comment ? ` ${comment}` : ''}`.slice(0, 500);
+  return { ...rest, address, comment };
+}
+
 export type DeliveryAddress = { address: string; landmark: string };
 
 const LEGACY_LANDMARK = /^([\s\S]*\S)\s*\(([^()]*\S[^()]*)\)\s*$/;

@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
   formatSom,
+  isLegacyOrderFieldsRejection,
+  legacyOrderPayload,
   minimumOrderShortfall,
   parseSavedAddresses,
   paymentMethodLabel,
@@ -62,6 +64,25 @@ test('payment labels; unknown or missing values are cash', () => {
   assert.equal(paymentMethodLabel('cash_on_delivery'), 'Наличными курьеру');
   assert.equal(paymentMethodLabel(undefined), 'Наличными курьеру');
   assert.equal(paymentMethodLabel('card'), 'Наличными курьеру');
+});
+
+test('only an old Lambda rejecting the new fields triggers the old-form retry', () => {
+  assert.ok(isLegacyOrderFieldsRejection('VALIDATION_ERROR', { landmark: 'field is not allowed', payment_method: 'field is not allowed' }));
+  assert.ok(isLegacyOrderFieldsRejection('VALIDATION_ERROR', { payment_method: 'field is not allowed' }));
+  assert.ok(!isLegacyOrderFieldsRejection('VALIDATION_ERROR', { address: 'must contain between 5 and 500 characters' }));
+  assert.ok(!isLegacyOrderFieldsRejection('VALIDATION_ERROR', { landmark: 'must be a string with at most 300 characters' }));
+  assert.ok(!isLegacyOrderFieldsRejection('VALIDATION_ERROR', {}));
+  assert.ok(!isLegacyOrderFieldsRejection('ORDER_ITEMS_UNAVAILABLE', { landmark: 'field is not allowed' }));
+  assert.ok(!isLegacyOrderFieldsRejection('VALIDATION_ERROR', undefined));
+});
+
+test('the old form keeps the landmark in brackets and the e-wallet choice in the comment', () => {
+  const body = { customer_name: 'Ф', phone: '917123456', address: 'Такси Худжанд', landmark: 'у вокзала',
+    payment_method: 'e_wallet' as const, comment: 'позвоните', items: [{ medicine_id: 1, quantity: 1 }] };
+  assert.deepEqual(legacyOrderPayload(body), { customer_name: 'Ф', phone: '917123456', address: 'Такси Худжанд (у вокзала)',
+    comment: 'Оплата: электронный кошелёк. позвоните', items: [{ medicine_id: 1, quantity: 1 }] });
+  assert.deepEqual(legacyOrderPayload({ address: 'ул. Айни 29', landmark: null, payment_method: 'cash_on_delivery', comment: null }),
+    { address: 'ул. Айни 29', comment: null });
 });
 
 test('money is shown in whole сомони', () => {

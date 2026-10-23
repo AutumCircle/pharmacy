@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextResponse, after } from 'next/server';
-import { createPublicOrder, sendOrderNotification } from '@/lib/api-v1/server';
+import { ApiV1Error, createPublicOrder, sendOrderNotification } from '@/lib/api-v1/server';
+import { isLegacyOrderFieldsRejection, legacyOrderPayload } from '@/lib/checkout-order';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 import type { CreateOrderRequest, OrderAttribution } from '@/lib/api-v1/types';
 import { SOURCE_COOKIE, attributionForOrder, parseSource } from '@/lib/collections';
@@ -66,10 +67,19 @@ export async function POST(request: Request) {
     }
     // Attribution is taken from the latest tracked-link cookie; the browser body cannot set it.
     const attribution = attributionForOrder(parseSource((await cookies()).get(SOURCE_COOKIE)?.value));
-    const response = await createPublicOrder(
-      attribution ? { ...body, attribution: attribution as OrderAttribution } : body,
-      idempotencyKey,
+    const withAttribution = (order: CreateOrderRequest): CreateOrderRequest => (
+      attribution ? { ...order, attribution: attribution as OrderAttribution } : order
     );
+    let response: Awaited<ReturnType<typeof createPublicOrder>>;
+    try {
+      response = await createPublicOrder(withAttribution(body), idempotencyKey);
+    } catch (error) {
+      // A public Lambda from before the checkout redesign rejects `landmark` / `payment_method` while validating,
+      // before the Idempotency-Key is reserved, so nothing was created: send the same order once more in its old
+      // form. This keeps checkout working if the site goes live before that Lambda is redeployed.
+      if (!(error instanceof ApiV1Error) || !isLegacyOrderFieldsRejection(error.code, error.details?.fields)) throw error;
+      response = await createPublicOrder(withAttribution(legacyOrderPayload(body)), idempotencyKey);
+    }
     const order = response.data as typeof response.data & { _notification?: Record<string, unknown> };
     const notification = order._notification;
     if (notification) {

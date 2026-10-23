@@ -235,6 +235,14 @@ export default function CheckoutView({ items, totalPrice, totalItems, onBack, on
           await new Promise((resolve) => window.setTimeout(resolve, IN_PROGRESS_DELAY_MS));
           continue;
         }
+        if (code === 'IDEMPOTENCY_CONFLICT') {
+          // The next press gets a fresh key; a real repeat is still caught by the server's 10-minute check.
+          try {
+            sessionStorage.removeItem(PENDING_ORDER_KEY);
+          } catch {
+            // Without storage every attempt already has its own key.
+          }
+        }
         showError(ERROR_MESSAGES[code] || payload?.error?.message || 'Не удалось оформить заказ. Повторите попытку.');
         break;
       }
