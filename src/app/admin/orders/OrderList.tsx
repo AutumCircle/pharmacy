@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatOrderDateTime } from '@/lib/order-time';
+import { splitLegacyAddress } from '@/lib/checkout-order';
 import { updateOrderStatus } from './actions';
 import OrderDeleteButton from './OrderDeleteButton';
 import type { AdminOrderSummary } from '@/lib/api-v1/admin-types';
@@ -68,7 +69,7 @@ export default function OrderList({ initialOrders }: { initialOrders: AdminOrder
                 <span className={chip.className}>{chip.label}</span>
               </span>
               <span className="ao-work-who">{order.customer_name || 'Имя не указано'} · {order.phone}</span>
-              <span className="ao-work-where">{order.address}</span>
+              <span className="ao-work-where">{splitLegacyAddress(order.address, order.landmark).address}</span>
               <span className="ao-work-meta">
                 <span className={`ao-origin ao-origin-${from.key}`}>{from.label}</span>
                 {order.order_source && <span>{sourceLabels[order.order_source]}</span>}

@@ -168,6 +168,8 @@ export type CourierOrder = {
   phone: string;
   address: string;
   landmark: string | null;
+  /** Website checkout choice (`cash_on_delivery` | `e_wallet`); absent on older Lambdas. */
+  payment_method?: string | null;
   notes: string | null;
   order_source: StaffOrderSource | null;
   status: CourierOrderStatus;

@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 import type { CourierOrder, CourierOrderStatus } from '@/lib/api-v1/staff-types';
 import { CHECKLIST_STEPS, checklistProgress, isStepDone } from '@/lib/courier-checklist';
 import { formatOrderDateTime } from '@/lib/order-time';
+import { paymentMethodLabel, splitLegacyAddress } from '@/lib/checkout-order';
 import {
   answersProgressText, confirmedAmountText, courierItemAnswerLabel, courierItemAnswerTone, isAmountConfirmed,
 } from '@/lib/pharmacy-answers';
@@ -113,6 +114,8 @@ function CustomerSection({ order, base, onSaved }: { order: CourierOrder; base: 
     </section>;
   }
 
+  // Website orders made before the checkout redesign keep the landmark in brackets inside the address.
+  const shown = splitLegacyAddress(order.address, order.landmark);
   return <section className="c-block c-client" aria-labelledby="c-client-title">
     <div className="c-block-title"><h2 id="c-client-title">Клиент</h2>
       {order.own_order && <button type="button" className="c-link" onClick={open}>Изменить</button>}</div>
@@ -126,8 +129,9 @@ function CustomerSection({ order, base, onSaved }: { order: CourierOrder; base: 
         Позвонить</a>
     </div>
     <div className="c-address">
-      <p className="c-address-main">{order.address}</p>
-      {order.landmark && <p><span>Ориентир:</span> {order.landmark}</p>}
+      <p className="c-address-main">{shown.address}</p>
+      {shown.landmark && <p><span>Ориентир:</span> {shown.landmark}</p>}
+      {order.website_order && <p><span>Оплата:</span> {paymentMethodLabel(order.payment_method)}</p>}
       {order.notes && <p className="c-note"><span>Комментарий:</span> {order.notes}</p>}
     </div>
     {!order.own_order && <p className="c-muted c-small">Заказ с сайта: данные клиента и товары меняет только администратор.</p>}

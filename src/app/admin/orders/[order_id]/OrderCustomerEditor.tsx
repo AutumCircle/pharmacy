@@ -3,9 +3,12 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateOrderCustomer } from '../actions';
+import { paymentMethodLabel, splitLegacyAddress } from '@/lib/checkout-order';
 
-export default function OrderCustomerEditor({ orderId, revision, customerName, phone, address, landmark, comment }: {
+export default function OrderCustomerEditor({ orderId, revision, customerName, phone, address, landmark, comment, paymentMethod }: {
   orderId: string; revision: number; customerName: string; phone: string; address: string; landmark: string | null; comment: string | null;
+  /** Website orders only: the customer's checkout choice. */
+  paymentMethod?: string | null;
 }) {
   const router = useRouter();
   const local = phone.replace(/\D/g, '').slice(-9);
@@ -25,6 +28,9 @@ export default function OrderCustomerEditor({ orderId, revision, customerName, p
   }
 
   if (!editing) {
+    // Orders made before the checkout redesign keep the landmark in brackets inside the address; the editor
+    // below still shows the stored values, so saving splits them for good.
+    const shown = splitLegacyAddress(address, landmark);
     return <section className="od-card od-o1">
       <div className="od-card-head"><h2>Клиент</h2>
         <button type="button" className="od-link" onClick={() => { setValues(initial); setError(''); setEditing(true); }}>Изменить</button></div>
@@ -34,8 +40,9 @@ export default function OrderCustomerEditor({ orderId, revision, customerName, p
         {phone && <a className="od-call" href={`tel:${phone}`}>Позвонить</a>}
       </div>
       <dl className="od-facts">
-        <div><dt>Адрес</dt><dd>{address}</dd></div>
-        {landmark && <div><dt>Ориентир</dt><dd>{landmark}</dd></div>}
+        <div><dt>Адрес</dt><dd>{shown.address}</dd></div>
+        {shown.landmark && <div><dt>Ориентир</dt><dd>{shown.landmark}</dd></div>}
+        {paymentMethod !== undefined && paymentMethod !== null && <div><dt>Оплата</dt><dd>{paymentMethodLabel(paymentMethod)}</dd></div>}
         <div><dt>Комментарий</dt><dd>{comment || '—'}</dd></div>
       </dl>
     </section>;

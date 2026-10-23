@@ -29,6 +29,21 @@ const STATUS_FALLBACK: Record<string, OrderStage> = {
   cancelled: 'cancelled',
 };
 
+/** One short line under the stage on the customer's order card. */
+export const ORDER_STAGE_HINTS: Record<OrderStage, string> = {
+  assembling: 'Аптека собирает ваш заказ',
+  assembled: 'Заказ собран, скоро подтвердим',
+  confirmed: 'Заказ подтверждён, готовим к отправке',
+  delivering: 'Курьер уже везёт заказ',
+  delivered: 'Заказ доставлен. Будьте здоровы!',
+  cancelled: 'Если это ошибка — позвоните нам',
+};
+
+/** Delivered and cancelled orders go to «Завершённые» in «Мои заказы». */
+export function isFinishedStage(stage: OrderStage): boolean {
+  return stage === 'delivered' || stage === 'cancelled';
+}
+
 export function isOrderStage(value: unknown): value is OrderStage {
   return typeof value === 'string' && (ORDER_STAGES as readonly string[]).includes(value);
 }

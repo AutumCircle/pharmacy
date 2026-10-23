@@ -415,3 +415,12 @@ test('job 014 round 2: row controls are at least 44 px on phones and touch scree
   assert.match(block, /\.pa-price-inline \.pa-mini \{ min-width: 44px; \}/);
   assert.match(css, /@media \(max-width: 420px\) \{ \.pa-mini-group \{ max-width: 200px; \} \}/);
 });
+
+test('an older website order shows the bracketed landmark separately; a stored landmark wins', () => {
+  const legacy = pharmacyOrderView({ order_id: 'old', address: 'Такси Худжанд (Отправка кардан даркор)', landmark: null });
+  assert.equal(legacy.address, 'Такси Худжанд');
+  assert.equal(legacy.landmark, 'Отправка кардан даркор');
+  const current = pharmacyOrderView({ order_id: 'new', address: 'Айни 29 (2 этаж)', landmark: 'у рынка' });
+  assert.equal(current.address, 'Айни 29 (2 этаж)');
+  assert.equal(current.landmark, 'у рынка');
+});

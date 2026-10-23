@@ -4,6 +4,7 @@ import {
   BOTH_PHARMACIES_MISSING, crossPharmacyMark, pharmacyAnswerChip, routedAwayMark, unavailableConfirmText,
 } from './pharmacy-answers.ts';
 import { nextAssemblyAction } from './pharmacy-assembly.ts';
+import { splitLegacyAddress } from './checkout-order.ts';
 
 export type WaitingLevel = 'normal' | 'warning' | 'urgent';
 
@@ -250,8 +251,9 @@ export function pharmacyOrderView(order: PharmacyOrderInput, pharmacyId?: number
     source: text(order.source),
     customerName: text(order.customer_name),
     phone: text(order.phone),
-    address: text(order.address),
-    landmark: text(order.landmark),
+    // Older website orders keep the landmark in brackets inside the address (display-only split).
+    address: order.address ? text(splitLegacyAddress(order.address, order.landmark).address) : text(order.address),
+    landmark: order.address ? text(splitLegacyAddress(order.address, order.landmark).landmark) : text(order.landmark),
     notes: text(order.notes),
     medicines: medicines && medicines.map((item) => ({
       name: item.medicine_name,

@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createPublicOrder, sendOrderNotification } from '@/lib/api-v1/server';
 import { apiRouteError } from '@/lib/api-v1/route-response';
 import type { CreateOrderRequest, OrderAttribution } from '@/lib/api-v1/types';
@@ -23,9 +23,11 @@ const RATE_LIMITED_MESSAGE = 'Слишком много попыток офор�
 function isCreateOrderRequest(value: unknown): value is CreateOrderRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const body = value as Record<string, unknown>;
-  const allowed = new Set(['customer_name', 'phone', 'address', 'comment', 'items']);
+  const allowed = new Set(['customer_name', 'phone', 'address', 'landmark', 'payment_method', 'comment', 'items']);
   if (Object.keys(body).some((key) => !allowed.has(key))) return false;
   if (typeof body.customer_name !== 'string' || typeof body.phone !== 'string' || typeof body.address !== 'string') return false;
+  if (body.landmark !== undefined && body.landmark !== null && typeof body.landmark !== 'string') return false;
+  if (body.payment_method !== undefined && body.payment_method !== 'cash_on_delivery' && body.payment_method !== 'e_wallet') return false;
   if (body.comment !== undefined && body.comment !== null && typeof body.comment !== 'string') return false;
   if (!Array.isArray(body.items) || body.items.length === 0) return false;
   return body.items.every((item) => {
@@ -72,11 +74,15 @@ export async function POST(request: Request) {
     const notification = order._notification;
     if (notification) {
       delete order._notification;
-      try {
-        await sendOrderNotification(notification);
-      } catch (notificationError) {
-        console.error('Order was created, but Telegram notification failed', notificationError);
-      }
+      // Telegram is sent after the response, so the customer sees «Заказ принят» without waiting for
+      // three messages. A failure is only logged: the order already exists.
+      after(async () => {
+        try {
+          await sendOrderNotification(notification);
+        } catch (notificationError) {
+          console.error('Order was created, but Telegram notification failed', notificationError);
+        }
+      });
     }
     return NextResponse.json(response, { status: 201 });
   } catch (error) {

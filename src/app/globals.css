@@ -1470,3 +1470,20 @@ a {
   .pagination-number-link,
   .pagination-page-number { min-width: 36px; min-height: 36px; padding: 6px 9px !important; }
 }
+
+/* Product photo on cart, checkout and «Мои заказы» (src/components/MedicineThumb.tsx). */
+.medicine-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border: 1px solid #eeeeee;
+  border-radius: 12px;
+  background: #ffffff;
+}
+.medicine-thumb img { width: 100%; height: 100%; object-fit: contain; padding: 4px; box-sizing: border-box; }
+.medicine-thumb svg { width: 60%; height: 60%; }
+.medicine-thumb.is-round { width: 60px; height: 60px; border-radius: 50%; }

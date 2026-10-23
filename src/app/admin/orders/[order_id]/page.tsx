@@ -117,7 +117,8 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
       <aside className="od-side">
         <OrderCustomerEditor key={`${order.edit_revision}`} orderId={order.order_id} revision={order.edit_revision}
           customerName={order.customer_name || ''} phone={order.phone || ''} address={order.address || ''}
-          landmark={order.landmark} comment={order.notes} />
+          landmark={order.landmark} comment={order.notes}
+          paymentMethod={order.created_by_staff_account_id === null ? order.payment_method : null} />
         {order.fulfillment && <OrderFulfillment fulfillment={order.fulfillment} status={order.status} />}
         <OrderStatusControl key={`${order.status}-${order.stage ?? ''}`} orderId={order.order_id}
           currentStatus={order.status} stage={order.stage} />

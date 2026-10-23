@@ -9,7 +9,8 @@ import type { OrderStage } from '../order-stage';
 
 export type Currency = 'TJS';
 export type OrderStatus = 'pending' | 'confirmed' | 'delivering' | 'delivered' | 'cancelled';
-export type PaymentMethod = 'cash_on_delivery';
+/** Website checkout choice, recorded with the order (nobody is charged online). */
+export type PaymentMethod = 'cash_on_delivery' | 'e_wallet';
 export type PaymentStatus = 'unpaid';
 
 export type SiteContactSettings = {
@@ -184,6 +185,9 @@ export interface CreateOrderRequest {
   customer_name: string;
   phone: string;
   address: string;
+  /** Separate since the checkout redesign; older orders have it in brackets inside `address`. */
+  landmark?: string | null;
+  payment_method?: PaymentMethod;
   comment?: string | null;
   items: CreateOrderItemRequest[];
   /** Added by the Next.js server from the latest tracked-link cookie; never accepted from the browser. */
@@ -196,6 +200,8 @@ export interface PublicOrderItem {
   quantity: number;
   selling_unit_price: number;
   line_total: number;
+  /** Catalogue photo, returned by tracking (absent on older Lambdas and for deleted medicines). */
+  image_url?: string | null;
 }
 
 export interface PublicOrder {
@@ -211,6 +217,8 @@ export interface PublicOrder {
   items_subtotal: number;
   order_total: number;
   created_at: string;
+  /** Set when the same order had just been placed: the existing order is returned, no new one is made. */
+  deduplicated?: boolean;
 }
 
 export interface TrackOrdersRequest {

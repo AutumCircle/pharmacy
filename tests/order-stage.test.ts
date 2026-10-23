@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  ORDER_STAGES, ORDER_STAGE_LABELS, TRACKING_STEPS, isOrderStage, orderStage, orderStageLabel, statusStageLabel,
+  ORDER_STAGES, ORDER_STAGE_HINTS, ORDER_STAGE_LABELS, TRACKING_STEPS, isFinishedStage, isOrderStage, orderStage,
+  orderStageLabel, statusStageLabel,
   trackingStepIndex,
 } from '../src/lib/order-stage.ts';
 
@@ -48,4 +49,9 @@ test('tracking shows five steps and the current index', () => {
   assert.equal(trackingStepIndex({ status: 'pending' }), 0);
   assert.equal(trackingStepIndex({ status: 'confirmed' }), 2);
   assert.equal(trackingStepIndex({ status: 'cancelled' }), -1);
+});
+
+test('every stage has a short customer hint, and only delivered/cancelled are finished', () => {
+  for (const stage of ORDER_STAGES) assert.ok(ORDER_STAGE_HINTS[stage].length > 0);
+  assert.deepEqual(ORDER_STAGES.filter(isFinishedStage), ['delivered', 'cancelled']);
 });

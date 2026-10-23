@@ -160,6 +160,26 @@ database credentials или Telegram token. Next.js вызывает API Gateway
    Staff/courier order search and admin exports are unchanged. Deploy order: migration (one-shot runner in
    `backend/operations/medicine_client_visibility_once`), then admin and public Lambdas, then the site.
 
+14. Checkout redesign (branch `claude/checkout-redesign`, design approved by the owner on the Claude Design canvas
+   «Vatan checkout redesign»). `/cart` has three steps in one page: the cart (`src/app/cart/CartView.tsx`; phone rows with
+   a round photo and an outlined counter whose «−» turns into a bin at 1, desktop rows unchanged from production; the
+   50 с. notice only below the minimum; unavailable items are removed on «Оформить заказ»), the checkout
+   (`CheckoutView.tsx`) and «Заказ принят» (`OrderSuccess.tsx`, animated check, order number, «Смотреть заказ» →
+   `/tracking?order=<order_id>`; the page scrolls to the top). Checkout: item photos; saved addresses as
+   `{address, landmark}` in `localStorage.vatan_addresses` (old «Адрес (Ориентир)» strings are split); address and
+   landmark sent as separate fields; phone mask `917 12 34 56` with a 0/9 counter whose Backspace never sticks on a
+   space (`applyCheckoutPhoneEdit` in `src/lib/checkout-phone.ts`); payment «Наличными» or «Электронный кошелёк»
+   (`payment_method` `cash_on_delivery` | `e_wallet`, recorded only, no online payment); the submit button is pinned on a
+   phone, locked with a spinner while sending, guarded against a second tap, and reuses one Idempotency-Key per payload
+   (retries `IDEMPOTENCY_IN_PROGRESS`). `/api/checkout` sends Telegram in `after()`. Public Lambda: accepts `landmark` and
+   `payment_method`, returns the existing pending order (`deduplicated: true`, no Telegram) when the same phone, address and
+   items arrive again within 10 minutes, and tracking returns item `image_url` and `payment_method`. `/tracking`
+   («Мои заказы», `TrackingClient.tsx`): phone entry, list split into «Сейчас в работе» / «Завершённые», order card with the
+   five stages, «Позвонить» (`tel:` link to `site_contact_settings.delivery_contact_phone`, hidden when unset) and a quiet
+   refresh once a minute while visible. Admin, courier and pharmacy screens show the payment method (website orders) and
+   split old bracketed addresses for display only. Deploy order: public Lambda, admin Lambda (courier `payment_method`),
+   Telegram notifier (shared message renderer), then the site. No migration.
+
 Telegram notifier variables are configured only in AWS, never in Git:
 
 - `NOTIFIER_BEARER_TOKEN`, `TELEGRAM_BOT_TOKEN`

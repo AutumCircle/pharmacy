@@ -327,6 +327,8 @@ Idempotency-Key: 2d61a4e9-1ec4-4b89-a09a-4a75b4df2a32
   "customer_name": "Фируз",
   "phone": "917123456",
   "address": "Душанбе, ул. Айни 24",
+  "landmark": "напротив школы № 20",
+  "payment_method": "e_wallet",
   "comment": "Позвоните перед доставкой",
   "items": [
     {
@@ -344,6 +346,12 @@ Validation:
 - `customer_name`: 2–120 символов.
 - `phone`: 9 местных цифр или `+992` E.164; в RDS сохраняется `+992XXXXXXXXX`.
 - `address`: 5–500 символов.
+- `landmark`: optional, max 300 символов, пустая строка → `null`. Сохраняется в `orders.landmark` (колонка из
+  миграции `0015`). До редизайна оформления сайт склеивал его в `address` как «Адрес (Ориентир)»; такие старые
+  заказы в БД не меняются, экраны админа, курьера и аптеки показывают их раздельно (`splitLegacyAddress` в
+  `src/lib/checkout-order.ts`, только отображение).
+- `payment_method`: optional, `cash_on_delivery` (по умолчанию) или `e_wallet`. Это только выбор клиента, который
+  видят админ, курьер и Telegram (владелец и курьер, не аптека); онлайн-оплаты нет, `payment_status` всегда `unpaid`.
 - `comment`: optional, max 500 символов.
 - `items`: 1–50 уникальных позиций.
 - `medicine_id`: положительный integer, существующий в каталоге.
@@ -355,11 +363,16 @@ Validation:
 1. Проверить caller, rate limit, schema и `Idempotency-Key`.
    - Текущая реализация: per-IP лимит попыток создания заказа применяется в Next.js route `POST /api/checkout` (см. §11), до вызова Lambda. Lambda-side лимит и лимит по hash телефона для create order пока не реализованы.
 2. Повтор с тем же key и payload возвращает исходный response; тот же key с другим payload — `409 IDEMPOTENCY_CONFLICT`.
+   - Защита от двойного заказа с новым key (вторая вкладка, повторное нажатие после перезагрузки): под
+     `pg_advisory_xact_lock` по телефону Lambda ищет заказ с сайта со статусом `pending`, тем же телефоном, тем же
+     `address` и ровно тем же набором `(medicine_id, quantity)`, созданный за последние 10 минут
+     (`DUPLICATE_ORDER_WINDOW_MINUTES`). Если он есть, новый заказ не создаётся: ответ `200` с этим заказом и
+     `"deduplicated": true`, Telegram не отправляется, ответ сохраняется в `order_idempotency` под новым key.
 3. В одной DB transaction получить все позиции по primary key `medicine_id`.
 4. Для каждой позиции потребовать ровно одну активную запись с `in_stock=true` и положительной `base_unit_price`.
 5. Decimal arithmetic: `selling_unit_price = ceil(base_unit_price × 1.05)`.
 6. Рассчитать `items_subtotal = Σ(selling_unit_price × quantity)` и проверить `items_subtotal >= 50`.
-7. Установить server-owned значения: `order_total=items_subtotal`, `payment_method=cash_on_delivery`, `payment_status=unpaid`, `status=pending`. `delivery_fee` и `grand_total` не рассчитываются и не сохраняются.
+7. Установить server-owned значения: `order_total=items_subtotal`, `payment_method` из запроса (по умолчанию `cash_on_delivery`), `payment_status=unpaid`, `status=pending`. `delivery_fee` и `grand_total` не рассчитываются и не сохраняются.
 8. Сохранить order, item snapshots (`medicine_id`, `medicine_name`, base/selling price, quantity) и первую status-history запись.
 9. Commit и вернуть серверный итог. При ошибке заказ не создаётся частично.
 
@@ -430,7 +443,7 @@ Request:
   - **Ограничение (Option A, решение владельца — хранить в памяти сайта):** счётчики и блокировка хранятся в памяти каждого Vercel instance. Они теряются при cold start/redeploy и не общие между instances, поэтому 5-часовая блокировка **не гарантирована** — на практике она может длиться минуты; смена IP её обходит. Надёжная глобальная блокировка требует хранилища в Lambda/RDS (миграция, деплой Lambda, доверенная передача IP) или Vercel KV/Upstash — отдельная задача с согласованием владельца.
   - Per-phone bucket намеренно не реализован: иначе атакующий мог бы заблокировать жертве отслеживание собственных заказов. Hash телефона используется только для подсчёта разных номеров на IP, поэтому требование «по IP и hash телефона» выполнено частично.
   - Риск ложных срабатываний: общий IP (NAT мобильного оператора, семья) может попасть под (b). Сообщение нейтральное; пороги — именованные константы в `src/lib/tracking-guard.ts`.
-- Response содержит `order_reference`, status, `medicine_id`, item names/quantities/selling snapshots, `items_subtotal`, `order_total` и timestamps. Delivery fee отсутствует.
+- Response содержит `order_reference`, status, `payment_method`, `medicine_id`, item names/quantities/selling snapshots, `image_url` позиции (фото из каталога через `LEFT JOIN medicines`, `null` для удалённых), `items_subtotal`, `order_total` и timestamps. Delivery fee отсутствует.
 - Точный адрес, полный телефон, base price, admin notes и чужие заказы исключены.
 - **`stage` (задача 013).** Каждый заказ ответа содержит `stage` рядом с неизменным `status`: `assembling`
   («Собирается»), `assembled` («Собран»), `confirmed` («Подтверждён»), `delivering` («В пути»), `delivered`

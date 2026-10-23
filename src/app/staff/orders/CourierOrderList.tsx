@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { CourierOrder } from '@/lib/api-v1/staff-types';
 import { checklistProgress } from '@/lib/courier-checklist';
 import { formatOrderDateTime } from '@/lib/order-time';
+import { splitLegacyAddress } from '@/lib/checkout-order';
 import { answersProgressText } from '@/lib/pharmacy-answers';
 import { courierAssemblySummary } from '@/lib/pharmacy-assembly';
 import { money } from '../format';
@@ -25,7 +26,7 @@ export default function CourierOrderList({ orders, emptyText = 'Новые за�
           <span className={pill.className}>{pill.label}</span>
         </span>
         <span className="c-row-who">{order.customer_name || 'Без имени'} · {order.phone}</span>
-        <span className="c-row-where">{order.address}</span>
+        <span className="c-row-where">{splitLegacyAddress(order.address, order.landmark).address}</span>
         {progress && <span className={`c-row-checklist${progress.next ? '' : ' done'}`}>
           <b>{progress.done} из {progress.total} шагов</b>{progress.next ? ` · ${progress.next.title}` : ' · всё готово'}</span>}
         {answers && <span className={`c-row-answers${order.pharmacy_answers_complete ? ' done' : ''}`}>{answers}</span>}
